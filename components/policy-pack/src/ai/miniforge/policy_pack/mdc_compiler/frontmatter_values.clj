@@ -58,35 +58,14 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} unescape-literal-text
-  "Expand `\\n`, `\\t` and `\\\\` escapes in a frontmatter value that is literal
-   text rather than regex source.
+  "Expand `\\n`, `\\t` and `\\\\` in a frontmatter value that is literal text;
+   every other backslash sequence, and any non-string, is returned unchanged.
+   One left-to-right pass, so `\\\\n` is a backslash followed by `n`.
 
-   MDC frontmatter has no block-scalar (`|`) syntax, so a multi-line literal can
-   only be written as a single-line quoted scalar carrying `\\n`. Without this,
-   `remediation.template` reached the patcher as a backslash followed by an `n`
-   and a prepend wrote the whole header on one line — which, for 810
-   `project/header-copyright`, still contained both strings the rule's own
-   negative detection looks for, so the corrupted file then scanned as compliant
-   (miniforge-standards#129).
-
-   Call this ONLY on fields whose value is literal text. `detection.pattern`,
-   `detection.emailPattern` and `remediation.replacement` must NOT be routed
-   through it: the first two are regex source and the third is a regex
-   replacement string with `$1`-style group references. Expanding escapes there
-   would rewrite the pattern a rule matches on. The field-by-field decision
-   lives with the callers that know which key they are reading
-   (`mdc-compiler.rule-config`), not here — this namespace parses values and
-   has no field context.
-
-   A single left-to-right scan gives escape-the-escape for free: in `\\\\n` the
-   leading `\\\\` is consumed as one escape, so the trailing `n` stays an ordinary
-   character and the result is a literal backslash followed by `n`.
-
-   Arguments:
-   - s - Parsed frontmatter value; non-strings (booleans, vectors) pass through
-
-   Returns:
-   - The string with recognized escapes expanded, or `s` unchanged."
+   Only for literal-text fields. Regex source (`detection.pattern`,
+   `detection.emailPattern`) and regex replacement strings
+   (`remediation.replacement`) must not pass through it: expanding escapes
+   there would change what a rule matches. The caller knows the field."
   [s]
   (if (string? s)
     (str/replace s escape-sequence-re expand-escape)
