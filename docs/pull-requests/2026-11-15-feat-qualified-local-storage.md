@@ -58,7 +58,7 @@ ambiguous mount data, no peer proof, and root replacement. Test actual
 JVM/Babashka peers and forced publication on disposable files. Bound native
 storage metadata to a shared process/read deadline and a fixed output limit.
 
-The extended native packet passes 24 tests and 62 assertions in each JVM product,
+The extended native packet passes 24 tests and 63 assertions in each JVM product,
 Babashka source and a fresh package. It covers the opaque-root contract, actual
 native ACL/metadata behavior, real JVM/Babashka mutual locks, and refusal to skip
 a missing peer runtime or classpath. The same packet is wired into the existing
@@ -81,6 +81,10 @@ owned peer and removes its scratch directory. Bypassing exclusion produces one
 assertion failure; disabling peer termination produces four, with zero runtime
 errors on both JVM and Babashka. Fixtures independently clean their own processes
 even when production cleanup is deliberately disabled by those controls.
+Root-replacement coverage includes a swap inside the peer-proof callback, keeping
+both displaced directories alive to prevent inode reuse. Qualification refuses
+the new, unprobed root. Ignoring the original observation fails that assertion
+on both runtimes, with zero errors.
 
 ## Deployment plan
 

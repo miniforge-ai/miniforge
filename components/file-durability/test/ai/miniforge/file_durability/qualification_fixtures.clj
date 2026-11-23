@@ -25,11 +25,11 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} qualify! [root]
+(defn ^{:stratum 1} qualify! [root & [proof]]
   (anomaly/let-ok [_ (durability/prepare-protected-directory! root)]
     (with-redefs [store/observe candidate
                   publication/check! (constantly :publication-verified)
-                  locks/check! (constantly true)]
+                  locks/check! (or proof (constantly true))]
       (durability/qualify-local-root! root profile (peer root)))))
 
 (comment (peer (fs/file ".")))

@@ -20,6 +20,11 @@
 
 (defn- ^{:stratum 0} reject-probe! [& _] (throw (AssertionError.)))
 
+(defn- ^{:stratum 0} replace-during-proof! [previous root _]
+  (fs/move root previous)
+  (durability/prepare-protected-directory! (fs/file root))
+  true)
+
 (defn- ^{:stratum 0} verify-attached-boundaries! [root]
   (when (support/posix? root)
     (let [parent (fs/file (fs/real-path root))
@@ -54,17 +59,6 @@
            (:anomaly/type (durability/qualify-local-root!
                            root fixtures/profile (assoc (fixtures/peer root) field unsafe)))))))
 
-(defn- ^{:stratum 0} verify-root-replacement! [parent]
-  (when (support/posix? parent)
-    (let [root (fs/file parent "qualified")
-          previous (fs/path parent "previous")]
-      (durability/prepare-protected-directory! root)
-      (let [handle (fixtures/qualify! root)]
-        (is (= (fs/real-path root) (durability/resolve-qualified-root handle)))
-        (fs/move root previous)
-        (durability/prepare-protected-directory! root)
-        (is (anomaly/anomaly? (durability/resolve-qualified-root handle)))))))
-
 (defn- ^{:stratum 0} verify-access-controls! [root]
   (when (support/posix? root)
     (let [parent (fs/file (fs/real-path root))
@@ -76,6 +70,19 @@
         (is (= :unauthorized (:anomaly/type (durability/verify-attached-directory parent child))))))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} verify-root-replacement! [parent]
+  (when (support/posix? parent)
+    (let [root (fs/file parent "qualified")
+          raced (fs/path parent "raced")
+          previous (fs/path parent "previous")]
+      (durability/prepare-protected-directory! root)
+      (let [handle (fixtures/qualify! root)]
+        (is (= (fs/real-path root) (durability/resolve-qualified-root handle)))
+        (fs/move root previous)
+        (durability/prepare-protected-directory! root)
+        (is (anomaly/anomaly? (durability/resolve-qualified-root handle)))
+        (is (anomaly/anomaly? (fixtures/qualify! root (partial replace-during-proof! raced))))))))
 
 (defn- ^{:stratum 1} verify-alias-before-observation! [root]
   (when (support/posix? root)
@@ -105,13 +112,13 @@
 (deftest ^{:stratum 1} test-relative-peer-executable-or-classpath-is-rejected
   (support/with-root verify-peer-paths!))
 
-(deftest ^{:stratum 1} test-replaced-protected-root-invalidates-its-handle
-  (support/with-root verify-root-replacement!))
-
 (deftest ^{:stratum 1} test-handle-and-child-retain-verifiable-access-controls
   (support/with-root verify-access-controls!))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} test-root-replacement-cannot-create-or-reuse-a-qualified-handle
+  (support/with-root verify-root-replacement!))
 
 (deftest ^{:stratum 2} test-storage-alias-is-rejected-before-native-observation
   (support/with-root verify-alias-before-observation!))
