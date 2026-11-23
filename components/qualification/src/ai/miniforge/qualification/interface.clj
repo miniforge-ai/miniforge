@@ -64,7 +64,9 @@
    `:command`); or {:invalid-gate problems}. A scenario that throws or
    returns malformed output still yields a report: every criterion unrun,
    verdict incomplete. The build is read before and after the scenario; one
-   that changes during the run is recorded as not clean."
+   that changes during the run is recorded as not clean. Printer settings
+   the caller bound (`*print-length*`, `*print-namespace-maps*` and the
+   like) are reset for the run, so they reach neither hashes nor report."
   [gate scenario opts]
   (run/run-gate! gate scenario opts))
 

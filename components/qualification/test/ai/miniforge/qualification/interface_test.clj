@@ -20,6 +20,7 @@
    run where every criterion passed exits 0."
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.qualification.interface :as qualification]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [slingshot.slingshot :refer [throw+]])
   (:import [java.nio.file Files]
@@ -138,11 +139,12 @@
         (is (= 1 (qualification/exit-code result)))))))
 
 (deftest ^{:stratum 2} test-unusable-output-is-unrun
-  (testing "given malformed output, a fn in the fixtures or in observed state, or a result for an undeclared criterion → invalid output, every criterion unrun"
+  (testing "given malformed output, a fn or keys the hash would merge (1, 1.0) in the fixtures, a fn in observed state, or an undeclared criterion → invalid output, every criterion unrun"
     (doseq [scenario [(fn [] {:scenario/results all-pass})
                       (fn [] {:scenario/fixtures {:connector identity}
                               :scenario/config {}
                               :scenario/results all-pass})
+                      (fn [] {:scenario/fixtures {1 :a 1.0 :b} :scenario/config {} :scenario/results all-pass})
                       (scenario-returning (assoc-in all-pass [1 :criterion/observed] {:sink identity}))
                       (scenario-returning (conj all-pass {:criterion/id :c/other
                                                           :criterion/status :status/pass}))]]
@@ -158,11 +160,12 @@
       (is (= 1 (qualification/exit-code result))))))
 
 (deftest ^{:stratum 2} test-hashes-repeat-across-runs
-  (testing "given the same fixtures and config twice → the same hashes"
+  (testing "given the same fixtures and config twice, once under a caller's *print-length* → the same hashes, and the EDN report reads back whole"
     (let [a (:report (run-in-temp (scenario-returning all-pass)))
-          b (:report (run-in-temp (scenario-returning all-pass)))]
+          {b :report paths :paths} (binding [*print-length* 0] (run-in-temp (scenario-returning all-pass)))]
       (is (= (:report/fixture-hash a) (:report/fixture-hash b)))
-      (is (= (:report/config-hash a) (:report/config-hash b))))))
+      (is (= (:report/config-hash a) (:report/config-hash b)))
+      (is (= b (edn/read-string (slurp (:edn paths))))))))
 
 (deftest ^{:stratum 2} test-unpinned-build-is-not-a-pass
   (testing "given every criterion passing on a dirty tree or without a commit → incomplete, exit 1, and the summary says why"

@@ -20,6 +20,7 @@
    verdict. A declared criterion with no result is unrun; only a run where
    every criterion passed is a pass."
   (:require
+   [ai.miniforge.content-hash.interface :as content-hash]
    [ai.miniforge.qualification.messages :as msg]
    [ai.miniforge.qualification.schema :as schema]
    [ai.miniforge.qualification.vocabulary :as vocab]
@@ -54,11 +55,12 @@
             (msg/t :result/duplicate {:id id})))))
 
 (defn- ^{:stratum 0} plain-data?
-  "True when `x` prints and reads back equal, so its content hash is the
-   same on every run. A fn or other object does not."
+  "True when `x`'s canonical EDN, the text its content hash digests, reads
+   back equal, so the hash repeats and names only `x`. A fn or other object
+   fails, and so do two keys the canonical order merges (`1` and `1.0`)."
   [x]
   (try+
-   (= x (edn/read-string (pr-str x)))
+   (= x (edn/read-string (content-hash/canonical-edn x)))
    (catch Exception _
      false)))
 
@@ -67,8 +69,8 @@
 (defn ^{:stratum 1} output-problems
   "Why a scenario's output cannot be reported, or nil when it can: it is
    not a ScenarioOutput, its fixtures, config or results are not plain data
-   (the hashes would not repeat, and the report could not be written as
-   EDN), or its results do not match the gate."
+   (the hashes would not repeat or would merge two keys, and the report
+   could not be written as EDN), or its results do not match the gate."
   [gate output]
   (cond
     (not (m/validate schema/ScenarioOutput output))

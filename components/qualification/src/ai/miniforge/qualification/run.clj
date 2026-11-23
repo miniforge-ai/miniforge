@@ -170,23 +170,25 @@
                   :or   {out-dir  "target/qualification"
                          root     "."
                          build-fn build/build-identity}}]
-  (if-not (m/validate schema/Gate gate)
-    {:invalid-gate (pr-str (me/humanize (m/explain schema/Gate gate)))}
-    (let [started-at (now)
-          before     (build-fn root)
-          outcome    (scenario-outcome gate scenario)
-          build      (stable-build before (build-fn root))
-          report     (assemble-report gate outcome {:command    command
-                                                    :build      build
-                                                    :started-at started-at})]
-      (if-not (m/validate schema/Report report)
-        {:report report :invalid-report (pr-str (me/humanize (m/explain schema/Report report)))}
-        (try+
-         {:report report :paths (writer/write-report! out-dir report)}
-         (catch thrown-value? _
-           {:report report :write-failure (write-failure-message (:throwable &throw-context))})
-         (catch Exception e
-           {:report report :write-failure (write-failure-message e)}))))))
+  (binding [*print-length* nil *print-level* nil *print-meta* false
+            *print-namespace-maps* false *print-dup* false]
+    (if-not (m/validate schema/Gate gate)
+      {:invalid-gate (pr-str (me/humanize (m/explain schema/Gate gate)))}
+      (let [started-at (now)
+            before     (build-fn root)
+            outcome    (scenario-outcome gate scenario)
+            build      (stable-build before (build-fn root))
+            report     (assemble-report gate outcome {:command    command
+                                                      :build      build
+                                                      :started-at started-at})]
+        (if-not (m/validate schema/Report report)
+          {:report report :invalid-report (pr-str (me/humanize (m/explain schema/Report report)))}
+          (try+
+           {:report report :paths (writer/write-report! out-dir report)}
+           (catch thrown-value? _
+             {:report report :write-failure (write-failure-message (:throwable &throw-context))})
+           (catch Exception e
+             {:report report :write-failure (write-failure-message e)})))))))
 
 (comment
   (run-gate! {:gate/id :fixture/gate :gate/title "Fixture"

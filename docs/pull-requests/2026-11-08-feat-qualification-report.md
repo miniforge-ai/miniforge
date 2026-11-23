@@ -75,6 +75,12 @@ data.
     file never ends up beside a new EDN report.
 14. A write that fails after creating its file (disk full, say) deletes that
     file; a file that was already there is never touched.
+15. Fixtures, config and results must read back equal from their canonical
+    EDN, the text the hash digests, so two keys the canonical order merges
+    (`1` and `1.0`) are invalid output instead of a hash that hides one.
+    `run-gate!` resets printer settings (`*print-length*`,
+    `*print-namespace-maps*` and the like) for the run, so a caller's REPL
+    settings change neither the hashes nor the written EDN.
 
 From the schema PR's review: the verdict is `vocabulary/report-verdict`, so
 passing rows on a dirty tree, without a commit or without hashes give
@@ -92,7 +98,7 @@ passing rows on a dirty tree, without a commit or without hashes give
    every criterion unrun; an unreported criterion is incomplete; hashes repeat
    across runs; an invalid gate exits 2; an unwritable report exits 1 even
    when every criterion passed; the summary names the verdict and each row.
-3. Locally: 37 tests, 137 assertions, 0 failures. Over the PR budget, with
+3. Locally: 37 tests, 141 assertions, 0 failures. Over the PR budget, with
    the override and its reason in the PR description. Also covered: a pass on
    an unpinned build is incomplete and the summary says why; a short commit
    names the file.
