@@ -97,6 +97,9 @@ data.
 19. Output holding a map keyed by collections is invalid: the hash leaves
     such keys in insertion order, so equal fixtures built in a different
     order would hash differently.
+20. Output must also read back from its plain EDN, the text the report
+    holds, so a value the hash accepts but that prints unreadably (a
+    queue) is recorded as invalid output instead of failing the write.
 
 From the schema PR's review: the verdict is `vocabulary/report-verdict`, so
 passing rows on a dirty tree, without a commit or without hashes give
@@ -114,7 +117,7 @@ passing rows on a dirty tree, without a commit or without hashes give
    every criterion unrun; an unreported criterion is incomplete; hashes repeat
    across runs; an invalid gate exits 2; an unwritable report exits 1 even
    when every criterion passed; the summary names the verdict and each row.
-3. Locally: 38 tests, 154 assertions, 0 failures. Over the PR budget, with
+3. Locally: 38 tests, 157 assertions, 0 failures. Over the PR budget, with
    the override and its reason in the PR description. Also covered: a pass on
    an unpinned build is incomplete and the summary says why; a short commit
    names the file.
