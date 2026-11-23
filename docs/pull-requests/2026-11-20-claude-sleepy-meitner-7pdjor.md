@@ -34,6 +34,9 @@ other MCP server the user had configured was dropped.
   The link chain is followed by hand, so a link whose backing file is
   missing is kept and the backing file is created. A link cycle throws
   after 40 hops and writes nothing.
+- Reads follow links the same way as writes, through `read-config-text`.
+  Only a missing file reads as empty. Any other read failure throws
+  before anything is written, for the JSON configs and the Codex TOML.
 - A config created for the first time is owner-only. The previous
   in-place write used the process umask.
 - `setup` stops at the first client whose config cannot be read. Later
@@ -41,7 +44,7 @@ other MCP server the user had configured was dropped.
 
 ## Testing plan
 
-New `tasks_test.clj`, 5 tests and 17 assertions:
+New `tasks_test.clj`, 6 tests and 20 assertions:
 
 - `read-json-file` on a missing file, valid JSON, truncated JSON,
   trailing content, a non-object root and a blank file.
@@ -52,10 +55,13 @@ New `tasks_test.clj`, 5 tests and 17 assertions:
 - A link with a missing backing file is kept and its backing file is
   created.
 - A link cycle throws and leaves both links in place.
+- A chain of 45 links throws on read and on write. The backing config
+  is untouched.
 
-The namespace passes on the JVM. Under Babashka, `bb lsp:setup` loads
-the namespace and prints its preview, and the calls the change adds
-(`parsed-seq`, `create-temp-file`, atomic `Files/move`) behave the same.
+The namespace passes on the JVM. Under Babashka, `bb lsp:setup
+--claude-code` was run in a scratch project. A config with trailing
+content made it throw and stayed byte-for-byte the same. A valid config
+kept its other server and gained `miniforge-lsp`.
 
 ## Deployment plan
 
