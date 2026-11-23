@@ -10,7 +10,7 @@
 
 (def ^{:stratum 0} ^:private mount-line
   "Read mount identity and filesystem facts while accepting optional kernel fields."
-  #"([0-9]+) [0-9]+ ([0-9]+:[0-9]+) \S+ (\S+) (\S+)(?: \S+)*? - (\S+) \S+ (\S+)")
+  #"([0-9]+) ([0-9]+) ([0-9]+:[0-9]+) \S+ (\S+) (\S+)(?: \S+)*? - (\S+) \S+ (\S+)")
 
 (def ^{:stratum 0} ^:private path-escapes
   "Kernel mount-table escapes are not general octal or shell interpolation."
@@ -48,10 +48,11 @@
        (not-any? unsafe-option? options)))
 
 (defn ^{:stratum 2} parse [line]
-  (when-let [[_ id device target options type super-options] (re-matches mount-line line)]
+  (when-let [[_ id parent device target options type super-options] (re-matches mount-line line)]
     (let [path (target-path target)
           flags (set (str/split (str options "," super-options) #","))]
       {:mount/id id
+       :mount/parent parent
        :mount/device device
        :mount/target path
        :mount/type type
