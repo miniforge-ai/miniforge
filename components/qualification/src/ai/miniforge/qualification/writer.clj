@@ -78,11 +78,14 @@
   (throw (ex-info (msg/t message-key) {:out-dir out-dir :paths paths})))
 
 (defn- ^{:stratum 0} write-new!
-  "Create `path` with `text`; fails if anything, a symlink too, is there."
+  "Create `path` with `text`; fails if anything, a symlink too, is there. A
+   write that fails after creating the file deletes it."
   [path text]
-  (Files/write (.toPath (io/file path)) (.getBytes ^String text "UTF-8")
-               ^"[Ljava.nio.file.OpenOption;"
-               (into-array OpenOption [StandardOpenOption/CREATE_NEW StandardOpenOption/WRITE])))
+  (let [p   (.toPath (io/file path))
+        out (Files/newOutputStream p ^"[Ljava.nio.file.OpenOption;"
+                                   (into-array OpenOption [StandardOpenOption/CREATE_NEW StandardOpenOption/WRITE]))]
+    (try+ (with-open [o out] (.write o (.getBytes ^String text "UTF-8")))
+          (catch Object _ (Files/deleteIfExists p) (throw+)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -110,7 +113,8 @@
 (defn ^{:stratum 2} write-report!
   "Write `report` under `out-dir` as EDN and JSON; returns the paths. Throws,
    leaving no new file, when a path leaves `out-dir` (as written or through
-   a symlink), when JSON would merge two keys, or when a file exists."
+   a symlink), when JSON would merge two keys, when a file exists, or when
+   a write fails."
   [out-dir report]
   (let [{:keys [edn json] :as paths} (report-paths out-dir report)
         edn-body  (edn-text report)

@@ -117,6 +117,15 @@
       (is (thrown? Exception (writer/write-report! dir report)))
       (is (and (not (.exists (io/file edn))) (= "old" (slurp json)))))))
 
+(deftest ^{:stratum 1} test-failed-write-removes-only-its-own-file
+  (testing "given a write failing after the file is created (nil text) → throws, file gone; an existing file → kept"
+    (let [path (str (io/file (temp-dir) "r.edn"))]
+      (is (thrown? Exception (#'writer/write-new! path nil)))
+      (is (not (.exists (io/file path))))
+      (spit path "old")
+      (is (thrown? Exception (#'writer/write-new! path "new")))
+      (is (= "old" (slurp path))))))
+
 (deftest ^{:stratum 1} test-written-report-round-trips
   (testing "given a report → the EDN reads back equal, the JSON keeps namespaced names"
     (let [{:keys [edn json]} (writer/write-report! (temp-dir) report)]

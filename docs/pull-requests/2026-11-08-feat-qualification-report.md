@@ -73,6 +73,8 @@ data.
 13. Both formats are serialized before either file is created, and a failed
     JSON write deletes the EDN file this call created, so a pre-existing JSON
     file never ends up beside a new EDN report.
+14. A write that fails after creating its file (disk full, say) deletes that
+    file; a file that was already there is never touched.
 
 From the schema PR's review: the verdict is `vocabulary/report-verdict`, so
 passing rows on a dirty tree, without a commit or without hashes give
@@ -90,7 +92,7 @@ passing rows on a dirty tree, without a commit or without hashes give
    every criterion unrun; an unreported criterion is incomplete; hashes repeat
    across runs; an invalid gate exits 2; an unwritable report exits 1 even
    when every criterion passed; the summary names the verdict and each row.
-3. Locally: 36 tests, 133 assertions, 0 failures. PR budget 614 / 600, with
+3. Locally: 37 tests, 137 assertions, 0 failures. Over the PR budget, with
    the override and its reason in the PR description. Also covered: a pass on
    an unpinned build is incomplete and the summary says why; a short commit
    names the file.
