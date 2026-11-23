@@ -46,6 +46,23 @@
     (catch Exception e
       {:exit 1 :err (.getMessage e) :out ""})))
 
+(defn ^{:stratum 0} hook-free-git-args
+  "`run-git` args for `git -C worktree-path <args>` with hooks and
+   fsmonitor off, for every persist call that touches the index or a ref.
+
+   The task worktree shares `.git/config` with the host checkout, so a
+   hooks path or fsmonitor program set there, by the operator or by a task,
+   would otherwise run. `--no-verify` skips only pre-commit and commit-msg;
+   prepare-commit-msg, post-commit, post-checkout and reference-transaction
+   still run, and `status`, `add`, `commit` and `checkout` each start the
+   fsmonitor program."
+  [worktree-path args]
+  (let [hook-free-options ["-c" "core.hooksPath=/dev/null"
+                           "-c" "core.fsmonitor=false"]]
+    (-> ["-C" worktree-path]
+        (into hook-free-options)
+        (into args))))
+
 (defn- ^{:stratum 0} command-output
   "Return command stdout when it is a string; otherwise return empty text."
   [result]
