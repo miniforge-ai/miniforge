@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.lsp-mcp-bridge.tasks-test
   "Tests for config file reading and writing in the setup tasks."
   (:require
@@ -23,9 +22,17 @@
    [babashka.fs :as fs]
    [clojure.test :refer [deftest is testing]]))
 
-(def ^:private corrupt-json "{\"mcpServers\": {\"other\": ")
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest read-json-file-test
+(def ^{:stratum 0} ^:private corrupt-json "{\"mcpServers\": {\"other\": ")
+
+(defn- ^{:stratum 0} file-names
+  [dir]
+  (set (map fs/file-name (fs/list-dir dir))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} read-json-file-test
   (fs/with-temp-dir [dir {}]
     (let [path (str dir "/config.json")]
       (testing "a missing file reads as an empty map"
@@ -47,16 +54,16 @@
         (spit path "  \n")
         (is (= {} (tasks/read-json-file path)))))))
 
-(deftest write-json-file-test
+(deftest ^{:stratum 1} write-json-file-test
   (fs/with-temp-dir [dir {}]
     (let [path (str dir "/nested/config.json")]
       (with-out-str (tasks/write-json-file path {"a" 1}))
       (testing "creates parents and writes parseable JSON"
         (is (= {"a" 1} (tasks/read-json-file path))))
       (testing "leaves no temp file behind"
-        (is (not (fs/exists? (str path ".tmp"))))))))
+        (is (= #{"config.json"} (file-names (fs/parent path))))))))
 
-(deftest write-file-atomically-preserves-target-test
+(deftest ^{:stratum 1} write-file-atomically-preserves-target-test
   (fs/with-temp-dir [dir {}]
     (let [real (str dir "/real.json")
           link (str dir "/link.json")]
@@ -73,10 +80,9 @@
           (is (= (fs/str->posix "rw-------")
                  (fs/posix-file-permissions real)))))
       (testing "no temp file is left in the directory"
-        (is (= #{"real.json" "link.json"}
-               (set (map fs/file-name (fs/list-dir dir)))))))))
+        (is (= #{"real.json" "link.json"} (file-names dir)))))))
 
-(deftest write-file-atomically-dangling-symlink-test
+(deftest ^{:stratum 1} write-file-atomically-dangling-symlink-test
   (fs/with-temp-dir [dir {}]
     (let [real (str dir "/dotfiles/real.json")
           link (str dir "/link.json")]
