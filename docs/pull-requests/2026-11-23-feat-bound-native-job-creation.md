@@ -41,6 +41,10 @@ Validation completed:
   A non-reader is killed within the local deadline; a zero-exit valid receipt
   without accepted stdin is refused. Missing executables retain the sanitized
   I/O diagnostic without exposing their path.
+- The actual project integration alias includes the shared executor fixture
+  directory. Its classpath regression test keeps those fixtures off production
+  builds; the native packet also runs with `-M:test:integration`, without a
+  manually supplied test path.
 - Five independent negative controls fail with zero errors on Java 21 and
   Babashka: post-receipt admission (2), native payload integrity (2), historical
   Job identity and downstream ownership (6), input completion (1), and native
