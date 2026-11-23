@@ -24,23 +24,16 @@
    capsule as GH_TOKEN for gh CLI authentication.
    Agent: :releaser
    Default gates: [:release-ready]"
-  (:require [clojure.java.io :as io]
-            [ai.miniforge.anomaly.interface :as anomaly]
-            [ai.miniforge.workspace.interface :as workspace]
-            [clojure.java.shell :as shell]
-            [clojure.string :as str]
-            [ai.miniforge.agent.interface :as agent]
-            [ai.miniforge.logging.interface :as log]
+  (:require [ai.miniforge.logging.interface :as log]
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.phase.interface.gate :as phase-gate]
-            [ai.miniforge.phase.interface.task-base :as task-base]
             [ai.miniforge.phase-software-factory.codex-pin :as codex-pin]
             [ai.miniforge.phase-software-factory.gap-wiring :as gap-wiring]
             [ai.miniforge.phase-software-factory.messages :as messages]
             [ai.miniforge.phase-software-factory.phase-config :as phase-config]
             [ai.miniforge.phase-software-factory.phase-terminal :as phase-terminal]
             [ai.miniforge.phase-software-factory.release-publish :as release-publish]
-            [ai.miniforge.phase-software-factory.release-scan :as release-scan]
+            [ai.miniforge.phase-software-factory.release-state :as release-state]
             [ai.miniforge.release-executor.interface :as release-executor]
             [ai.miniforge.response.interface :as response]))
 
@@ -66,146 +59,6 @@
   "Phase defaults loaded from config/phase/defaults.edn."
   (phase-config/defaults-for :release))
 
-;; Interceptor implementation
-(defn- ^{:stratum 0} log-already-implemented!
-  "Log when implement phase reports work already done."
-  [ctx impl-status]
-  (when (= :already-implemented impl-status)
-    (let [logger (or (get-in ctx [:execution/logger])
-                     (log/create-logger {:min-level :info :output :human}))]
-      (log/info logger :release :release/skipped-already-implemented
-                {:data {:summary (get-in ctx [:execution/phase-results :implement :result :summary])}}))))
-
-;; assert-implement-artifact! used to throw when the implement phase
-;; reported anything other than :status :success. That gate disagreed with
-;; verify and review, which read the environment directly and run regardless
-;; of what the implement result map said. The disagreement surfaced under
-;; the curator's :curator/no-files-written path: the agent narrates code in
-;; chat, curator marks implement :failed, but persist still captures whatever
-;; landed on disk and verify+review work fine against it. Release would
-;; then explode with `:release/no-implement-artifact` even though there was
-;; real work to release. Removed — the env-based `:release/zero-files`
-;; check below is the authoritative gate, matching what verify and review
-;; already do.
-(defn- ^{:stratum 0} ctx-worktree-path
-  "Resolve the working directory from phase context."
-  [ctx]
-  (workspace/resolve-execution-workdir ctx "release"))
-
-(def ^{:stratum 0} ^:private commit-sha-pattern
-  "A full or abbreviated commit sha: 7 to 40 hex digits (SHA-1), up to 64
-   (SHA-256 repositories). A branch name, a range or any other ref fails it."
-  #"[0-9a-f]{7,64}")
-
-(defn- ^{:stratum 0} capsule-target
-  "The capsule a governed run executes in, as {:execute-fn :executor
-   :env-id :workdir}, or nil for a host run. `:workdir` is the capsule's own
-   checkout (`:execution/capsule-workdir`): the host worktree path
-   `worktree-path` does not exist inside the capsule."
-  [ctx worktree-path]
-  (let [execute-fn (get ctx :execution/execute-fn)
-        executor   (get ctx :execution/executor)
-        env-id     (get ctx :execution/environment-id)]
-    (when (and (= :governed (get ctx :execution/mode)) execute-fn executor env-id)
-      {:execute-fn execute-fn
-       :executor   executor
-       :env-id     env-id
-       ;; The runner sets the key on every run, nil without a capsule
-       ;; checkout, so a get default would never apply.
-       :workdir    (or (get ctx :execution/capsule-workdir) worktree-path)})))
-
-(defn- ^{:stratum 0} porcelain-scan-entry
-  "A release-scan entry for one `git status` [status path] pair: no mode,
-   so release-scan reads it as a file unless it was deleted."
-  [[xy path]]
-  (let [status (cond (str/includes? xy "D") "D"
-                     (= "??" xy)            "A"
-                     :else                  "M")]
-    {:status status :path path}))
-
-(defn- ^{:stratum 0} scan-io
-  "The git runner, file reader and root a scan uses: in the capsule's
-   checkout for a governed run (`capsule`, from capsule-target), else on
-   the host in `worktree-path`."
-  [worktree-path capsule]
-  (if-let [{:keys [execute-fn executor env-id workdir]} capsule]
-    {:run  (release-scan/capsule-runner execute-fn executor env-id workdir)
-     :read (release-scan/capsule-reader execute-fn executor env-id workdir)
-     :root workdir}
-    {:run  (release-scan/host-runner worktree-path)
-     :read (release-scan/host-reader worktree-path)
-     :root worktree-path}))
-
-(defn- ^{:stratum 0} porcelain-z-entries
-  "Parse `git status --porcelain -z` output into [status path] pairs.
-   With -z each entry is NUL-terminated and its path is never quoted or
-   escaped (without -z git wraps a path with spaces or non-ASCII bytes in
-   C-style quotes). A rename or copy entry is followed by its source
-   path, which is skipped."
-  [out]
-  (loop [records (str/split (or out "") #"\u0000")
-         entries []]
-    (if-let [record (first records)]
-      (if (< (count record) 4)
-        (recur (next records) entries)
-        (let [status (subs record 0 2)]
-          (recur (if (some #{\R \C} status) (nnext records) (next records))
-                 (conj entries [status (subs record 3)]))))
-      entries)))
-
-(defn- ^{:stratum 0} rehydrate-committed-files
-  "Read content for the `:code/file-paths` recorded by the implement
-   phase. Used when implement's boundary commit has cleaned the
-   worktree — `git-dirty-files` then returns empty even though the
-   files exist as committed content on the task branch.
-
-   Modeled after review.clj/rehydrate-from-paths but with two
-   differences:
-   - Returns a `:code/files` vector directly (review wraps it back
-     into the outer artifact); release wants the vector to feed
-     into `code-artifacts` below.
-   - Applies the same `agent/substantive-file?` filter that
-     `git-dirty-files` uses, so a record consisting only of
-     `.miniforge/session-id` does not count as releasable work
-     (matches the iter-23 empty-diff PR guard).
-
-   Host-mode only: `agent/rehydrate-files` reads the host
-   filesystem. In governed (capsule) mode the worktree lives
-   inside a Docker/K8s container and the host cannot reach it
-   directly. A capsule-aware variant is a follow-up; today the
-   capsule path falls through to `git-dirty-files-capsule`, which
-   matches the pre-fix behavior in that mode."
-  [implement-artifact worktree-path]
-  (when-let [paths (and implement-artifact
-                        worktree-path
-                        (seq (:code/file-paths implement-artifact)))]
-    (let [files (try
-                  (agent/rehydrate-files worktree-path paths
-                                         (:code/file-actions implement-artifact))
-                  (catch Exception _ nil))]
-      (->> (or files [])
-           (filter agent/substantive-file?)
-           vec))))
-
-(defn- ^{:stratum 0} unresolved-known-issues
-  "The review's unresolved non-blocking issues to record on the PR. Prefer the
-   structured `:review/issues` (severity :warning/:nit — these carry file/line);
-   fall back to the legacy `:review/warnings` description strings when no
-   structured issues are present (gate-produced warnings arrive as strings)."
-  [review-output]
-  (let [structured (filterv (comp #{:warning :nit} :severity)
-                            (get review-output :review/issues []))]
-    (if (seq structured)
-      structured
-      (vec (get review-output :review/warnings [])))))
-
-(defn- ^{:stratum 0} zero-files-data
-  [impl-result worktree-path]
-  {:type           :release/zero-files
-   :phase          :release
-   :environment-id (:environment-id impl-result)
-   :worktree-path  worktree-path})
-
 (defn- ^{:stratum 0} compute-verdict
   "Pick the verdict that should flow on the phase result.
 
@@ -226,21 +79,6 @@
 
     :else
     :approved))
-
-(defn- ^{:stratum 0} readiness-check
-  "One phase's readiness evidence: verify completed, or review completed
-   with an approving decision. A phase with no recorded result fails."
-  [ctx phase-name]
-  (let [phase-result (get-in ctx [:execution/phase-results phase-name])
-        completed?   (and (some? phase-result) (phase/succeeded? phase-result))
-        decision     (when (= :review phase-name)
-                       (response/review-decision (response/phase-output phase-result)))]
-    (cond-> {:phase   phase-name
-             :passed? (and completed?
-                           (or (not= :review phase-name)
-                               (contains? #{:approved :conditionally-approved} decision)))}
-      (nil? phase-result)     (assoc :reason :no-result)
-      (= :review phase-name)  (assoc :decision decision))))
 
 (defn- ^{:stratum 0} attach-error-verdict
   "Phase 3b: when error-release fails terminally, attach the verdict to
@@ -302,108 +140,6 @@
       codex-outcome (assoc :codex/outcome (dissoc codex-outcome :text)))))
 
 ;------------------------------------------------------------------------------ Layer 1
-
-(defn ^{:stratum 1} release-readiness
-  "Whether the release may publish: each of verify and review that the
-   workflow pipeline configures must have passed. A pipeline configuring
-   neither has no evidence and is not ready. The :release-ready gate reads
-   this from the phase output's :release/readiness."
-  [ctx]
-  (let [configured (set (map :phase (get-in ctx [:execution/workflow :workflow/pipeline])))
-        checks     (mapv #(readiness-check ctx %) (filter configured [:verify :review]))]
-    {:ready? (boolean (and (seq checks) (every? :passed? checks)))
-     :checks (if (seq checks) checks [{:phase :verify :passed? false :reason :not-configured}])}))
-
-(defn- ^{:stratum 1} release-base-shas
-  "The exact commits the task branch is measured from: the shas among the
-   task base refs implement recorded (checkpointed, so a resumed run
-   restores the first attempt's base, which its own environment's base is
-   already past), then the environment's base commit.
-
-   Commits only, never a branch name, a range, or the commit the CLI
-   started on: `git diff <ref>` compares the working tree with the ref
-   itself, so a ref behind the task's real base would count upstream
-   changes as this run's work."
-  [ctx]
-  (into []
-        (comp (filter #(and (string? %) (re-matches commit-sha-pattern %))) (distinct))
-        (concat (task-base/recorded-refs ctx)
-                [(get-in ctx [:execution/environment-metadata :base-sha])])))
-
-(defn- ^{:stratum 1} git-dirty-files
-  "Scan git working tree for new/modified/deleted files; return as :code/files entries.
-   Used as fallback when the implement phase wrote files directly to disk
-   (design docs, specs, UX assets, etc.) rather than returning them in a
-   :code/files artifact.
-
-   Filters out non-substantive paths (session markers, miniforge runtime
-   artifacts) via `agent/substantive-file?` — a diff consisting only of
-   these must not count as releasable work. Matches the same filter the
-   curator applies upstream (iter-23 regression: empty-diff PRs).
-
-   Reads `git status -z`, whose paths are never quoted: without -z git
-   wraps a path with a space or non-ASCII bytes in C-style quotes, which
-   names no file on disk, and the file was left out of the release.
-
-   Returns a `:release/git-status-failed` anomaly when the scan cannot
-   run, never `[]` (which release would report as zero files)."
-  [root-path]
-  (try
-    (let [{:keys [exit out err]} (shell/sh "git" "status" "--porcelain" "-uall" "-z" :dir root-path)]
-      (if-let [failure (release-scan/command-failure "git status --porcelain -uall -z" exit err nil)]
-        (release-scan/git-status-failed root-path failure)
-        (->> (porcelain-z-entries out)
-             (keep (fn [[xy path]]
-                     (let [file   (io/file root-path path)
-                           action (if (str/starts-with? (str/trim xy) "?") :create :modify)]
-                       (cond
-                         (str/includes? xy "D") {:path path :content "" :action :delete}
-                         ;; Keep a symlink's path but never follow it: its
-                         ;; target may lie outside the worktree (see release-scan).
-                         (java.nio.file.Files/isSymbolicLink (.toPath file))
-                                                {:path path :content "" :action action}
-                         (.isFile file)         {:path path :content (slurp file) :action action}))))
-             (filter agent/substantive-file?)
-             vec)))
-    (catch Exception e
-      (release-scan/git-status-failed root-path (release-scan/exception-failure e {})))))
-
-(defn- ^{:stratum 1} git-dirty-files-capsule
-  "Scan git working tree inside a task capsule via execute-fn (N11 §9.3).
-   Used for K8s executors where the filesystem is not locally accessible.
-   execute-fn is dag-exec/execute! passed through context to avoid cross-component requires.
-   `workdir` is the capsule's checkout (see capsule-target).
-
-   Applies the same `agent/substantive-file?` filter as the local variant so
-   session markers and miniforge runtime artifacts don't slip through the
-   governed path (iter-23 empty-diff regression).
-
-   Returns a `:release/git-status-failed` anomaly when `git status` or a
-   file's `cat` fails in the capsule, rather than `[]` or empty content."
-  [execute-fn executor env-id workdir]
-  (let [run                   (release-scan/capsule-runner execute-fn executor env-id workdir)
-        read-file             (release-scan/capsule-reader execute-fn executor env-id workdir)
-        {:keys [out failure]} (run ["status" "--porcelain" "-uall" "-z"])
-        entries               (->> (porcelain-z-entries out)
-                                   (filter (fn [[_status path]] (agent/substantive-file? {:path path})))
-                                   (map porcelain-scan-entry))]
-    (if failure
-      (release-scan/git-status-failed workdir failure)
-      (release-scan/read-entries read-file workdir entries))))
-
-(defn- ^{:stratum 1} release-files-result
-  "Return release file data, the failed scan's own anomaly when `dirty` is
-   one, or a canonical anomaly when there is no substantive work to release."
-  [committed dirty impl-result worktree-path]
-  (cond
-    (seq committed)          committed
-    (anomaly/anomaly? dirty) dirty
-    (seq dirty)              dirty
-    :else
-    (anomaly/sub-anomaly :invalid-input
-                         :anomalies.phase/enter-failed
-                         (messages/t :release/zero-files)
-                         (zero-files-data impl-result worktree-path))))
 
 (defn ^{:stratum 1} leave-release
   "Post-processing for release phase.
@@ -519,138 +255,8 @@
           (assoc :phase (phase/fail-phase (:phase ctx) error-map))
           (attach-error-verdict false (some? on-fail))))))
 
-;------------------------------------------------------------------------------ Layer 2
-
-(defn- ^{:stratum 2} committed-since-base
-  "Substantive `:code/files` the task branch holds beyond its base commits
-   (committed and dirty alike), limited to paths a commit other than a
-   verify or review boundary commit touched (see release-scan); [] when
-   there are none or no base commit is known, or a
-   `:release/git-status-failed` anomaly when the scan fails. A
-   clean worktree is not \"nothing to release\" when an earlier implement
-   iteration's commits are still unreleased. Runs in the capsule for a
-   governed run (`capsule`, from capsule-target), else on the host."
-  [ctx worktree-path capsule]
-  (let [{:keys [run read root]} (scan-io worktree-path capsule)
-        entries                 (release-scan/first-base-diff run root (release-base-shas ctx))]
-    (if (anomaly/anomaly? entries)
-      entries
-      (release-scan/read-entries read root entries))))
-
-(defn- ^{:stratum 2} dirty-scan
-  "The worktree's dirty files: in the capsule's checkout for a governed run
-   (`capsule`, from capsule-target), else on the host."
-  [worktree-path capsule]
-  (if-let [{:keys [execute-fn executor env-id workdir]} capsule]
-    (git-dirty-files-capsule execute-fn executor env-id workdir)
-    (git-dirty-files worktree-path)))
-
-(defn- ^{:stratum 2} release-files!
-  "Boundary wrapper around the anomaly-returning `release-files-result`;
-   retained for release phase control flow that treats `:release/zero-files`
-   as a terminal exception."
-  [committed dirty impl-result worktree-path]
-  (let [result (release-files-result committed dirty impl-result worktree-path)]
-    (if (anomaly/anomaly? result)
-      (throw (ex-info (:anomaly/message result)
-                      (:anomaly/data result)))
-      result)))
-
-;------------------------------------------------------------------------------ Layer 3
-
-(defn- ^{:stratum 3} skip-probe
-  "The scan enter-release skips on: the worktree's dirty files, or when it
-   has none, the files the task branch committed beyond its base. An
-   implement that reports :already-implemented after an earlier iteration
-   committed its work leaves a clean worktree, and that work must still be
-   released. A failed scan is returned as its anomaly, which never reads as
-   \"no changes\": build-workflow-state raises it unless implement's
-   recorded files carry the release."
-  [ctx]
-  (let [wt      (ctx-worktree-path ctx)
-        capsule (capsule-target ctx wt)
-        dirty   (dirty-scan wt capsule)]
-    (if (and (vector? dirty) (empty? dirty))
-      (committed-since-base ctx wt capsule)
-      dirty)))
-
-(defn ^{:stratum 3} build-workflow-state
-  "Build workflow state from phase context for the release executor.
-
-   In the new environment model, code changes live in the execution
-   environment's git working tree (:execution/worktree-path) rather than
-   being serialized into phase results.
-
-   File-discovery resolution order:
-
-     1. `:code/file-paths` recorded on the implement phase artifact
-        (`lightweight-curated-artifact`). After implement's boundary
-        commit lands on the task branch the worktree is clean at HEAD,
-        so `git-dirty-files` returns empty even though the files exist
-        as committed content. Reading the recorded paths off disk is
-        the same pattern review.clj/rehydrate-from-paths uses.
-     2. `git-dirty-files` (or its capsule-aware twin) for files the
-        agent wrote to the worktree but the boundary did not commit
-        (legacy / partial-write path).
-     3. Throw :release/zero-files when both paths come back empty —
-        the only legitimate \"nothing to release\" condition. When the
-        git scan itself fails, throw its :release/git-status-failed
-        instead, carrying git's error.
-
-   `probe` is the scan enter-release already ran to decide whether to
-   skip (nil when it ran none): dirty files, else files committed beyond
-   the task's base. It stands in for step 2's rescan, so a failed probe
-   raises its own error instead of a clean rescan turning it into
-   zero-files.
-
-   Stage-3 dogfood (2026-05-07) tripped on the missing #1 path:
-   plan/implement/verify/review all green, files committed on the
-   task branch, but release threw zero-files because git-dirty-files
-   saw a clean worktree. This commit closes that gap."
-  [ctx probe]
-  (let [impl-result   (get-in ctx [:execution/phase-results :implement :result])
-        impl-artifact (get-in ctx [:execution/phase-results :implement :artifact])
-        impl-status   (:status impl-result)]
-    (log-already-implemented! ctx impl-status)
-    (let [worktree-path  (ctx-worktree-path ctx)
-          capsule        (capsule-target ctx worktree-path)
-          committed      (rehydrate-committed-files impl-artifact worktree-path)
-          dirty          (when (empty? committed)
-                           (if (some? probe)
-                             probe
-                             (dirty-scan worktree-path capsule)))
-          files          (release-files! committed dirty impl-result worktree-path)
-          code-artifacts [{:artifact/type    :code
-                           :artifact/content {:code/id        (random-uuid)
-                                              :code/language  "mixed"
-                                              :code/files     files
-                                              :code/summary   (get impl-result :summary
-                                                                   (messages/t :release/changes-description))
-                                              :environment-id (:environment-id impl-result)}}]
-          ;; Carry the review phase's unresolved non-blocking warnings into the
-          ;; release as a :review artifact, so an :accept-with-warnings PR opens
-          ;; with those warnings recorded as known-issues (release-executor's
-          ;; PR-body renderer reads :review-typed artifacts). Pass-through only:
-          ;; presentation lives in the renderer. Clean reviews carry no warnings
-          ;; → no :review artifact → no change to the happy-path PR body.
-          review-output  (get-in ctx [:execution/phase-results :review :result :output])
-          known-issues   (unresolved-known-issues review-output)
-          review-artifacts (when (seq known-issues)
-                             [{:artifact/type    :review
-                               :artifact/content {:review/decision (:review/decision review-output)
-                                                  :review/summary  (:review/summary review-output)
-                                                  :review/warnings known-issues}}])
-          input          (get-in ctx [:execution/input])]
-      {:workflow/id       (or (get-in ctx [:execution/id]) (random-uuid))
-       :workflow/phase    :release
-       :workflow/spec     {:spec/description (or (:description input)
-                                                 (:title input)
-                                                 (messages/t :default/task-description))}
-       :workflow/artifacts (into code-artifacts review-artifacts)})))
-
-;------------------------------------------------------------------------------ Layer 4
-
-(defn ^{:stratum 4} enter-release
+;; Interceptor implementation
+(defn ^{:stratum 1} enter-release
   "Prepare the release.
 
    Uses the release executor to:
@@ -673,7 +279,7 @@
         _ (phase/emit-phase-started! ctx :release)
         ;; Skip probe: scan only when an empty worktree means "nothing to release".
         probe (when (contains? #{:already-implemented :already-satisfied nil} impl-status)
-                (skip-probe ctx))]
+                (release-state/skip-probe ctx))]
     ;; Short-circuit: skip release when there is nothing to release.
     ;; This covers:
     ;; - implement returned :already-implemented (no new code)
@@ -688,7 +294,7 @@
                                       (phase/skipped :already-implemented))
           (assoc-in [:phase :status] :completed))
       (let [;; Build workflow state and context
-            workflow-state (build-workflow-state ctx probe)
+            workflow-state (release-state/build-workflow-state ctx probe)
         _ (log/debug logger :release :release/workflow-state-built
                      {:data {:artifact-count (count (:workflow/artifacts workflow-state))
                              :file-count (count (get-in (first (:workflow/artifacts workflow-state))
@@ -722,7 +328,7 @@
                          :release/artifacts (:artifacts exec-result)
                          :release/prepared (:prepared exec-result)
                          ;; Read by the :release-ready gate.
-                         :release/readiness (release-readiness ctx)
+                         :release/readiness (release-state/release-readiness ctx)
                          :release/metrics (:metrics exec-result)}))
                      ;; Execution failed — surface the executor's :errors
                      ;; so the next dogfood run can diagnose root cause from
@@ -766,10 +372,10 @@
 
     (phase/enter-context ctx :release :releaser gates budget start-time result)))))
 
-;------------------------------------------------------------------------------ Layer 5
+;------------------------------------------------------------------------------ Layer 2
 
 ;; Registry methods
-(defmethod ^{:stratum 5} phase/get-phase-interceptor-method :release
+(defmethod ^{:stratum 2} phase/get-phase-interceptor-method :release
   [config]
   (let [merged (phase/merge-with-defaults config)]
     {:name ::release

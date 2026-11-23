@@ -25,7 +25,7 @@
    [clojure.java.io :as io]
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.agent.implementer :as implementer]
+   [ai.miniforge.agent.implementer.session :as impl-session]
    [ai.miniforge.agent.planner :as planner]
    [ai.miniforge.agent.reviewer :as reviewer]
    [ai.miniforge.agent.tester :as tester]
@@ -253,7 +253,7 @@
 
 (deftest ^{:stratum 2} disallowed-native-tools-stay-denied-test
   (testing "every tool a role's --disallowedTools list removes is refused by the hook too"
-    (doseq [[role tools] {:implementer @#'implementer/implementer-disallowed-tools
+    (doseq [[role tools] {:implementer @#'impl-session/implementer-disallowed-tools
                           :planner     @#'planner/planner-disallowed-tools
                           :tester      @#'tester/tester-disallowed-tools
                           :reviewer    @#'reviewer/reviewer-disallowed-tools}

@@ -42,14 +42,16 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} load-settings [overrides]
-  (try+
-    (let [defaults (config/load-config-resource "config/phase-opsv/kubernetes.edn")
-          settings (merge defaults overrides)]
-      (if (and (map? overrides) (m/validate schema/Settings settings)
-               (endpoint? (:kubernetes/base-url settings)))
-        (update settings :kubernetes/base-url canonical-endpoint)
-        (invalid)))
-    (catch Object _ (failed! (:throwable &throw-context)))))
+(defn ^{:stratum 2} load-settings
+  ([overrides] (load-settings overrides schema/Settings []))
+  ([overrides settings-schema excluded-defaults]
+   (try+
+     (let [defaults (config/load-config-resource "config/phase-opsv/kubernetes.edn")
+           settings (merge (apply dissoc defaults excluded-defaults) overrides)]
+       (if (and (map? overrides) (m/validate settings-schema settings)
+                (endpoint? (:kubernetes/base-url settings)))
+         (update settings :kubernetes/base-url canonical-endpoint)
+         (invalid)))
+     (catch Object _ (failed! (:throwable &throw-context))))))
 
 (comment ::credential-safe-kubernetes-target)

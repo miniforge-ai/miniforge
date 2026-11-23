@@ -204,6 +204,22 @@
                              (messages/t :env/governed-required {:workflow-id (str workflow-id)})
                              {:workflow/id workflow-id :execution-mode execution-mode})))
 
+(defn ^{:stratum 0} refuse-network-access-when-governed!
+  "Throw an :anomalies/forbidden anomaly when a governed run's LLM client
+   gives the Codex agent network access (`network-access?`, from
+   [:llm :codex :network-access?]). The agent CLI is started by the
+   miniforge process, not inside the capsule, so the capsule's network
+   settings do not bound it; the setting is for local runs only. Called
+   beside `refuse-local-when-governed-required!`, so it covers the same
+   runs: DAG child tasks, resumed runs, chain steps and plan runs."
+  [workflow-id execution-mode network-access?]
+  (when (and (= :governed execution-mode) network-access?)
+    (response/throw-anomaly! :anomalies/forbidden
+                             (messages/t :env/network-access-local-only {:workflow-id (str workflow-id)})
+                             {:workflow/id workflow-id
+                              :execution-mode execution-mode
+                              :config/key [:llm :codex :network-access?]})))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} restore-local-workspace-checkpoint!

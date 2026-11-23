@@ -135,6 +135,19 @@
         (is (= :timeout
                (get-in result [:error :data :error :code])))))))
 
+(deftest ^{:stratum 0} acquire-resources-forwards-env-passthrough-test
+  (testing "a task's :env-passthrough reaches the executor with its :env, so
+            an untrusted capsule keeps the variables the task permits"
+    (let [env-config (atom nil)]
+      (with-redefs [dag/acquire-worktree!    (fn [& _] (dag/ok {:holder-id "task-1"}))
+                    dag/acquire-environment! (fn [_executor _task-id cfg]
+                                               (reset! env-config cfg)
+                                               (dag/ok {:env-id :e1}))]
+        (runner/acquire-resources! "task-1" nil nil nil
+                                   {:env {"PORT" "8080"} :env-passthrough ["PORT"]})
+        (is (= {"PORT" "8080"} (:env @env-config)))
+        (is (= ["PORT"] (:env-passthrough @env-config)))))))
+
 (deftest ^{:stratum 0} acquire-resources-environment-failure-test
   (testing "environment acquisition failure releases the worktree and returns DAG error data"
     (let [released? (atom false)]

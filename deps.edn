@@ -4,6 +4,7 @@
 
  :aliases
  {:dev  {:extra-paths ["development/src"
+                       "development/resources"
                        "components/schema/src"
                        "components/schema/resources"
                        "components/config/src"
@@ -40,6 +41,8 @@
                        "components/progress-detector/src"
                        "components/progress-detector/resources"
                        "components/clock/src"
+                       "components/subprocess/src"
+                       "components/subprocess/resources"
                        "components/codex/src"
                        "components/codex/resources"
                        "components/codex-gap/src"
@@ -52,6 +55,10 @@
                        "components/task-executor/src"
                        "components/task-executor/resources"
                        "components/decision/src"
+                       "components/agent-environment/src"
+                       "components/agent-environment/resources"
+                       "components/agent-worker/src"
+                       "components/agent-worker/resources"
                        "components/deliberation-workspace/src"
                        "components/deliberation-workspace/resources"
                        "components/deliberation-harness/src"
@@ -75,6 +82,7 @@
                        "components/phase-software-factory/resources"
                        "components/phase-opsv/src"
                        "components/phase-opsv/resources"
+                       "components/kubernetes-target/src"
                        "components/opsv-adapter-simulated/src"
                        "components/gate/src"
                        "components/gate/resources"
@@ -275,6 +283,7 @@
                       ai.miniforge/anomaly {:local/root "components/anomaly"}
                       ai.miniforge/progress-detector {:local/root "components/progress-detector"}
                       ai.miniforge/clock {:local/root "components/clock"}
+                      ai.miniforge/subprocess {:local/root "components/subprocess"}
                       ai.miniforge/codex {:local/root "components/codex"}
                       ai.miniforge/codex-gap {:local/root "components/codex-gap"}
                       ai.miniforge/coerce {:local/root "components/coerce"}
@@ -293,6 +302,7 @@
                       ai.miniforge/phase {:local/root "components/phase"}
                       ai.miniforge/phase-software-factory {:local/root "components/phase-software-factory"}
                       ai.miniforge/phase-opsv {:local/root "components/phase-opsv"}
+                      ai.miniforge/kubernetes-target {:local/root "components/kubernetes-target"}
                       ai.miniforge/opsv-adapter-simulated {:local/root "components/opsv-adapter-simulated"}
                       ai.miniforge/gate {:local/root "components/gate"}
                       ai.miniforge/workflow {:local/root "components/workflow"}
@@ -418,6 +428,7 @@
                        "components/anomaly/test"
                        "components/progress-detector/test"
                        "components/clock/test"
+                       "components/subprocess/test"
                        "components/codex/test"
                        "components/codex/test-resources"
                        "components/codex-gap/test"
@@ -435,6 +446,7 @@
                        "components/phase-software-factory/test"
                        "components/phase-opsv/test"
                        "components/phase-opsv/test-resources"
+                       "components/kubernetes-target/test"
                        "components/opsv-adapter-simulated/test"
                        "components/gate/test"
                        "components/workflow/test"
@@ -491,6 +503,8 @@
                        "components/repo-index/test"
                        "components/governance-provenance/test"
                        "components/context-pack/test"
+                       "components/agent-environment/test"
+                       "components/agent-worker/test"
                        "components/deliberation-workspace/test"
                        "components/deliberation-harness/test"
                        "bases/deliberation-lab/test"
@@ -573,6 +587,7 @@
                       ai.miniforge/anomaly {:local/root "components/anomaly"}
                       ai.miniforge/progress-detector {:local/root "components/progress-detector"}
                       ai.miniforge/clock {:local/root "components/clock"}
+                      ai.miniforge/subprocess {:local/root "components/subprocess"}
                       ai.miniforge/codex {:local/root "components/codex"}
                       ai.miniforge/codex-gap {:local/root "components/codex-gap"}
                       ai.miniforge/coerce {:local/root "components/coerce"}
@@ -590,6 +605,7 @@
                       ai.miniforge/phase {:local/root "components/phase"}
                       ai.miniforge/phase-software-factory {:local/root "components/phase-software-factory"}
                       ai.miniforge/phase-opsv {:local/root "components/phase-opsv"}
+                      ai.miniforge/kubernetes-target {:local/root "components/kubernetes-target"}
                       ai.miniforge/opsv-adapter-simulated {:local/root "components/opsv-adapter-simulated"}
                       ai.miniforge/gate {:local/root "components/gate"}
                       ai.miniforge/workflow {:local/root "components/workflow"}

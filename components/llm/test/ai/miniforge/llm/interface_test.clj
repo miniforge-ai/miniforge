@@ -339,12 +339,27 @@
                   :error {:message "Rate limited"}})
           parsed (impl/parse-codex-stream-line line)]
       (is (true? (:done? parsed)))
-      (is (str/includes? (:delta parsed) "Rate limited"))))
+      (is (= (msg/t :cli-output.system/codex-stream-error {:message "Rate limited"}) (:delta parsed)))))
 
-  (testing "thread.started is ignored"
+  (testing "an error event without a message says so, whether the message is
+            missing or null"
+    (let [unknown (msg/t :cli-output.system/codex-stream-error
+                         {:message (msg/t :cli-output.system/codex-error-unknown)})]
+      (is (str/starts-with? unknown "\n") "the error starts on its own line")
+      (doseq [event [{:type "error"}
+                     {:type "error" :message nil}
+                     {:type "turn.failed" :error {}}
+                     {:type "turn.failed" :error {:message nil}}]]
+        (is (= unknown
+               (:delta (impl/parse-codex-stream-line (json/generate-string event))))
+            (pr-str event)))))
+
+  (testing "thread.started is a heartbeat naming the invocation"
     (let [line (json/generate-string {:type "thread.started" :thread_id "abc"})
           parsed (impl/parse-codex-stream-line line)]
-      (is (nil? parsed)))))
+      (is (true? (:heartbeat parsed)))
+      (is (= "abc" (:invocation-id parsed)))
+      (is (= "" (:delta parsed))))))
 
 (deftest ^{:stratum 0} parse-codex-stream-line-finish-reason-test
   (testing "turn.completed always sets :increment-turns true"
@@ -406,7 +421,18 @@
     (let [resp (impl/parse-cli-output "" 0)]
       (is (not (:success resp)))
       (is (= "empty_success_output" (get-in resp [:error :type])))
-      (is (some? (:anomaly resp))))))
+      (is (= (msg/t :cli-output.system/empty-success-output) (get-in resp [:error :message])))
+      (is (some? (:anomaly resp)))))
+
+  (testing "the CLI's limit notice as its whole output is a rate limit that quotes it"
+    (let [resp (impl/parse-cli-output "You've hit your limit · resets 7pm (America/Los_Angeles)" 0)]
+      (is (= "rate_limit" (get-in resp [:error :type])))
+      (is (= (msg/t :cli-output.system/claude-rate-limited
+                    {:notice "You've hit your limit · resets 7pm (America/Los_Angeles)"})
+             (get-in resp [:error :message])))
+      (is (str/includes? (get-in resp [:error :message])
+                         "You've hit your limit · resets 7pm (America/Los_Angeles)")
+          "the reset-time parse reads the notice inside the message"))))
 
 (deftest ^{:stratum 0} mock-client-response-includes-metrics-test
   (testing "mock client success response has :tokens and :usage"
@@ -894,6 +920,21 @@
                :done? true
                :content "fallback answer"}]
              @chunks)))))
+
+(deftest ^{:stratum 0} complete-stream-impl-empty-stream-fallback-opt-out-test
+  (testing "a request that opts out gets the empty stream back with no second call"
+    (let [buffered-calls (atom 0)
+          client (ai.miniforge.llm.protocols.records.llm-client/create-client
+                  {:backend :claude
+                   :stream-exec-fn (fn [_cmd _on-line _opts]
+                                     {:out "" :err "stream stderr" :exit 0})
+                   :exec-fn (fn
+                              ([_cmd] (swap! buffered-calls inc) {:out "fallback answer" :err "" :exit 0})
+                              ([_cmd _opts] (swap! buffered-calls inc) {:out "fallback answer" :err "" :exit 0}))})
+          resp (llm/complete-stream client {:prompt "test" :empty-stream-fallback? false}
+                                    (constantly nil))]
+      (is (zero? @buffered-calls))
+      (is (str/blank? (:content resp))))))
 
 (defn- ^{:stratum 0} recording-claude-client
   "A claude client whose exec-fn and stream-exec-fn record every command
@@ -1542,6 +1583,8 @@
                    :stats {:chunks 2 :unique-chunks 2 :files-written 0 :stagnant-cycles 0}}
           client (ai.miniforge.llm.protocols.records.llm-client/create-client
                   {:backend :claude
+                   ;; A priced model, so the cut run's cost can be estimated.
+                   :model "claude-sonnet-4-6"
                    :logger logger
                    :stream-exec-fn (fn [_cmd on-line _opts]
                                      (on-line (tool-line "mcp__context__context_read"))
@@ -1678,7 +1721,10 @@
                                    (assistant-frame "<synthetic>" "You've hit your limit · resets 7pm (America/Los_Angeles)")])]
       (is (< 300 (count long-answer)) "the answer alone is longer than any notice")
       (is (not (:success resp)))
-      (is (= "rate_limit" (get-in resp [:error :type])))))
+      (is (= "rate_limit" (get-in resp [:error :type])))
+      (is (= (msg/t :cli-output.system/claude-rate-limited
+                    {:notice "You've hit your limit · resets 7pm (America/Los_Angeles)"})
+             (get-in resp [:error :message])))))
   (testing "a model's short final answer that mentions a limit is not a limit"
     (let [resp (streamed-response [(assistant-frame "claude-opus-5" long-answer)
                                    (assistant-frame "claude-opus-5" "{\"summary\":\"Added handling for too many requests.\"}")])]

@@ -205,6 +205,7 @@
           ;; Create initial LLM client for workflow selection
           backend-override (:backend opts)
           selection-llm-client (context/create-llm-client nil spec quiet backend-override)
+          _ (context/refuse-network-access-when-governed! mode selection-llm-client)
           workflow-type (setup/select-workflow-type spec selection-llm-client quiet)
           workflow-version (get spec :spec/workflow-version "latest")
           workflow (setup/load-or-create-workflow load-workflow workflow-type workflow-version)
@@ -230,6 +231,7 @@
           control-state (es/create-control-state)
           ;; Create workflow-specific LLM client for execution
           llm-client (context/create-llm-client workflow spec quiet backend-override)
+          _ (context/refuse-network-access-when-governed! mode llm-client)
           callbacks (setup/create-phase-callbacks quiet)
           base-context (let [ctx (context/create-workflow-context
                              {:callbacks callbacks

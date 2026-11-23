@@ -6,6 +6,7 @@
             [ai.miniforge.phase-opsv.boundary.environment-comparison :as comparison]
             [ai.miniforge.phase-opsv.boundary.verification-receipt :as receipts]
             [ai.miniforge.phase-opsv.environment-comparison-failure :as failure]
+            [ai.miniforge.phase-opsv.environment-comparison-bindings :as bindings]
             [ai.miniforge.phase-opsv.messages :as msg]
             [ai.miniforge.phase-opsv.runtime-context :as context]
             [ai.miniforge.phase-opsv.verification-environment-schema :as schema]
@@ -14,10 +15,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} plan [workflow-id baseline declaration request]
-  (cond-> {:comparison/binding (assoc (select-keys request
-                                                  [:verification/id :candidate/hash :experiment-pack/hash])
-                                      :workflow/id workflow-id
-                                      :runtime/target (:runtime/target declaration))
+  (cond-> {:comparison/binding (bindings/comparison-binding workflow-id (:runtime/target declaration) request)
            :comparison/baseline baseline
            :comparison/changes (:comparison/changes declaration)}
     (contains? declaration :comparison/replica-contract)

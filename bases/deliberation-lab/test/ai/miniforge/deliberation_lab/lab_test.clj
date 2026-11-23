@@ -137,6 +137,16 @@
     (let [call (adapter/claude-call manifest)]
       (is (anomaly/anomaly? (call {:task {:id "t"}}))))))
 
+(deftest ^{:stratum 1} an-empty-stream-is-not-retried-unjournaled
+  (let [requests (atom [])]
+    (with-redefs [llm/complete-stream (fn [_ request _]
+                                        (swap! requests conj request)
+                                        {:success true :content ""})]
+      (let [call (adapter/claude-call manifest)]
+        (testing "the request turns off the client's buffered retry"
+          (is (anomaly/anomaly? (call {:task {:id "t"}})))
+          (is (= [false] (map :empty-stream-fallback? @requests))))))))
+
 (deftest ^{:stratum 1 :integration true} a-recorded-board-its-log-does-not-produce-fails-verification
   (with-output
     (fn [output]

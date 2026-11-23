@@ -47,8 +47,7 @@
 (def ^{:stratum 2} PodList
   [:and lists/PodList
    [:map
-    ["metadata" [:map ["resourceVersion" schema/NonBlankString]
-                  ["continue" {:optional true} :string]]]
+    ["metadata" lists/ListMetadata]
     ["items" [:vector [:map ["metadata" [:map ["namespace" names/NamespaceName]]]
                        ["spec" PodDependencies]]]]]])
 

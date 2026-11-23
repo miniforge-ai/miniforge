@@ -5,6 +5,7 @@
   "Correlate one prepared target per run and project confirmed PR outcomes."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.opsv.interface :as opsv]
+            [ai.miniforge.phase-opsv.effect-disposition :as disposition]
             [ai.miniforge.phase-opsv.messages :as msg]
             [ai.miniforge.phase-opsv.runtime-context :as context]
             [clojure.string :as str]
@@ -22,10 +23,7 @@
 (defn- ^{:stratum 0} nonblank? [value]
   (and (string? value) (not (str/blank? value))))
 
-(defn ^{:stratum 0} governed-effect [transaction]
-  {:evidence/effect-id (:effect/id transaction)
-   :evidence/grant-id (:effect/grant-id transaction)
-   :evidence/envelope-id (:effect/envelope-id transaction)})
+(def ^{:stratum 0} governed-effect disposition/reference)
 
 ;------------------------------------------------------------------------------ Layer 1
 

@@ -1,0 +1,68 @@
+{:spec/title "Workflow resume — a failed local workspace restore stops the run instead of continuing without an environment"
+
+ :spec/description
+ "When `bb miniforge resume` restarts a local-mode run, the CLI passes the
+  checkpoint's workspace (`:resume-workspace`, carrying `:bundle-path` and
+  `:branch`) to `acquire-execution-environment!` in
+  `ai.miniforge.workflow.runner-environment`. That function calls
+  `restore-local-workspace-checkpoint!` to fetch the persisted branch into
+  the host repository before the worktree is created.
+
+  Today a failed restore is swallowed twice:
+
+  1. `restore-local-workspace-checkpoint!` logs `:workflow/restore-failed`
+     and returns the failed result (or nil when the restore throws). Its
+     caller ignores the return value.
+  2. `acquire-execution-environment!` wraps the whole local acquisition in
+     `(catch Exception e ...)`, logs `:workflow/env-acquisition-failed`, and
+     returns nil. So even a thrown restore error becomes a nil environment.
+
+  The run then continues without its restored workspace: phases run against
+  the wrong tree or no worktree, and the resume ends `:running` or fails far
+  from the cause. This was the most likely cause (a) in
+  `workflow-resume-fsm-advance-investigation.spec.edn`.
+
+  Change: in local mode, when `:resume-workspace` carries a `:bundle-path`
+  and a `:branch` and the restore does not succeed, `acquire-execution-environment!`
+  throws an anomaly of type `:anomalies.workflow/workspace-restore-failed`
+  whose data names the bundle path, the branch, and the underlying error.
+  The throw must escape the local-mode catch in `acquire-execution-environment!`
+  (that catch keeps returning nil for other local acquisition failures, as
+  today). The anomaly message comes from the workflow message catalog
+  (`:env/restore-failed` already exists in
+  `components/workflow/resources/config/workflow/messages/en-US.edn`).
+
+  Behaviour that must not change: a local run with no `:resume-workspace`,
+  a resume whose restore succeeds, and governed mode (which restores inside
+  the capsule and already throws on acquisition failure)."
+
+ :spec/intent
+ {:type :bugfix
+  :scope ["components/workflow/src/ai/miniforge/workflow/runner_environment.clj"
+          "components/workflow/test/ai/miniforge/workflow/runner_environment_test.clj"]}
+
+ :spec/constraints
+ ["Local mode only — governed acquisition behaviour is unchanged"
+  "A local acquisition failure that is not a resume-restore failure still logs and returns nil, as today"
+  "The anomaly is thrown with the existing `response/throw-anomaly!` helper, like the governed-unavailable throw in the same function"
+  "acquire-execution-environment! stays the runner's documented escalation boundary: its docstring names the restore-failure throw beside the governed one, and no other function gains a throw"
+  "User-facing text comes from the workflow message catalog, not inline strings"
+  "Tests stub the restore with with-redefs; they do not create real git bundles or worktrees"]
+
+ :spec/acceptance-criteria
+ ["acquire-execution-environment! in local mode throws :anomalies.workflow/workspace-restore-failed when restore-workspace! returns a failed result for a supplied :resume-workspace"
+  "acquire-execution-environment! in local mode throws :anomalies.workflow/workspace-restore-failed when restore-workspace! throws for a supplied :resume-workspace"
+  "The thrown anomaly's data carries the :bundle-path, the :branch, and the underlying error message"
+  "acquire-execution-environment! in local mode with a successful restore returns the environment record as before"
+  "acquire-execution-environment! in local mode with no :resume-workspace is unchanged: an executor failure still returns nil"
+  "The docstring of acquire-execution-environment! lists the workspace-restore throw among its failure results"]
+
+ :spec/priority
+ {:tier :blocker
+  :axes #{:correctness :token-conservation :dogfood-enabler}
+  :theme :dogfood-resilience
+  :rationale "A resume that silently loses its workspace re-spends the whole run's tokens and reports the failure far from its cause."
+  :blocks ["workflow-resume-fsm-advance-investigation.spec.edn"]
+  :blocked-by []}
+
+ :spec/workflow-type :canonical-sdlc}

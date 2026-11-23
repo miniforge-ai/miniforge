@@ -31,6 +31,9 @@
 (defn ^{:stratum 0} invalid-response []
   (anomaly/anomaly :invalid-input (msg/ts :measurement/invalid-response) {}))
 
+(defn ^{:stratum 0} within-cap? [maximum request]
+  (<= (:measurement/max-samples request) maximum))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} measurement [request series samples]

@@ -52,11 +52,12 @@
    real spend). Applied on BOTH success and failure paths — tokens were
    spent either way."
   [ctx dag-result]
-  (let [{:keys [tokens cost-usd duration-ms]} (:metrics dag-result)]
-    (-> ctx
-        (update-in [:execution/metrics :tokens]      (fnil + 0)   (or tokens 0))
-        (update-in [:execution/metrics :cost-usd]    (fnil + 0.0) (or cost-usd 0.0))
-        (update-in [:execution/metrics :duration-ms] (fnil + 0)   (or duration-ms 0)))))
+  (let [{:keys [tokens cost-usd duration-ms cost-unavailable?]} (:metrics dag-result)]
+    (cond-> (-> ctx
+                (update-in [:execution/metrics :tokens]      (fnil + 0)   (or tokens 0))
+                (update-in [:execution/metrics :cost-usd]    (fnil + 0.0) (or cost-usd 0.0))
+                (update-in [:execution/metrics :duration-ms] (fnil + 0)   (or duration-ms 0)))
+      cost-unavailable? (assoc-in [:execution/metrics :cost-unavailable?] true))))
 
 (defn- ^{:stratum 0} dag-failure-error
   "The :execution/errors entry for a failed DAG run. An operator cancel

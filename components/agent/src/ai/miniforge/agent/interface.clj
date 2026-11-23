@@ -21,7 +21,7 @@
    while this namespace remains the Polylith entrypoint."
   (:require
    [ai.miniforge.agent.file-artifacts :as file-artifacts]
-   [ai.miniforge.agent.implementer :as implementer]
+   [ai.miniforge.agent.implementer.prompt :as impl-prompt]
    [ai.miniforge.agent.interface.classification :as classification]
    [ai.miniforge.agent.interface.llm :as llm]
    [ai.miniforge.agent.interface.memory :as memory]
@@ -371,7 +371,7 @@
   "Render an implementer task map to the user-prompt text the LLM sees —
    the seam evidence sections (gate denial, verify failures, review
    feedback) must survive through. Arg: task map. Returns a string."
-  implementer/task->text)
+  impl-prompt/task->text)
 
 (def ^{:stratum 0} create-tester
   "Create a Tester agent. Arg (optional): options map. Returns a

@@ -9,12 +9,15 @@
         ai.miniforge/evidence-bundle {:local/root "../evidence-bundle"}
         ai.miniforge/event-stream {:local/root "../event-stream"}
         ai.miniforge/gate {:local/root "../gate"}
+        ai.miniforge/kubernetes-target {:local/root "../kubernetes-target"}
         ai.miniforge/messages {:local/root "../messages"}
         ai.miniforge/opsv {:local/root "../opsv"}
         ai.miniforge/opsv-actuation {:local/root "../opsv-actuation"}
         ai.miniforge/opsv-provider-github {:local/root "../opsv-provider-github"}
         ai.miniforge/phase {:local/root "../phase"}
+        ai.miniforge/redaction {:local/root "../redaction"}
         ai.miniforge/resource-cleanup {:local/root "../resource-cleanup"}
+        ai.miniforge/response {:local/root "../response"}
         ai.miniforge/schema {:local/root "../schema"}
         cheshire/cheshire {:mvn/version "5.13.0"}
         metosin/malli {:mvn/version "0.16.4"}
@@ -22,5 +25,4 @@
         ;; Later releases generate an interface unavailable in native Babashka.
         org.clojure/data.json {:mvn/version "2.4.0"}
         slingshot/slingshot {:mvn/version "0.12.2"}}
- :aliases {:test {:extra-paths ["test" "test-resources"]
-                  :extra-deps {ai.miniforge/response {:local/root "../response"}}}}}
+ :aliases {:test {:extra-paths ["test" "test-resources"]}}}

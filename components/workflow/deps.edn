@@ -10,6 +10,7 @@
         ai.miniforge/fsm {:local/root "../fsm"}            ; State machines
         ai.miniforge/agent-runtime {:local/root "../agent-runtime"}
         ai.miniforge/agent {:local/root "../agent"}
+        ai.miniforge/llm {:local/root "../llm"}
         ai.miniforge/task {:local/root "../task"}
         ai.miniforge/loop {:local/root "../loop"}
         ai.miniforge/artifact {:local/root "../artifact"}

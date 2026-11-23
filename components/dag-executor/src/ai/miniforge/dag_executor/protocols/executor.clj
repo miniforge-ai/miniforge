@@ -55,7 +55,10 @@
         :branch string           ; Branch to checkout
         :base-sha string         ; Base commit SHA
         :workdir string          ; Working directory inside environment
-        :env map                 ; Environment variables
+        :env map                 ; Environment variables (an :untrusted capsule keeps
+                                 ;   only allowlisted names, the agent backend's
+                                 ;   credentials and :env-passthrough)
+        :env-passthrough coll    ; :env names an :untrusted capsule keeps
         :resources map           ; Resource limits {:cpu :memory}
         :timeout-ms long}        ; Acquisition timeout
 

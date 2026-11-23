@@ -117,6 +117,14 @@
                                 :else   ""))))
               (str/join "\n")))))
 
+(defn- ^{:stratum 0} format-existing-files-shed
+  "Shed-path file list: `:keep-inline?` bodies (the codex pin) stay inlined."
+  [files]
+  (let [{kept true shed false} (group-by #(boolean (:keep-inline? %)) files)]
+    (->> [(format-existing-files kept) (format-existing-files-manifest shed)]
+         (remove nil?)
+         (str/join "\n\n"))))
+
 (defn- ^{:stratum 0} emit-prompt-size!
   "Emit an :agent/prompt-size workflow event recording the planner's
    pre-flight budget (N12 §3) so estimate-vs-window is visible/queryable —
@@ -607,12 +615,28 @@
 
 ;------------------------------------------------------------------------------ Layer 3
 
+(defn- ^{:stratum 3} assemble-with-shed
+  "One budget pass: `shed-fn` renders the shed-path file list and
+   `shed-count` is how many bodies it drops."
+  [spec-text existing-files effective-system model reserve shed-fn shed-count]
+  (context-budget/assemble-within-budget
+   {:effective-system    effective-system
+    :model               model
+    :reserve             reserve
+    :max-inline-fraction (get @planner-prompt-data
+                              :prompt/max-inline-window-fraction 1.0)
+    :build-full          (partial build-user-prompt spec-text existing-files)
+    :build-shed          (partial build-user-prompt spec-text existing-files shed-fn)
+    :shed-count          shed-count}))
+
 (defn- ^{:stratum 3} assemble-within-budget
   "Assemble the planner user-prompt within the model's context window
    (N12 §5). If the prompt reaches the configured inline cap or overflows
    the window, shed the eagerly-inlined file bodies down to a manifest
-   (paths only) — the bodies stay reachable via the context MCP cache
-   (seeded separately in invoke-planner-session), so the agent keeps a query
+   (paths only), except `:keep-inline?` bodies (the codex pin), which drop
+   only if they alone still overflow the window. Shed bodies stay reachable
+   via the context MCP cache (seeded separately in invoke-planner-session),
+   so the agent keeps a query
    surface, and the section's already-satisfied evidence-bundle instructions
    are preserved. Returns
    {:user-prompt :shed? :over-after-shed? :window :reserve :effective-window
@@ -635,16 +659,15 @@
    before window fit, so a barely-fitting prompt can't stall a turn past
    the phase timeout."
   [spec-text existing-files effective-system model reserve]
-  (context-budget/assemble-within-budget
-   {:effective-system effective-system
-    :model            model
-    :reserve          reserve
-    :max-inline-fraction (get @planner-prompt-data
-                              :prompt/max-inline-window-fraction 1.0)
-    :build-full       #(build-user-prompt spec-text existing-files)
-    :build-shed       #(build-user-prompt spec-text existing-files
-                                          format-existing-files-manifest)
-    :shed-count       (count existing-files)}))
+  (let [assemble (partial assemble-with-shed
+                         spec-text existing-files effective-system model reserve)
+        total    (count existing-files)
+        kept     (count (filter :keep-inline? existing-files))
+        r        (assemble format-existing-files-shed (- total kept))]
+    ;; A pin too big on its own must not fail a plan the plain manifest fits.
+    (if (and (pos? kept) (:over-after-shed? r))
+      (assemble format-existing-files-manifest total)
+      (assoc r :file-count total))))
 
 ;------------------------------------------------------------------------------ Layer 4
 

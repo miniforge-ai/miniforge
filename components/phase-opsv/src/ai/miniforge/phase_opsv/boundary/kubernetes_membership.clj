@@ -11,13 +11,18 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} admit [observed]
+(defn ^{:stratum 0} mismatch []
+  (anomaly/anomaly :conflict (msg/ts :kubernetes/membership-mismatch) {}))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} admit [observed]
   (cond
     (not (m/validate schema/Observation observed))
     (anomaly/anomaly :invalid-input (msg/ts :kubernetes/invalid-membership) {})
     (not (membership/consistent?
            (update observed :kubernetes/pods (partial lists/typed-list "Pod"))))
-    (anomaly/anomaly :conflict (msg/ts :kubernetes/membership-mismatch) {})
+    (mismatch)
     :else observed))
 
 (comment ::captured-identity-checks-not-live-acquisition-or-effect-admission)

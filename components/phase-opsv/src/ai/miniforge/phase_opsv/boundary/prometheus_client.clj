@@ -8,6 +8,7 @@
             [ai.miniforge.phase-opsv.boundary.http-transport :as http]
             [ai.miniforge.phase-opsv.boundary.prometheus-response :as response]
             [ai.miniforge.phase-opsv.boundary.prometheus-settings :as settings]
+            [ai.miniforge.phase-opsv.measurement-window :as window]
             [ai.miniforge.phase-opsv.messages :as msg]
             [ai.miniforge.resource-cleanup.interface :as cleanup]
             [slingshot.slingshot :refer [try+]]))
@@ -26,7 +27,7 @@
     (cond
       (anomaly/anomaly? options) options
       failure failure
-      (> (:measurement/max-samples request) (:measurement/max-samples options)) (measurement/invalid-request)
+      (not (window/within-cap? (:measurement/max-samples options) request)) (measurement/invalid-request)
       :else (response/acquire! options request))))
 
 ;------------------------------------------------------------------------------ Layer 1

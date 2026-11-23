@@ -2,11 +2,11 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.environment-fingerprint-schema
-  (:require [clojure.string :as str]))
+  (:require [ai.miniforge.kubernetes-target.interface :as target]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} Text [:and :string [:fn (complement str/blank?)]])
+(def ^{:stratum 0} Text target/IdentityText)
 
 ;------------------------------------------------------------------------------ Layer 1
 

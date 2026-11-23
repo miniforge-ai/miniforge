@@ -18,7 +18,10 @@
 (ns ai.miniforge.execution-grant.issuance.schema
   "Closed runtime inputs for irreversible-effect grant issuance."
   (:require
-   [clojure.string :as str]))
+   [ai.miniforge.execution-grant.issuance.selection :as selection]
+   [ai.miniforge.execution-grant.opsv-scope-schema :as opsv]
+   [clojure.string :as str]
+   [malli.util :as mu]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -30,14 +33,21 @@
   "A full SHA-1 or SHA-256 commit id; abbreviated ids can match many commits."
   [:re #"\A(?:[0-9a-f]{40}|[0-9a-f]{64})\z"])
 
+(def ^{:stratum 0 :private true} OpsvWorkflowStatus
+  "Stopped trials may need compensation; unstarted and completed runs cannot issue."
+  [:enum :running :paused :blocked :failed :cancelled])
+
+(defn- ^{:stratum 0} running-or-recovery? [request]
+  (or (= :running (:workflow-run/status request))
+      (contains? opsv/recovery-operations (get-in request [:opsv/experiment :opsv/operation]))))
+
 (defn- ^{:stratum 0} request-schema
-  "Build one closed request without duplicating authority or basis fields."
-  [effect-class preflight-type target-fields]
+  [class-schema preflight-type target-fields]
   (into [:map {:closed true}
          [:workflow-run/id :uuid]
          [:workflow-run/status [:= :running]]
          [:effect/id :uuid]
-         [:effect/class [:= effect-class]]
+         [:effect/class class-schema]
          [:effect/preflight
           [:map {:closed true}
            [:preflight/type [:= preflight-type]]
@@ -49,7 +59,7 @@
 (def ^{:stratum 1} MergeRequest
   "Closed request for one exact pull-request merge at one head commit."
   (request-schema
-   :effect/merge
+   [:= :effect/merge]
    :preflight/merge-readiness
    [[:pr/repo NonBlankString]
     [:pr/number pos-int?]
@@ -58,7 +68,7 @@
 (def ^{:stratum 1} PrCreateRequest
   "Closed request binding one PR's target, revision and serialized payload."
   (request-schema
-   :effect/pr-create
+   [:= :effect/pr-create]
    :preflight/pr-create-readiness
    [[:pr/repo NonBlankString]
     [:pr/base NonBlankString]
@@ -72,7 +82,7 @@
    The remote is its push URL, not a name a later config change could
    repoint."
   (request-schema
-   :effect/push
+   [:= :effect/push]
    :preflight/push-readiness
    [[:git/remote-url NonBlankString]
     [:git/branch NonBlankString]
@@ -84,7 +94,7 @@
    comment, a reply, a resolved thread, a review, an approval or a change
    request, bound to the hash of exactly what is written."
   (request-schema
-   :effect/comment
+   [:= :effect/comment]
    :preflight/comment-readiness
    [[:pr/repo NonBlankString]
     [:pr/number pos-int?]
@@ -95,7 +105,7 @@
 (def ^{:stratum 1} ProvisionRequest
   "Closed request for one `pulumi up` of one saved plan on one stack."
   (request-schema
-   :effect/provision
+   [:= :effect/provision]
    :preflight/provision-plan
    [[:pulumi/stack NonBlankString]
     [:pulumi/stack-dir NonBlankString]
@@ -107,7 +117,7 @@
    `:context` may be nil only because the issuer replaces it with the
    required configured default before constructing grant scope."
   (request-schema
-   :effect/deploy
+   [:= :effect/deploy]
    :preflight/deploy-policy-and-dry-run
    [[:kustomize-dir NonBlankString]
     [:context [:maybe NonBlankString]]
@@ -115,12 +125,22 @@
     [:namespace NonBlankString]
     [:deployment-name NonBlankString]]))
 
+(def ^{:stratum 1} OpsvExperimentRequest
+  [:and
+   (mu/assoc (request-schema
+              [:enum :effect/deploy :effect/load-test]
+              :preflight/opsv-staging-experiment
+              [[:opsv/experiment opsv/Binding]])
+             :workflow-run/status OpsvWorkflowStatus)
+   [:fn running-or-recovery?]])
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (def ^{:stratum 2} Arguments
   "Canonical effect request plus the runtime-owned issuance instant."
   [:tuple
-   [:multi {:dispatch :effect/class}
+   [:multi {:dispatch selection/profile-key}
+    [:opsv/experiment OpsvExperimentRequest]
     [:effect/merge MergeRequest]
     [:effect/pr-create PrCreateRequest]
     [:effect/push PushRequest]
@@ -128,3 +148,5 @@
     [:effect/provision ProvisionRequest]
     [:effect/deploy DeployRequest]]
    inst?])
+
+(comment ::closed-runtime-inputs-select-explicit-policy-profiles)

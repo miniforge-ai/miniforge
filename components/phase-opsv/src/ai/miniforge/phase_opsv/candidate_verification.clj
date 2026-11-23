@@ -4,6 +4,7 @@
 (ns ai.miniforge.phase-opsv.candidate-verification
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.phase-opsv.boundary.verification-adapter :as adapter]
+            [ai.miniforge.phase-opsv.boundary.retained-preparation :as retained]
             [ai.miniforge.phase-opsv.boundary.verification-receipt :as receipts]
             [ai.miniforge.phase-opsv.flow :as flow]
             [ai.miniforge.phase-opsv.messages :as msg]
@@ -12,7 +13,8 @@
             [ai.miniforge.phase-opsv.verification-drift :as drift]
             [ai.miniforge.phase-opsv.verification-environment :as environment]
             [ai.miniforge.phase-opsv.verification-environment-artifacts :as artifacts]
-            [ai.miniforge.phase-opsv.verification-environment-schema :as schema]))
+            [ai.miniforge.phase-opsv.verification-environment-schema :as schema]
+            [ai.miniforge.redaction.interface :as redaction]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -37,10 +39,12 @@
          (get-in pin [:comparison/contract :comparison/binding :runtime/target])))
 
 (defn- ^{:stratum 0} measure [ctx state]
-  (let [request (assoc (:request state) :comparison/artifact-ref
-                       (get-in state [:output :opsv/phase-artifact-ids :verification-environment]))]
-    (receipts/admit schema/Receipt :verification/invalid request
-                    (adapter/invoke port/run-verification (context/adapter ctx) request))))
+  (let [id (get-in state [:output :opsv/phase-artifact-ids :verification-environment])
+        request (assoc (:request state) :comparison/artifact-ref id)]
+    (anomaly/let-ok [_ready (artifacts/ready ctx)
+                    _retained (retained/read! ctx request id)]
+      (receipts/admit schema/Receipt :verification/invalid request
+                      (adapter/invoke port/run-verification (context/adapter ctx) request)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -71,8 +75,9 @@
       (cond-> retained
         (get-in matched [:anomaly/data :opsv/environment-drift])
         (assoc-in [:anomaly/data :opsv/environment-drift]
-                  (get-in matched [:anomaly/data :opsv/environment-drift])))
-      (with-output (if (anomaly/anomaly? matched) matched measured) retained))))
+                  (redaction/redact (get-in matched [:anomaly/data :opsv/environment-drift]))))
+      ;; Keep the successful receipt in memory until original criteria are evaluated.
+      (with-output (if (anomaly/anomaly? matched) (redaction/redact matched) measured) retained))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

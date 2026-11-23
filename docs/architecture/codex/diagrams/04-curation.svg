@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1120" role="img" aria-labelledby="title desc" font-family="Helvetica, Arial, sans-serif">
+<title id="title">Thesium Codex — 4. Curation: how entries are written</title><desc id="desc">Everything dotted lives in the vault and the Codex specs, not in this repository. Only the read boundary and the two telemetry bridges are code here.</desc>
+<defs><marker id="a-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3a76b8"/></marker><marker id="a-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#b85450"/></marker><marker id="a-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4a9a4a"/></marker><marker id="a-grey" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#888888"/></marker></defs>
+<rect width="1920" height="1120" fill="white"/>
+<rect width="1920" height="65" fill="#1e5f96"/>
+<text x="24" y="30" font-size="23" fill="white" font-weight="bold">Thesium Codex — 4. Curation: how entries are written</text>
+<text x="24" y="52" font-size="15" fill="#cfe2f3">Everything dotted lives in the vault and the Codex specs, not in this repository. Only the read boundary and the two telemetry bridges are code here.</text>
+<rect x="24" y="84" width="1872" height="120" rx="8" fill="#fcfcfa" stroke="#b8b8b0" stroke-dasharray="2 5"/>
+<text x="42" y="113" font-size="18" fill="#1e5f96" font-weight="bold">SOURCES FOR THIS PANEL</text>
+<text x="48" y="150" font-size="16" fill="#333">Spec sections cited by miniforge code (§4.4 retirement, §5.4 retrodiction, §5.6 promotion, §7.7 telemetry, HARVEST 2026-08 §7) and earlier session records.</text>
+<text x="48" y="178" font-size="16" fill="#b85450">Not verified against the vault. A local agent with the vault should replace this panel with the real pipeline.</text>
+<rect x="24" y="222" width="1352" height="802" rx="8" fill="#fcfcfa" stroke="#b8b8b0" stroke-dasharray="2 5"/>
+<text x="42" y="251" font-size="18" fill="#1e5f96" font-weight="bold">IN THE VAULT</text>
+<rect x="48" y="278" width="400" height="172" rx="8" fill="#f5f5f5" stroke="#666666" stroke-width="1.5" stroke-dasharray="2 5"/>
+<text x="64" y="306" font-size="19" fill="#333" font-weight="bold">Harvest</text>
+<text x="64" y="332" font-size="16" fill="#333">Mine review history, such as Copilot comments,</text>
+<text x="64" y="355" font-size="16" fill="#333">into candidate questions, not facts.</text>
+<rect x="48" y="470" width="400" height="172" rx="8" fill="#f5f5f5" stroke="#666666" stroke-width="1.5" stroke-dasharray="2 5"/>
+<text x="64" y="498" font-size="19" fill="#333" font-weight="bold">Borrowed scars</text>
+<text x="64" y="524" font-size="16" fill="#333">Receipts from other teams&#x27; postmortems, marked</text>
+<text x="64" y="547" font-size="16" fill="#333">origin: borrowed, so the codex is not limited to</text>
+<text x="64" y="570" font-size="16" fill="#333">failures it saw itself.</text>
+<rect x="472" y="278" width="420" height="364" rx="8" fill="#f8cecc" stroke="#b85450" stroke-width="1.5" stroke-dasharray="2 5"/>
+<text x="488" y="306" font-size="19" fill="#333" font-weight="bold">Admission test</text>
+<text x="488" y="332" font-size="16" fill="#333">A candidate is admitted only if it changes where</text>
+<text x="488" y="355" font-size="16" fill="#333">something lands. Sound-but-inert entries are</text>
+<text x="488" y="378" font-size="16" fill="#333">refused. Refused clusters stay on record as research</text>
+<text x="488" y="401" font-size="16" fill="#333">agenda, and the refusal rate is a health signal.</text>
+<rect x="916" y="278" width="436" height="172" rx="8" fill="#f5f5f5" stroke="#666666" stroke-width="1.5" stroke-dasharray="2 5"/>
+<text x="932" y="306" font-size="19" fill="#333" font-weight="bold">Horizon tagging and boards</text>
+<text x="932" y="332" font-size="16" fill="#333">Each problem is tagged with a horizon; pegs are grouped</text>
+<text x="932" y="355" font-size="16" fill="#333">into a board per situation.</text>
+<rect x="916" y="470" width="436" height="172" rx="8" fill="#f5f5f5" stroke="#666666" stroke-width="1.5" stroke-dasharray="2 5"/>
+<text x="932" y="498" font-size="19" fill="#333" font-weight="bold">Semantic dedup</text>
+<text x="932" y="524" font-size="16" fill="#333">Planned: merge near-duplicate entries, so one worry is</text>
+<text x="932" y="547" font-size="16" fill="#333">not admitted twice in different words.</text>
+<path d="M448,364 L472,364" fill="none" stroke="#888888" stroke-width="2" stroke-dasharray="2 5" marker-end="url(#a-grey)"/>
+<path d="M448,556 L472,556" fill="none" stroke="#888888" stroke-width="2" stroke-dasharray="2 5" marker-end="url(#a-grey)"/>
+<path d="M892,364 L916,364" fill="none" stroke="#888888" stroke-width="2" stroke-dasharray="2 5" marker-end="url(#a-grey)"/>
+<rect x="48" y="700" width="640" height="300" rx="8" fill="#f8cecc" stroke="#b85450" stroke-width="1.5" stroke-dasharray="2 5"/>
+<text x="64" y="728" font-size="19" fill="#333" font-weight="bold">Promotion (§5.6)</text>
+<text x="64" y="754" font-size="16" fill="#333">A provisional entry is promoted only with evidence that it would have changed</text>
+<text x="64" y="777" font-size="16" fill="#333">where real misses landed. Retrodiction is that evidence.</text>
+<rect x="712" y="700" width="640" height="300" rx="8" fill="#f5f5f5" stroke="#666666" stroke-width="1.5" stroke-dasharray="2 5"/>
+<text x="728" y="728" font-size="19" fill="#333" font-weight="bold">Retirement (§4.4)</text>
+<text x="728" y="754" font-size="16" fill="#333">A peg that stopped discriminating is retired, and a board whose branches collapsed</text>
+<text x="728" y="777" font-size="16" fill="#333">is merged. Peg telemetry supplies both signals.</text>
+<rect x="1400" y="222" width="496" height="802" rx="8" fill="#fcfcfa" stroke="#b8b8b0"/>
+<text x="1418" y="251" font-size="18" fill="#1e5f96" font-weight="bold">IN THIS REPO</text>
+<rect x="1424" y="278" width="448" height="230" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.5"/>
+<text x="1440" y="306" font-size="19" fill="#333" font-weight="bold">The read boundary</text>
+<text x="1440" y="332" font-size="16" fill="#333">Curation emits generated markdown nodes. Miniforge</text>
+<text x="1440" y="355" font-size="16" fill="#333">parses and loads them (codex/node.clj) and never writes</text>
+<text x="1440" y="378" font-size="16" fill="#333">back: data-as-source, per T1 §8.1.</text>
+<rect x="1424" y="532" width="448" height="220" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+<text x="1440" y="560" font-size="19" fill="#333" font-weight="bold">Retrodiction bridge</text>
+<text x="1440" y="586" font-size="16" fill="#333">bb codex-gap-retrodict re-scores old misses against a</text>
+<text x="1440" y="609" font-size="16" fill="#333">candidate codex: the promotion evidence.</text>
+<rect x="1424" y="776" width="448" height="224" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+<text x="1440" y="804" font-size="19" fill="#333" font-weight="bold">Telemetry bridge</text>
+<text x="1440" y="830" font-size="16" fill="#333">bb codex-gap-peg-telemetry: answer entropy and collapsed</text>
+<text x="1440" y="853" font-size="16" fill="#333">branches, the retirement signals.</text>
+<path d="M1352,364 L1424,364" fill="none" stroke="#888888" stroke-width="2" stroke-dasharray="2 5" marker-end="url(#a-grey)"/>
+<text x="1362" y="352" font-size="14" fill="#888888" font-style="italic">nodes</text>
+<path d="M1424,700 L1388,700 L1388,1012 L368,1012 L368,1002" fill="none" stroke="#888888" stroke-width="2" stroke-dasharray="2 5" marker-end="url(#a-grey)"/>
+<path d="M1424,888 L1354,888" fill="none" stroke="#888888" stroke-width="2" stroke-dasharray="2 5" marker-end="url(#a-grey)"/>
+<rect x="24" y="1040" width="1872" height="60" rx="6" fill="#f7f9fb" stroke="#d2dbe4"/>
+<rect x="44" y="1058" width="44" height="24" rx="4" fill="white" stroke="#555" stroke-width="1.5"/>
+<text x="98" y="1076" font-size="15" fill="#333">built: code in this repo</text>
+<rect x="374" y="1058" width="44" height="24" rx="4" fill="white" stroke="#555" stroke-width="1.5" stroke-dasharray="10 6"/>
+<text x="428" y="1076" font-size="15" fill="#333">partial</text>
+<rect x="704" y="1058" width="44" height="24" rx="4" fill="white" stroke="#555" stroke-width="1.5" stroke-dasharray="2 5"/>
+<text x="758" y="1076" font-size="15" fill="#333">spec or vault only: not in this repo</text>
+<rect x="1034" y="1058" width="24" height="24" rx="4" fill="#d5e8d4" stroke="#82b366" stroke-width="1.5"/>
+<text x="1066" y="1076" font-size="15" fill="#333">data at rest</text>
+<rect x="1204" y="1058" width="24" height="24" rx="4" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+<text x="1236" y="1076" font-size="15" fill="#333">runtime step</text>
+<rect x="1374" y="1058" width="24" height="24" rx="4" fill="#fff2cc" stroke="#d6b656" stroke-width="1.5"/>
+<text x="1406" y="1076" font-size="15" fill="#333">agent-facing</text>
+<rect x="1544" y="1058" width="24" height="24" rx="4" fill="#f8cecc" stroke="#b85450" stroke-width="1.5"/>
+<text x="1576" y="1076" font-size="15" fill="#333">fail-closed check</text>
+<rect x="1714" y="1058" width="24" height="24" rx="4" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+<text x="1746" y="1076" font-size="15" fill="#333">record / read-out</text>
+</svg>

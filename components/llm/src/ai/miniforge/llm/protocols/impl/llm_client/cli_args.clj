@@ -81,8 +81,15 @@
   "text")
 
 (defn ^{:stratum 0} codex-args
-  "Build CLI arguments for the Codex backend."
-  [{:keys [prompt model system prompt-via]
+  "Build CLI arguments for the Codex backend.
+
+   The sandbox stays `workspace-write` and approvals stay off. A request
+   with `:network-access? true`, which only a client created with it sets
+   (see `completion/with-client-config`), also gets
+   `-c sandbox_workspace_write.network_access=true`: commands the agent
+   runs inside that sandbox may then reach the network. Without it
+   Codex's default applies, and those commands have no network."
+  [{:keys [prompt model system prompt-via network-access?]
     :or {prompt-via :stdin}}]
   (let [stdin? (= prompt-via :stdin)]
     (cond-> ["exec"
@@ -91,6 +98,7 @@
              "--sandbox=workspace-write"
              "--skip-git-repo-check"]
       true   (into ["-c" "approval_policy=never"])
+      (true? network-access?) (into ["-c" "sandbox_workspace_write.network_access=true"])
       model  (into ["-m" model])
       system (into ["-c" (str "system_prompt=" (json/generate-string system))])
       stdin? (conj "-")

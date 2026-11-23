@@ -47,6 +47,11 @@
 
  ;; ── Events with no browser handler ──────────────────────────────────────
 
+ {:constructor "workflow-cancelled"
+  :event-type  :workflow/cancelled
+  :json-string "workflow/cancelled"
+  :browser?    false}
+
  {:constructor "checkpoint-written"
   :event-type :workflow/checkpoint-written
   :json-string "workflow/checkpoint-written"

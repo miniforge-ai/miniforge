@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1120" role="img" aria-labelledby="title desc" font-family="Helvetica, Arial, sans-serif">
+<title id="title">Thesium Codex — 1. What the codex knows</title><desc id="desc">Situations route through questions to problems, and every problem is anchored to a receipt of a failure that happened.</desc>
+<defs><marker id="a-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3a76b8"/></marker><marker id="a-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#b85450"/></marker><marker id="a-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4a9a4a"/></marker><marker id="a-grey" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#888888"/></marker></defs>
+<rect width="1920" height="1120" fill="white"/>
+<rect width="1920" height="65" fill="#1e5f96"/>
+<text x="24" y="30" font-size="23" fill="white" font-weight="bold">Thesium Codex — 1. What the codex knows</text>
+<text x="24" y="52" font-size="15" fill="#cfe2f3">Situations route through questions to problems, and every problem is anchored to a receipt of a failure that happened.</text>
+<rect x="24" y="84" width="520" height="940" rx="8" fill="#fcfcfa" stroke="#b8b8b0"/>
+<text x="42" y="113" font-size="18" fill="#1e5f96" font-weight="bold">THE VAULT · READ-ONLY INPUT</text>
+<rect x="48" y="140" width="472" height="230" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.5"/>
+<text x="64" y="168" font-size="19" fill="#333" font-weight="bold">Markdown nodes</text>
+<text x="64" y="194" font-size="16" fill="#333">A directory of .md files with YAML-subset frontmatter, one</text>
+<text x="64" y="217" font-size="16" fill="#333">node per file, written in Obsidian style. Miniforge reads it</text>
+<text x="64" y="240" font-size="16" fill="#333">from MINIFORGE_CODEX_PATH and never writes to it</text>
+<text x="64" y="263" font-size="16" fill="#333">(codex/node.clj).</text>
+<rect x="48" y="396" width="472" height="196" rx="8" fill="#f5f5f5" stroke="#666666" stroke-width="1.5"/>
+<text x="64" y="424" font-size="19" fill="#333" font-weight="bold">Unset means off</text>
+<text x="64" y="450" font-size="16" fill="#333">With no MINIFORGE_CODEX_PATH, phases record :unconfigured,</text>
+<text x="64" y="473" font-size="16" fill="#333">the gate passes clean and the gap ledger writes nothing. The</text>
+<text x="64" y="496" font-size="16" fill="#333">capability is simply off.</text>
+<rect x="48" y="618" width="472" height="220" rx="8" fill="#f8cecc" stroke="#b85450" stroke-width="1.5"/>
+<text x="64" y="646" font-size="19" fill="#333" font-weight="bold">Unreadable is an answer</text>
+<text x="64" y="672" font-size="16" fill="#333">An unreadable codex, an unmatched situation and an ambiguous</text>
+<text x="64" y="695" font-size="16" fill="#333">one each come back as :codex/anomaly, never as an empty</text>
+<text x="64" y="718" font-size="16" fill="#333">success. An empty answer that looks clean is the failure the</text>
+<text x="64" y="741" font-size="16" fill="#333">codex exists to prevent.</text>
+<rect x="48" y="864" width="472" height="136" rx="8" fill="#f5f5f5" stroke="#666666" stroke-width="1.5"/>
+<text x="64" y="892" font-size="19" fill="#333" font-weight="bold">Node types</text>
+<text x="64" y="918" font-size="16" fill="#333">situation · discriminator · problem · resolution · scar</text>
+<rect x="568" y="84" width="760" height="940" rx="8" fill="#fcfcfa" stroke="#b8b8b0"/>
+<text x="586" y="113" font-size="18" fill="#1e5f96" font-weight="bold">THE GRAPH · routes-to and exposes edges</text>
+<rect x="592" y="140" width="712" height="150" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+<text x="608" y="168" font-size="19" fill="#333" font-weight="bold">Situation</text>
+<text x="608" y="194" font-size="16" fill="#333">Where you stand, e.g. about-to-commit-consequential. A phase enters by id, or an agent names</text>
+<text x="608" y="217" font-size="16" fill="#333">one.</text>
+<path d="M948,290 L948,330" fill="none" stroke="#3a76b8" stroke-width="2" marker-end="url(#a-blue)"/>
+<text x="960" y="316" font-size="14" fill="#3a76b8" font-style="italic">routes-to</text>
+<rect x="592" y="334" width="712" height="176" rx="8" fill="#fff2cc" stroke="#d6b656" stroke-width="1.5"/>
+<text x="608" y="362" font-size="19" fill="#333" font-weight="bold">Discriminator, a peg on a board</text>
+<text x="608" y="388" font-size="16" fill="#333">A question with a fixed answer vocabulary, e.g. is-there-progress-at-all: &quot;slow but moving&quot;</text>
+<text x="608" y="411" font-size="16" fill="#333">or &quot;no progress&quot;. Each answer routes on to another peg or to a landing.</text>
+<path d="M948,510 L948,550" fill="none" stroke="#3a76b8" stroke-width="2" marker-end="url(#a-blue)"/>
+<text x="960" y="536" font-size="14" fill="#3a76b8" font-style="italic">answer routes to</text>
+<rect x="592" y="554" width="440" height="200" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+<text x="608" y="582" font-size="19" fill="#333" font-weight="bold">Problem</text>
+<text x="608" y="608" font-size="16" fill="#333">What deserves attention. Carries a horizon (strategic,</text>
+<text x="608" y="631" font-size="16" fill="#333">operational or tactical), a confidence, its open</text>
+<text x="608" y="654" font-size="16" fill="#333">questions and the scars that anchor it.</text>
+<rect x="1052" y="554" width="252" height="200" rx="8" fill="#f5f5f5" stroke="#666666" stroke-width="1.5"/>
+<text x="1068" y="582" font-size="19" fill="#333" font-weight="bold">Resolution</text>
+<text x="1068" y="608" font-size="16" fill="#333">A terminal outcome. It renders</text>
+<text x="1068" y="631" font-size="16" fill="#333">as an outcome, with no</text>
+<text x="1068" y="654" font-size="16" fill="#333">horizon.</text>
+<rect x="592" y="806" width="712" height="194" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.5"/>
+<text x="608" y="834" font-size="19" fill="#333" font-weight="bold">Scar, the receipt</text>
+<text x="608" y="860" font-size="16" fill="#333">What actually happened: date, cost, cost-horizon, origin (owned, or borrowed from someone</text>
+<text x="608" y="883" font-size="16" fill="#333">else&#x27;s postmortem) and evidence. Scars anchor problems; a problem with none is flagged</text>
+<text x="608" y="906" font-size="16" fill="#333">unanchored.</text>
+<path d="M812,806 L812,758" fill="none" stroke="#3a76b8" stroke-width="2" marker-end="url(#a-blue)"/>
+<text x="824" y="790" font-size="14" fill="#3a76b8" font-style="italic">anchors</text>
+<rect x="1352" y="84" width="544" height="940" rx="8" fill="#fcfcfa" stroke="#b8b8b0"/>
+<text x="1370" y="113" font-size="18" fill="#1e5f96" font-weight="bold">WHAT consider(situation) RETURNS</text>
+<rect x="1376" y="140" width="496" height="178" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+<text x="1392" y="168" font-size="19" fill="#333" font-weight="bold">Landings, strategic first</text>
+<text x="1392" y="194" font-size="16" fill="#333">Every problem and resolution reachable from the situation,</text>
+<text x="1392" y="217" font-size="16" fill="#333">ordered strategic, then operational, then tactical, then by id.</text>
+<rect x="1376" y="336" width="496" height="200" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+<text x="1392" y="364" font-size="19" fill="#333" font-weight="bold">Coverage, said out loud</text>
+<text x="1392" y="390" font-size="16" fill="#333">Horizon mix, unanchored count and newest scar date. When</text>
+<text x="1392" y="413" font-size="16" fill="#333">nothing reaches the strategic horizon, the rendered text says</text>
+<text x="1392" y="436" font-size="16" fill="#333">so instead of staying silent.</text>
+<rect x="1376" y="554" width="496" height="178" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+<text x="1392" y="582" font-size="19" fill="#333" font-weight="bold">Escalations</text>
+<text x="1392" y="608" font-size="16" fill="#333">A scar whose cost landed above its problem&#x27;s horizon is flagged</text>
+<text x="1392" y="631" font-size="16" fill="#333">on that landing: the strongest confidence-lowering signal.</text>
+<rect x="1376" y="750" width="496" height="250" rx="8" fill="#fff2cc" stroke="#d6b656" stroke-width="1.5"/>
+<text x="1392" y="778" font-size="19" fill="#333" font-weight="bold">Pegs presented</text>
+<text x="1392" y="804" font-size="16" fill="#333">Every reachable peg, with the landing set behind each answer.</text>
+<text x="1392" y="827" font-size="16" fill="#333">This is the telemetry basis (§7.7). One renderer</text>
+<text x="1392" y="850" font-size="16" fill="#333">(codex/render.clj) serves both the pulled tool and the pushed</text>
+<text x="1392" y="873" font-size="16" fill="#333">pin, so the two cannot drift apart.</text>
+<rect x="24" y="1040" width="1872" height="60" rx="6" fill="#f7f9fb" stroke="#d2dbe4"/>
+<rect x="44" y="1058" width="44" height="24" rx="4" fill="white" stroke="#555" stroke-width="1.5"/>
+<text x="98" y="1076" font-size="15" fill="#333">built: code in this repo</text>
+<rect x="374" y="1058" width="44" height="24" rx="4" fill="white" stroke="#555" stroke-width="1.5" stroke-dasharray="10 6"/>
+<text x="428" y="1076" font-size="15" fill="#333">partial</text>
+<rect x="704" y="1058" width="44" height="24" rx="4" fill="white" stroke="#555" stroke-width="1.5" stroke-dasharray="2 5"/>
+<text x="758" y="1076" font-size="15" fill="#333">spec or vault only: not in this repo</text>
+<rect x="1034" y="1058" width="24" height="24" rx="4" fill="#d5e8d4" stroke="#82b366" stroke-width="1.5"/>
+<text x="1066" y="1076" font-size="15" fill="#333">data at rest</text>
+<rect x="1204" y="1058" width="24" height="24" rx="4" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+<text x="1236" y="1076" font-size="15" fill="#333">runtime step</text>
+<rect x="1374" y="1058" width="24" height="24" rx="4" fill="#fff2cc" stroke="#d6b656" stroke-width="1.5"/>
+<text x="1406" y="1076" font-size="15" fill="#333">agent-facing</text>
+<rect x="1544" y="1058" width="24" height="24" rx="4" fill="#f8cecc" stroke="#b85450" stroke-width="1.5"/>
+<text x="1576" y="1076" font-size="15" fill="#333">fail-closed check</text>
+<rect x="1714" y="1058" width="24" height="24" rx="4" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+<text x="1746" y="1076" font-size="15" fill="#333">record / read-out</text>
+</svg>
