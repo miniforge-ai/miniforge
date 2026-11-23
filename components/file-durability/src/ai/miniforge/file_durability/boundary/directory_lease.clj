@@ -11,12 +11,9 @@
   (release! [pin] "Invalidate the pin and close its native stream, idempotently.")
   (live? [pin] "True until the owning host releases this pin."))
 
-(defn ^{:stratum 0} create [stream]
-  (PinnedDirectory. stream (atom false)))
-
 ;------------------------------------------------------------------------------ Layer 1
 
-(deftype ^{:stratum 1 :private true} PinnedDirectory [stream closed]
+(deftype ^{:stratum 1} PinnedDirectory [stream closed]
   DirectoryLease
   (release! [_]
     (when (compare-and-set! closed false true) (.close ^Closeable stream)))
