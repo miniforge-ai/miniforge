@@ -54,6 +54,14 @@
     (core/write-new-text! file text)
     (boundary/invalid-input :write-new)))
 
+(defn ^{:stratum 0} verify-attached-directory
+  "Return a canonical protected direct child on the parent's device, or refuse.
+   The caller must already have established qualification of the parent store."
+  [parent child]
+  (if (m/validate spec/AttachedDirectoryArguments [parent child])
+    (core/verify-attached-directory parent child)
+    (boundary/invalid-input :verify-attached-directory)))
+
 (defn ^{:stratum 0} write-temporary-bytes!
   "Fill and force an existing fresh temporary file without following a final symlink."
   [file bytes]
@@ -84,3 +92,5 @@
   (if (m/validate spec/File file)
     (core/confirm! file)
     (boundary/invalid-input :confirm)))
+
+(comment (verify-attached-directory nil nil))
