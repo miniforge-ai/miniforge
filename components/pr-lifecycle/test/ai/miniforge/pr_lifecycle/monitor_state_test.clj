@@ -35,7 +35,7 @@
           persisted {:pr-number 42 :limits {} :comment-attempts {} :total-attempts 0
                      :started-at (java.util.Date.) :questions-answered 0 :fixes-pushed 0}]
       (with-redefs [budget/load-budget
-                    (fn [pr-number]
+                    (fn [_repo-slug pr-number]
                       (when (= 42 pr-number) persisted))]
         (is (= persisted (#'sut/load-budget-from-disk! monitor 42)))
         (is (= persisted (get-in @monitor [:budgets 42])))))))

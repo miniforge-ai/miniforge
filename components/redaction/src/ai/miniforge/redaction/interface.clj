@@ -57,6 +57,35 @@
   [s]
   (match/secret-string? s))
 
+(defn ^{:stratum 0} secret-key?
+  "True when K's name says its value is a secret (N3 §8.1 key patterns,
+   less the reference-suffix exclusions), whatever the value looks like.
+
+   Exposed so a consumer that must decide by name alone, such as which
+   container variables to clear, uses the same list as redaction."
+  [k]
+  (match/secret-key? k))
+
+(defn ^{:stratum 0} pattern-secret-string?
+  "True when S matches a secret value pattern: `secret-string?` without
+   the payment-card checksum scan.
+
+   For scanning source code. Any 12-19 digit run that passes the Luhn
+   checksum counts as a card, and ordinary numbers in code do one time
+   in ten — `(* 20 24 60 60 1000)` is one — so a gate that blocks on
+   code would refuse correct changes. Credentials, keys and SSNs are
+   still matched by the same patterns redaction uses."
+  [s]
+  (match/pattern-secret-string? s))
+
+(defn ^{:stratum 0} pattern-secret-spans
+  "[start end] of every match of the secret value patterns in S, matched
+   over the whole string so a match spanning lines (a PEM block, a header
+   folded onto the next line) is found whole. Payment-card candidates
+   are not checked, as in `pattern-secret-string?`."
+  [s]
+  (match/pattern-secret-spans s))
+
 (defn ^{:stratum 0} marker
   "The redaction marker substituted for an excluded value."
   []

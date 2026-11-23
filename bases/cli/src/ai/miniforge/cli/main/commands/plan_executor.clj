@@ -128,8 +128,12 @@
                                              :spec-title (:plan/title plan)
                                              :control-state control-state
                                              :skip-lifecycle-events false})
-        ;; Enrich context with workflow definition for sub-workflow construction
+        ;; Enrich context with workflow definition for sub-workflow construction,
+        ;; and the pipeline each task's sub-workflow runs through. A spec run gets
+        ;; :execution/run-pipeline-fn from the runner's initial context; this
+        ;; path never builds one, so it supplies the same runner here.
         ctx (assoc ctx :execution/workflow workflow
+                       :execution/run-pipeline-fn workflow/run-pipeline
                        :workflow-id workflow-id
                        :pre-completed-ids (get opts :pre-completed-dag-tasks #{}))]
     (when-not quiet

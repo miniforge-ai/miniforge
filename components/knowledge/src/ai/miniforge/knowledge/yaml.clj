@@ -18,9 +18,21 @@
 (ns ai.miniforge.knowledge.yaml
   "YAML frontmatter parsing for markdown files.
 
-   Provides a simplified YAML parser for basic frontmatter structures.
-   Handles key-value pairs, arrays, and list items."
+   `parse-yaml-frontmatter` reads frontmatter with a YAML parser
+   (clj-yaml), so block scalars (`description: |`), nested maps
+   (`intent:` with `type:` / `scope:` under it) and block lists keep
+   their values. Two compatibility paths keep inputs the earlier line
+   parser accepted working:
+
+   - A top-level `key: [...]` line whose value reads as an EDN vector of
+     keywords, strings, numbers or booleans (e.g. `tags: [:auth :security]`,
+     which is not valid YAML) keeps its EDN value.
+   - Frontmatter that is not a valid YAML mapping falls back to the line
+     parser (flat `key: value` pairs, `[a, b]` arrays, `  - item` lists).
+     Cursor-style `.mdc` rules need this: they often carry unquoted globs
+     such as `globs: **/*.{md,mdx,html}`, which YAML rejects."
   (:require
+   [clj-yaml.core :as yaml]
    [clojure.string :as str]
    [clojure.edn :as edn]))
 
@@ -85,6 +97,29 @@
           {:frontmatter (str/join "\n" (take end-idx (rest lines)))
            :body (str/join "\n" (drop (+ end-idx 2) lines))})))))
 
+(defn ^{:stratum 0} plain-data
+  "Convert clj-yaml output (ordered maps, lazy seqs) to plain maps and
+   vectors, so parsed frontmatter prints and reads back as ordinary EDN."
+  [x]
+  (cond
+    (map? x)        (into {} (map (fn [[k v]] [k (plain-data v)])) x)
+    (sequential? x) (mapv plain-data x)
+    :else           x))
+
+(defn ^{:stratum 0} edn-vector-entry
+  "Read a top-level `key: [...]` line whose value is an EDN vector of
+   keywords, strings, numbers or booleans, e.g. `tags: [:auth :security]`.
+   Returns [key-string vector], or nil for any other line, including YAML
+   flow lists of bare words such as `[a, b]` (EDN reads those as symbols)."
+  [line]
+  (when-let [[_ k v] (re-matches #"([\w.-]+):\s*(\[.*\])\s*" line)]
+    ;; Plain try: this component has no slingshot dep (rule 211 exemption 1).
+    (let [parsed (try (edn/read-string v) (catch Exception _ nil))]
+      (when (and (vector? parsed)
+                 (seq parsed)
+                 (every? (some-fn keyword? string? number? boolean?) parsed))
+        [k parsed]))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} parse-value
@@ -93,6 +128,26 @@
   (if (str/starts-with? v "[")
     (parse-array-value v)
     (parse-scalar-value v)))
+
+(defn ^{:stratum 1} parse-yaml-mapping
+  "Parse frontmatter text as a YAML mapping with keyword keys.
+
+   Top-level EDN vector lines (see `edn-vector-entry`) are replaced by
+   `key: []` before YAML parsing and their EDN values put back after.
+   Returns a plain map ({} for empty text), or nil when the text is not a
+   valid YAML mapping."
+  [yaml-str]
+  (let [lines     (str/split-lines yaml-str)
+        entries   (mapv edn-vector-entry lines)
+        yaml-text (str/join "\n" (map (fn [line [k]] (if k (str k ": []") line))
+                                       lines entries))
+        ;; Plain try: this component has no slingshot dep (rule 211 exemption 1).
+        parsed    (try (yaml/parse-string yaml-text)
+                       (catch Exception _ ::invalid))]
+    (when (or (nil? parsed) (map? parsed))
+      (into (plain-data (or parsed {}))
+            (keep (fn [[k v]] (when k [(keyword k) v])))
+            entries))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -136,14 +191,11 @@
 ;------------------------------------------------------------------------------ Layer 4
 
 (defn ^{:stratum 4} parse-yaml-frontmatter
-  "Parse YAML frontmatter into EDN map.
-   Simple parser for basic YAML - handles:
-   - key: value
-   - key: [list, items]
-   - Lists with hyphens
+  "Parse YAML frontmatter into a map with keyword keys.
 
-   Note: This is a simplified YAML parser. For complex YAML,
-   consider adding a proper YAML library."
+   Uses a YAML parser, so block scalars, nested maps and block lists keep
+   their values. Falls back to the line parser when the text is not a
+   valid YAML mapping (see the namespace docstring)."
   [yaml-str]
-  (let [lines (str/split-lines yaml-str)]
-    (reduce process-yaml-line {} lines)))
+  (or (parse-yaml-mapping yaml-str)
+      (reduce process-yaml-line {} (str/split-lines yaml-str))))

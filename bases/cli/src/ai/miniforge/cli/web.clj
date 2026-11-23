@@ -69,19 +69,19 @@
       (handlers/workflow-stream uri req)
 
       (and (str/starts-with? uri "/api/pr/") (str/ends-with? uri "/approve") (= request-method :post))
-      (handlers/approve uri)
+      (handlers/approve uri repos)
 
       (and (str/starts-with? uri "/api/pr/") (str/ends-with? uri "/reject") (= request-method :post))
-      (handlers/reject uri req)
+      (handlers/reject uri req repos)
 
       (and (str/starts-with? uri "/api/pr/") (str/ends-with? uri "/chat") (= request-method :post))
-      (handlers/chat uri req)
+      (handlers/chat uri req repos)
 
       (and (str/starts-with? uri "/api/pr/") (str/ends-with? uri "/summary") (= request-method :post))
-      (handlers/summary uri)
+      (handlers/summary uri repos)
 
       (and (str/starts-with? uri "/api/pr/") (= request-method :get))
-      (handlers/pr-detail uri)
+      (handlers/pr-detail uri repos)
 
       :else
       (response/not-found "Not found"))))

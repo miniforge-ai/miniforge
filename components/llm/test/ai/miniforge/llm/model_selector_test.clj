@@ -18,8 +18,10 @@
 (ns ai.miniforge.llm.model-selector-test
   (:require
    [clojure.test :refer [deftest is testing use-fixtures]]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.llm.model-selector :as selector]
-   [ai.miniforge.llm.model-registry :as registry]))
+   [ai.miniforge.llm.model-registry :as registry]
+   [ai.miniforge.logging.interface :as log]))
 
 ;; Simulate all provider API keys being set so selection tests are
 ;; deterministic regardless of the CI environment's real env vars.
@@ -223,3 +225,64 @@
           selection (selector/select-model classification)]
       (is (:model selection))
       (is (:model-id selection)))))
+
+;; Nothing selected: the documented fallback, and constraints the result must
+;; meet. The fallback path used to throw from its warning, and :automatic
+;; used to relax its constraints while reporting :fallback-used false.
+(deftest ^{:stratum 0} test-nothing-selected-returns-the-fallback
+  (testing "a task type the catalog has no tiers for returns the Sonnet fallback"
+    (let [entries   (atom [])
+          logger    (log/create-logger {:output #(swap! entries conj %)})
+          selection (selector/select-model {:type :unknown-task-type :confidence 0.5}
+                                           {:logger logger}
+                                           {})]
+      (is (= :sonnet-4.6 (:model selection)))
+      (is (true? (:fallback-used selection)))
+      (is (= 1 (count @entries)) "the fallback is reported to the caller's logger"))))
+
+(defn- ^{:stratum 0} local?
+  "True when the catalog marks the model as local."
+  [model-key]
+  (boolean (get-in (registry/get-model model-key) [:capabilities :local])))
+
+(deftest ^{:stratum 0} test-constraints-are-checked-against-the-result
+  (testing ":context-size no model meets is an anomaly, not a smaller model"
+    (let [result (selector/select-model {:type :execution-focused :confidence 0.9}
+                                        {}
+                                        {:context-size 2000000})]
+      (is (anomaly/anomaly? result))
+      (is (= :not-found (:anomaly/type result)))
+      (is (= [:context-size] (get-in result [:anomaly/data :unmet-constraints])))))
+  (testing ":cost-limit no qualifying model meets is an anomaly, not a pricier model"
+    (let [result (selector/select-model {:type :large-context :confidence 0.9}
+                                        {}
+                                        {:context-size 500000 :cost-limit 0.001})]
+      (is (anomaly/anomaly? result))
+      (is (some #{:cost-limit} (get-in result [:anomaly/data :unmet-constraints])))))
+  (testing "a selected model meets every constraint and is not a fallback"
+    (let [selection (selector/select-model {:type :large-context :confidence 0.9}
+                                           {}
+                                           {:context-size 500000})]
+      (is (>= (get-in (registry/get-model (:model selection)) [:capabilities :context-window])
+              500000))
+      (is (false? (:fallback-used selection)))))
+  (testing ":require-local refuses a cloud model from a strategy that ignores it"
+    (let [result (selector/select-model {:type :execution-focused :confidence 0.9}
+                                        {:strategy :speed}
+                                        {:require-local true})]
+      (is (anomaly/anomaly? result))
+      (is (some #{:require-local} (get-in result [:anomaly/data :unmet-constraints]))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} test-automatic-reads-every-tier
+  (testing "local models are found whichever tier lists them"
+    (doseq [task-type [:large-context :cost-optimized :privacy-sensitive]]
+      (let [selection (selector/select-model {:type task-type :confidence 0.9}
+                                             {}
+                                             {:require-local true})]
+        (is (local? (:model selection)) (str task-type))
+        (is (false? (:fallback-used selection)) (str task-type)))))
+  (testing "a privacy-sensitive task gets a local model without :require-local too"
+    (is (local?
+         (:model (selector/select-model {:type :privacy-sensitive :confidence 0.9}))))))

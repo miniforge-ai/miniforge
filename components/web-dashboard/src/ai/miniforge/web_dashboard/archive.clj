@@ -16,15 +16,18 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.web-dashboard.archive
-  "Archive scanning — build lightweight workflow summaries from event files.
-
-   Reads only first+last lines per file (two seeks) to extract name, status,
-   and timestamps without loading all events into memory."
+  "Archive scanning — lightweight workflow summaries from the first and
+   last events of each legacy `<workflow-id>.edn` file (two seeks) and
+   each file sink workflow directory (live/, archived/, the older flat
+   layout), without loading every event into memory."
   (:require
+   [ai.miniforge.event-stream.interface :as es]
    [clojure.java.io :as io]
+   [clojure.string :as str]
+   [ai.miniforge.web-dashboard.event-files :as event-files]
    [ai.miniforge.web-dashboard.watcher :as watcher])
   (:import
-   [java.io RandomAccessFile]))
+   [java.io File RandomAccessFile]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -89,6 +92,10 @@
          reverse
          vec)))
 
+(def ^{:stratum 0} tail-file-count
+  "Event files read from the end of a workflow directory for its status."
+  10)
+
 ;; Archive scan orchestration
 (defn ^{:stratum 0} list-edn-files
   [events-dir]
@@ -134,16 +141,40 @@
           (.close raf))))
     (catch Exception _ nil)))
 
+(defn ^{:stratum 2} read-dir-summary
+  "Summary of `workflow-id`'s file sink directory under `events-dir`,
+   from its first-millisecond files (plus two) and its last
+   `tail-file-count`. Keeps `events-dir`, not the directory, which an
+   archive may move. nil when it holds no readable event."
+  [events-dir workflow-id]
+  (when-let [dir (es/workflow-events-dir events-dir workflow-id)]
+    (let [files      (event-files/event-files dir)
+          first-ms   (some-> (first files) event-files/file-ms)
+          head-count (+ 2 (count (take-while #(= first-ms (event-files/file-ms %)) files)))]
+      (some-> (derive-summary (first (event-files/read-ordered (take head-count files)))
+                              (->> (first (event-files/newest-batches files tail-file-count))
+                                   (take-last tail-file-count)
+                                   reverse
+                                   vec)
+                              nil
+                              (reduce + 0 (map #(.length ^File %) files)))
+              (assoc :events-dir (str events-dir))))))
+
 ;------------------------------------------------------------------------------ Layer 3
 
 (defn ^{:stratum 3} scan-archive!
-  "Scan all .edn files in events-dir, build lightweight summaries.
-   Calls (on-workflow! summary) for each successfully parsed file.
-   Calls (on-complete!) when scan finishes. Returns nil."
+  "Scan the legacy .edn files and every workflow directory in events-dir
+   and build lightweight summaries. Calls (on-workflow! summary) for each
+   successfully parsed workflow (one in both layouts: twice, its
+   directory last), then (on-complete!). Returns nil."
   [events-dir on-workflow! on-complete!]
   (try
     (doseq [file (list-edn-files events-dir)]
       (when-let [summary (read-workflow-summary file)]
+        (on-workflow! summary)))
+    (doseq [workflow-id (es/stored-workflow-ids events-dir)
+            :when (not (str/starts-with? workflow-id "."))]
+      (when-let [summary (read-dir-summary events-dir workflow-id)]
         (on-workflow! summary)))
     (catch Exception _ nil))
   (on-complete!)

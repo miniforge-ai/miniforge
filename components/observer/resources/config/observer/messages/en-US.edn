@@ -1,0 +1,4 @@
+{:observer/messages
+ {:alert/phase-gap "Phase gap of {gap-ms}ms exceeds threshold"
+  :alert/tool-call-timeout "Tool call {call-id} timed out"
+  :alert/tool-error-rate "Tool error rate {error-percent}% exceeds threshold"}}

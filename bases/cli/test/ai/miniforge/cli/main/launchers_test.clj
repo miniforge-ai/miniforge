@@ -19,6 +19,10 @@
 
 (defn- ^{:stratum 0} fail-with [failure & _] (throw failure))
 
+(defn- ^{:stratum 0} capture-arg [captured value & [arg]]
+  (reset! captured arg)
+  value)
+
 (defn- ^{:stratum 0} interruption-preserved? [create]
   (try+ (create) false
        (catch InterruptedException _ (.isInterrupted (Thread/currentThread)))
@@ -40,6 +44,17 @@
         (is (= [:stream :attach :train :repo :start] @calls)))))
   (with-redefs [util/optional-composition-var (constantly nil)]
     (is (nil? (launchers/optional-web-launcher)))))
+
+(deftest ^{:stratum 1} dashboard-stream-has-bounded-history
+  (let [opts (atom nil)]
+    (with-redefs [util/optional-composition-var (constantly (constantly :started))
+                  events/create-event-stream (partial capture-arg opts :events)
+                  supervisory/ensure-attached! (constantly nil)
+                  pr-train/create-manager (constantly :train)
+                  repo-dag/create-manager (constantly :repo)]
+      ((launchers/optional-web-launcher) {:port 7878})
+      (is (= events/bounded-retention (:retention @opts))
+          "mf web runs for days, so its stream must bound the in-memory history"))))
 
 (deftest ^{:stratum 1} optional-manager-boundaries-preserve-fatal-errors
   (let [fatal (partial fail-with (AssertionError. "fatal fixture"))]

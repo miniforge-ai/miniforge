@@ -24,7 +24,8 @@
   (:require
    [clojure.test :refer [deftest is]]
    [ai.miniforge.event-stream.core :as core]
-   [ai.miniforge.event-stream.publication-fence :as fence]))
+   [ai.miniforge.event-stream.publication-fence :as fence]
+   [ai.miniforge.event-stream.sink-durability :as durability]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -174,8 +175,19 @@
 (deftest ^{:stratum 1} deliver-to-sink!-swallows-and-logs-exceptions
   (let [throwing-sink (fn [_] (throw (RuntimeException. "sink failed")))]
     ;; Logger nil — must not throw on the swallow path.
-    (is (nil? (deliver-to-sink! throwing-sink (evt) nil))
-        "exception from sink must not propagate; nil return is fine")))
+    (is (= {:sink/durable? false :sink/persisted? false}
+           (deliver-to-sink! throwing-sink (evt) nil))
+        "exception from sink must not propagate; the outcome records the failure")))
+
+(deftest ^{:stratum 1} deliver-to-sink!-reports-whether-a-durable-sink-persisted
+  (is (= {:sink/durable? true :sink/persisted? true}
+         (deliver-to-sink! (durability/durable-sink (fn [_] nil)) (evt) nil)))
+  (is (= {:sink/durable? true :sink/persisted? false}
+         (deliver-to-sink! (durability/durable-sink (fn [_] (throw (RuntimeException. "disk full"))))
+                           (evt) nil)))
+  (is (= {:sink/durable? false :sink/persisted? false}
+         (deliver-to-sink! (fn [_] nil) (evt) nil))
+      "a sink that is not durable never counts as persisting"))
 
 ;------------------------------------------------------------------------------ deliver-to-sinks!
 (deftest ^{:stratum 1} deliver-to-sinks!-runs-all-sinks-even-when-one-throws

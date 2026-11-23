@@ -51,7 +51,7 @@
       (try
         (let [info (json/parse-string (slurp discovery-file) true)
               port (:port info)]
-          (str "http://localhost:" port))
+          (str "http://" (get info :host "localhost") ":" port))
         (catch Exception _ nil)))))
 
 ;; HTTP client helpers

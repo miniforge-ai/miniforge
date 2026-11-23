@@ -22,7 +22,9 @@
    [ai.miniforge.cli.config :as config]
    [ai.miniforge.cli.workflow-runner.context :as sut]
    [ai.miniforge.event-stream.interface :as es]
-   [ai.miniforge.tenancy.interface :as tenancy]))
+   [ai.miniforge.llm.interface :as llm]
+   [ai.miniforge.tenancy.interface :as tenancy]
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -98,6 +100,19 @@
                       :acting supplied})]
         (is (= supplied (:acting context)))))))
 
+(deftest ^{:stratum 0} an-unknown-backend-stops-the-run-test
+  (testing "a mistyped --backend throws, naming it and the known backends, instead of returning no client"
+    (let [error (try (sut/create-llm-client nil nil true :opnecode) nil
+                     (catch Exception e e))]
+      (is (some? error))
+      (is (str/includes? (ex-message error) ":opnecode"))
+      (is (str/includes? (ex-message error) "opencode")))))
+
+(deftest ^{:stratum 0} a-backend-symbol-in-config-still-resolves-test
+  (testing "llm.backend written as a symbol by an older `config set` still selects that backend"
+    (with-redefs [config/load-config (constantly {:llm {:backend 'opencode}})]
+      (is (= :opencode (llm/client-backend (sut/create-llm-client nil nil true)))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} a-configured-operator-reaches-the-run-test
@@ -152,3 +167,20 @@
                   (context-with-config {:tenancy {:operator-name 42}} true))]
     (is (nil? (:acting context)) "still attaches nothing")
     (is (= "" (str out)) "and says nothing when asked to be quiet")))
+
+(deftest ^{:stratum 1} required-operator-refuses-to-start-unowned-test
+  (testing "given [:tenancy :require-operator?] and no operator → the run never starts"
+    (let [error (try (context-with-config {:tenancy {:require-operator? true}})
+                     nil
+                     (catch Exception e e))]
+      (is (some? error))
+      (is (str/includes? (str (ex-message error)) ":require-operator?"))))
+  (testing "given the flag and a misconfigured operator → also refused"
+    (is (thrown? Exception
+                 (context-with-config {:tenancy {:require-operator? true
+                                                 :operator-name "  "}}))))
+  (testing "given the flag and an operator → the run carries it and the flag"
+    (let [context (context-with-config {:tenancy {:require-operator? true
+                                                  :operator-name "alex"}})]
+      (is (tenancy/valid-acting? (:acting context)))
+      (is (true? (:require-operator? context))))))

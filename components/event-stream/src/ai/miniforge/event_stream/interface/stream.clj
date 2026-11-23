@@ -22,22 +22,37 @@
    [ai.miniforge.event-stream.boundary.current-stream :as current-stream]
    [ai.miniforge.event-stream.boundary.legacy-control :as legacy-control]
    [ai.miniforge.event-stream.core :as core]
-   [ai.miniforge.event-stream.envelope-draft :as draft]))
+   [ai.miniforge.event-stream.envelope-draft :as draft]
+   [ai.miniforge.event-stream.persisted-publication :as persisted]
+   [ai.miniforge.event-stream.retention :as retention]
+   [ai.miniforge.event-stream.sink-durability :as durability]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} prepare-current-publication
-  "Validate and redact a sequence-free chain v2, intervention v2, or Spec snapshot
+  "Validate and redact a sequence-free chain v2, intervention v2, Spec snapshot, OPSV or workflow lifecycle
    draft. Returns [scope draft] or an anomaly, not an acknowledgment. Other families
    are unsupported here. Historical replay and legacy publish! remain separate."
   publication-input/prepare)
 
 (def ^{:stratum 0} create-current-event-stream
   "Own an existing canonical :journal-directory and restore supported typed records.
-   Supports chain v2, intervention v2 and Spec snapshots only. No volatile fallback.
+   Supports chain v2, intervention v2, Spec snapshots, OPSV and workflow lifecycle drafts. No volatile fallback.
    Optional :sinks are best-effort listeners after durable commit (default []).
    Also accepts :logger and :snowflake-generator. Returns a stream or anomaly."
   current-stream/create)
+
+(def ^{:stratum 0} current-event-stream?
+  "Validate current stream structure, including closed streams; not availability or authority."
+  current-stream/current?)
+
+(def ^{:stratum 0} legacy-event-stream?
+  "Validate legacy stream structure without granting execution authority."
+  current-stream/legacy?)
+
+(def ^{:stratum 0} current-journal-directory
+  "Return a current stream's canonical journal directory, including after close. Not an authority check."
+  current-stream/journal-directory)
 
 (def ^{:stratum 0} close-current-event-stream!
   "Release a current stream's journal ownership and reject further publication.
@@ -52,8 +67,23 @@
    quiesce fence, in-flight counter, optional snowflake generator).
    Optional opts map: :logger, :sinks (vector of sink fns), :config
    (builds sinks from config), :snowflake-generator (BD-2b event-id
-   generator for lexically-sortable ids)."
+   generator for lexically-sortable ids), :retention (bound on the
+   in-memory history, e.g. `bounded-retention`; absent = unbounded)."
   core/create-event-stream)
+
+(def ^{:stratum 0} bounded-retention
+  "Retention policy for a stream that lives for days (the web dashboard):
+   per workflow, every lifecycle event, the newest health event per
+   dependency and the newest 500 others, for the 100 most recently active
+   workflows. Pass as `:retention` to
+   `create-event-stream`; merge over it to change a limit."
+  retention/bounded-policy)
+
+(def ^{:stratum 0} compact-events
+  "`(compact-events events policy)`: the events of `events` (a vector in
+   publish order) that a retention policy such as `bounded-retention`
+   keeps, still in publish order. Pure."
+  retention/compact)
 
 (def ^{:stratum 0} create-envelope
   "Build an event envelope map with an atomically-assigned per-workflow
@@ -81,6 +111,25 @@
    :workflow-quiesced :workflow-id ... :event-type ...} map without
    running sinks or subscribers."
   core/publish!)
+
+(def ^{:stratum 0} publish-persisted!
+  "Like publish!, but returns the result only when the event was persisted.
+   A current stream's receipt passes through. On a legacy stream an anomaly or
+   rejection passes through, and the event passes only when the stream has a
+   durable sink (the file sink) and every durable sink wrote it; otherwise an
+   :unavailable anomaly with :publication/reason :no-durable-sink or
+   :sink-write-failed."
+  persisted/publish-persisted!)
+
+(def ^{:stratum 0} durable-sink
+  "Mark a legacy-stream sink as persisting each event it returns from without
+   throwing, so publish-persisted! can count it."
+  durability/durable-sink)
+
+(def ^{:stratum 0} replay!
+  "Deliver a stored event to a legacy stream's log and subscribers
+   without its sinks. See `core/replay!`."
+  core/replay!)
 
 (def ^{:stratum 0} subscribe!
   "Register a callback for events. 3-arg form subscribes to all events;

@@ -342,6 +342,21 @@
         (update-workflow-at idx #(assoc % :status :failed :error error))
         with-timestamp)))
 
+(defn ^{:stratum 1} handle-workflow-resumed
+  "A resume sets the run's row back to running; nothing else changes."
+  [model {:keys [workflow-id]}]
+  (let [idx (find-workflow-idx (:workflows model) workflow-id)]
+    (-> model
+        (update-workflow-at idx #(-> % (assoc :status :running) (dissoc :error)))
+        with-timestamp)))
+
+(defn ^{:stratum 1} handle-workflow-named
+  "Set the run's row name, when there is one; its status is left alone."
+  [model {:keys [workflow-id name]}]
+  (cond-> model
+    name (update-workflow-at (find-workflow-idx (:workflows model) workflow-id)
+                             #(assoc % :name name))))
+
 (defn ^{:stratum 1} handle-gate-started [model {:keys [gate]}]
   (-> model
       (assoc :flash-message (msg/t :flash/gate-running

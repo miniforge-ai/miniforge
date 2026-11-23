@@ -65,7 +65,9 @@
 (def ^{:stratum 0} filter-applicable-rules
   "Filter rules to those enabled and applicable to a context (by file globs,
    task type, and phase). (filter-applicable-rules rules context) returns a
-   vector of applicable rules."
+   vector of applicable rules. The context's :artifact carries
+   :artifact/path, or :artifact/paths when it spans several files; a
+   glob-scoped rule applies when any path matches."
   applicability/filter-applicable-rules)
 
 (def ^{:stratum 0} rule-applies-to-phase?

@@ -55,6 +55,7 @@
     (let [result (runner/build-initial-context workflow input
                                                 {:execution-mode :local})]
       (is (not (anomaly/anomaly? result)))
+      (is (identical? runner/run-pipeline (:execution/run-pipeline-fn result)))
       (is (= :local (:execution/mode result))))))
 
 ;------------------------------------------------------------------------------ Anomaly-returning failure path

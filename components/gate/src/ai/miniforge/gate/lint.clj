@@ -19,7 +19,8 @@
   "Lint validation gate.
 
    Checks that code passes linting rules."
-  (:require [ai.miniforge.gate.registry :as registry]
+  (:require [ai.miniforge.gate.messages :as messages]
+            [ai.miniforge.gate.registry :as registry]
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.policy-pack.interface :as policy-pack]))
 
@@ -69,7 +70,7 @@
                            (:warnings result))})))
     (catch Exception e
       (log/warn (:logger ctx) :gate :gate/lint-policy-check-error
-                {:message "Policy-pack check threw; lint gate fails closed"
+                {:message (messages/system-t :lint/policy-check-threw)
                  :data    {:exception-message (or (ex-message e) (str (type e)))
                            :exception-data    (ex-data e)}})
       {:passed?  false
@@ -86,7 +87,7 @@
   {:success? false
    :artifact artifact
    :errors errors
-   :message "Lint repair requires LLM agent"})
+   :message (messages/t :lint/repair-requires-llm)})
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -116,7 +117,7 @@
       (seq packs)
       {:passed?  false
        :errors   [{:type    :check-error
-                   :message "Policy-pack check returned nil with packs configured"
+                   :message (messages/t :lint/policy-check-nil)
                    :data    {:pack-count (count packs)}}]
        :warnings []}
 
@@ -134,7 +135,7 @@
 (defmethod ^{:stratum 2} registry/get-gate :lint
   [_]
   {:name :lint
-   :description "Validates code passes linting rules (clj-kondo)"
+   :description (messages/t :lint/description)
    :check check-lint
    :repair repair-lint})
 

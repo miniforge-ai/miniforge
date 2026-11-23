@@ -17,7 +17,7 @@
 (defn- ^{:stratum 0} assert-collection-identities [ctx directory]
   (let [descriptor [:metric-snapshot :telemetry :opsv/ramp-steps]
         vector-record (model/record ctx {:opsv/ramp-steps [1 2]} descriptor)
-        list-record (model/record ctx {:opsv/ramp-steps '(1 2)} descriptor)]
+        list-record (model/record ctx {:opsv/ramp-steps (list 1 2)} descriptor)]
     (is (not= (:artifact/id vector-record) (:artifact/id list-record)))
     (doseq [record [vector-record list-record]]
       (is (= record (artifact/publish! directory record))))))

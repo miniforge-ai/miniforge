@@ -16,15 +16,22 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.event-stream.interface.opsv
-  "Public schemas and constructors for the N3 OPSV event family."
+  "Public schemas and constructors for the N3 OPSV event family.
+   Current streams produce sequence-free drafts; publish! returns the durable receipt.
+   Legacy streams retain positioned events. Construction failures are returned intact."
   (:require
    [malli.core :as m]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.event-stream.messages :as msg]
    [ai.miniforge.event-stream.opsv :as opsv]
+   [ai.miniforge.event-stream.opsv-draft-spec :as draft]
    [ai.miniforge.event-stream.schema.opsv :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} DraftProfile
+  "OPSV-specific current draft profile; common publication envelope rules apply separately."
+  draft/Draft)
 
 (def ^{:stratum 0} ExperimentPlanned
   "Schema for :opsv.experiment/planned."

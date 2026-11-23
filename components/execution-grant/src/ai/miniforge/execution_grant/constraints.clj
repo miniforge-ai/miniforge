@@ -16,25 +16,12 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.execution-grant.constraints
-  "The ONE check site for whether an effect is within its grant
-   (Ariadne step 2b, §13.5).
-
-   This is the representational fix for T3 contradiction 9. The 3h40m
-   runaway happened because a ceiling was wired to one of two channels
-   and the other went unmetered. Wiring each channel individually is
-   the mistake; a ceiling belongs on the GRANT, and every path to an
-   effect passes through `authorize` here.
-
-   `authorize` is called TWICE per effect — once at decide() and again
-   at commit (step 2c). Same function, different instants: a grant that
-   was live at decide and revoked before commit fails the second call.
-   That is the whole point of re-checking rather than trusting the
-   first answer.
-
-   Everything fails CLOSED. A nil grant, an inactive grant, and an
-   unresolvable ancestry all deny; absence is not silence (§13.7)."
+  "Shared scope containment, liveness, and ceiling checks behind public authorization.
+   Profile admission precedes these checks. Decisions and durable commits use
+   the public boundary; neither may treat an earlier authorization as current."
   (:require
    [ai.miniforge.execution-grant.attenuation :as attenuation]
+   [ai.miniforge.execution-grant.authorization-result :as result]
    [ai.miniforge.execution-grant.lineage :as lineage]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -169,10 +156,7 @@
           :grant/revocation-reason (:grant/revocation-reason grant)}
 
          (not (effect-within-grant-scope? grant effect-scope))
-         {:grant/outcome :scope-mismatch
-          :grant/id (:grant/id grant)
-          :grant/scope (:grant/scope grant)
-          :effect/scope effect-scope}
+         (result/scope-mismatch grant effect-scope)
 
          (seq over)
          {:grant/outcome :exceeded

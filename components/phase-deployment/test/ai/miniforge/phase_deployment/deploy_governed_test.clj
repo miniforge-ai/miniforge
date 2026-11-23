@@ -18,7 +18,9 @@
 (ns ai.miniforge.phase-deployment.deploy-governed-test
   "Granted deployment behavior at the provider and durable-record seams."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.effect-transaction.interface :as fx]
+   [ai.miniforge.execution-grant.interface :as grant]
    [ai.miniforge.phase-deployment.deploy-authority :as authority]
    [ai.miniforge.phase-deployment.deploy-governed :as governed]
    [ai.miniforge.phase-deployment.policy :as policy]
@@ -50,7 +52,7 @@
 
 (defn- ^{:stratum 0} tmp-dir
   []
-  (str (.toFile (Files/createTempDirectory "deploy" (into-array FileAttribute [])))))
+  (.getCanonicalPath (.toFile (Files/createTempDirectory "deploy" (into-array FileAttribute [])))))
 
 (defn- ^{:stratum 0} record-call
   [calls operation & arguments]
@@ -69,7 +71,8 @@
   []
   {:execution/id (random-uuid)
    :execution/phase-results {:provision {:result {:output {:steps []}}}}
-   :effect-store-dir (tmp-dir) :grant-breach-dir (tmp-dir)})
+   :effect-store-dir (tmp-dir) :grant-breach-dir (tmp-dir)
+   :clock (constantly now)})
 
 (defn- ^{:stratum 1} prepared-authority
   [ctx]
@@ -136,7 +139,10 @@
     (is (= :failed (:deploy/status result)))
     (is (= rollback-info (:deploy/rollback-info result)))
     (is (= rollback-info
-           (get-in record [:effect/observed :deploy/rollback-info])))))
+           (get-in record [:effect/observed :deploy/rollback-info])))
+    (is (= :revocation/superseded
+           (:grant/revocation-reason
+            (grant/current (:grant-breach-dir ctx) (:deploy/grant-id result)))))))
 
 (deftest ^{:stratum 2} successful-deploy-records-before-exact-apply-test
   (let [calls (atom [])
@@ -173,21 +179,66 @@
                (:effect/observed record)))))))
 
 (deftest ^{:stratum 2} inactive-authority-never-reaches-apply-test
-  (doseq [[label change]
-          [[:absent #(assoc % :authority/grant nil)]
-           [:mismatched #(assoc-in % [:authority/grant :grant/scope :context]
-                                   "other-cluster")]
-           [:expired #(assoc-in % [:authority/grant :grant/expires-at]
-                                (.minusSeconds now 1))]]]
-    (testing (name label)
-      (let [calls (atom [])
-            ctx (context)
-            prepared (change (prepared-authority ctx))]
-        (with-redefs [authority/prepare (fn [& _] prepared)]
-          (let [result (governed/transact! ctx deploy-config
-                                           (recording-operations calls) now)]
-            (is (= :failed (:deploy/status result)))
-            (is (= :authority (:deploy/stage result)))
-            (when (= :absent label)
-              (is (not (some #(= :rollback (first %)) @calls))))
-            (is (not (applied? calls)))))))))
+  (testing "an absent grant fails before rollback capture"
+    (let [calls (atom [])
+          ctx (context)
+          prepared (assoc (prepared-authority ctx) :authority/grant nil)]
+      (with-redefs [authority/prepare (fn [& _] prepared)]
+        (let [result (governed/transact! ctx deploy-config
+                                         (recording-operations calls) now)]
+          (is (= :authority (:deploy/stage result)))
+          (is (not (some #(= :rollback (first %)) @calls)))
+          (is (not (applied? calls)))))))
+  (testing "a grant that has expired by commit time never applies"
+    (let [calls (atom [])
+          ctx (assoc (context) :clock (constantly (.plusSeconds now 3600)))
+          result (governed/transact! ctx deploy-config
+                                     (recording-operations calls) now)]
+      (is (= :failed (:deploy/status result)))
+      (is (not (applied? calls))))))
+
+(deftest ^{:stratum 2} cancelled-run-revokes-before-apply-test
+  (let [calls (atom [])
+        ctx (assoc (context) :execution/opts
+                   {:control-state (atom {:paused false :stopped true})})
+        result (governed/transact! ctx deploy-config
+                                   (recording-operations calls) now)]
+    (is (= :failed (:deploy/status result)))
+    (is (not (applied? calls)))
+    (is (= :revocation/operator
+           (:grant/revocation-reason
+            (grant/current (:grant-breach-dir ctx) (:deploy/grant-id result)))))))
+
+(deftest ^{:stratum 2} reconcile-never-moves-the-record-backwards-test
+  (let [later (.plusSeconds now 60)
+        ctx (assoc (context) :clock (constantly later))
+        result (governed/transact! ctx deploy-config
+                                   (recording-operations (atom [])) now)
+        record (first (fx/list-records (:effect-store-dir ctx)))]
+    (is (= :success (:deploy/status result)))
+    (is (= later (:effect/updated-at record)))))
+
+(deftest ^{:stratum 2} a-failed-revocation-is-reported-test
+  (let [ctx (assoc (context) :execution/opts
+                   {:control-state (atom {:paused false :stopped true})})]
+    (with-redefs [grant/revoke-stored!
+                  (fn [& _] (anomaly/anomaly :unavailable "registry unwritable" {}))]
+      (let [result (governed/transact! ctx deploy-config
+                                       (recording-operations (atom [])) now)]
+        (is (= :failed (:deploy/status result)))
+        (is (uuid? (:deploy/grant-id result)))
+        (is (anomaly/anomaly? (:deploy/revocation-failure result)))))))
+
+(deftest ^{:stratum 2} a-failed-registration-keeps-the-grant-id-test
+  (let [register grant/register!]
+    (with-redefs [grant/register!
+                  (fn [dir issued]
+                    (register dir issued)
+                    (anomaly/anomaly :unavailable "publication not confirmed" {}))
+                  grant/revoke-stored!
+                  (fn [& _] (anomaly/anomaly :unavailable "registry unwritable" {}))]
+      (let [result (governed/transact! (context) deploy-config
+                                       (recording-operations (atom [])) now)]
+        (is (= :authority (:deploy/stage result)))
+        (is (uuid? (:deploy/grant-id result)) "the possibly live grant stays identifiable")
+        (is (anomaly/anomaly? (:deploy/revocation-failure result)))))))

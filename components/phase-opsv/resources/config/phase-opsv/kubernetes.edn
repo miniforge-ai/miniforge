@@ -1,0 +1,4 @@
+;; Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+{:kubernetes/timeout-ms 15000
+ :kubernetes/max-response-bytes 1048576
+ :kubernetes/max-resources 1000}

@@ -29,3 +29,18 @@
           result (events/authorize-action roles action requester)]
       (is (false? (:authorized? result)))
       (is (map? (:anomaly result))))))
+
+(deftest ^{:stratum 0} ordinary-control-roles-cannot-dispatch-full-stop
+  (let [requester {:principal "test-operator" :role :operator}
+        roles {:operator {:workflows #{:full-stop}}}
+        target {:target-type :workflow :target-id (random-uuid)}
+        action (events/create-control-action :full-stop target requester)
+        calls (atom [])
+        stream (events/create-event-stream {:sinks []})
+        decision (events/authorize-action roles action requester)
+        result (events/execute-control-action! stream action
+                                                 #(swap! calls conj %)
+                                                 {:roles roles})]
+    (is (false? (:authorized? decision)))
+    (is (= :denied (:status result)))
+    (is (empty? @calls))))

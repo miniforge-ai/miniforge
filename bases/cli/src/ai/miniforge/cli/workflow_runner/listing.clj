@@ -27,6 +27,18 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn ^{:stratum 0} listed-workflows
+  "The workflows `workflow list` shows, sorted: one entry per id and
+   version (two resource files can define the same workflow), without
+   the ones whose :workflow/metadata marks them :test-only?."
+  [workflows]
+  (->> workflows
+       (remove #(get-in % [:workflow/metadata :test-only?]))
+       (group-by (juxt :workflow/id :workflow/version))
+       vals
+       (map first)
+       (sort-by (juxt :workflow/id :workflow/version))))
+
 (defn ^{:stratum 0} format-workflow-listing [workflows]
   (if (empty? workflows)
     (println (messages/t :workflow-runner/no-workflows))
@@ -36,7 +48,8 @@
       (doseq [{:workflow/keys [id version description type]} workflows]
         (println (str (display/colorize :bold (str "  " (name id)))
                       " (v" version ")"
-                      "  " (display/colorize :yellow (messages/t :workflow-runner/workflow-type-label {:type (or type :unknown)}))
+                      (when type
+                        (str "  " (display/colorize :yellow (messages/t :workflow-runner/workflow-type-label {:type type}))))
                       (when description (str "\n    " description))))
         (println))
       (println (display/colorize :cyan (apply str (repeat 60 "─")))))))
@@ -68,7 +81,7 @@
 (defn ^{:stratum 1} list-workflows-from-resources []
   (let [list-workflows workflow/list-workflows]
     (->> (list-workflows)
-         (sort-by (juxt :workflow/id :workflow/version))
+         listed-workflows
          format-workflow-listing)))
 
 ;------------------------------------------------------------------------------ Layer 2

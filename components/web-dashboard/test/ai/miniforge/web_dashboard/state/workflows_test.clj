@@ -36,6 +36,11 @@
   [s]
   (java.util.Date/from (java.time.Instant/parse s)))
 
+(defn- ^{:stratum 0} iso-plus-seconds
+  "ISO-8601 instant string `seconds` after the instant string `base`."
+  [base seconds]
+  (str (.plusSeconds (java.time.Instant/parse base) seconds)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} wf-event
@@ -105,6 +110,23 @@
           (is (= 42 (get-in workflow [:metrics :tokens])))
           (is (= 3000 (get-in workflow [:metrics :duration-ms]))))))))
 
+(deftest ^{:stratum 2} get-workflows-keeps-publish-order-among-tied-timestamps-test
+  (testing "more events than an array map holds, all in one millisecond"
+    (let [stream (es/create-event-stream {:sinks []})
+          state  (core/create-state {:event-stream stream})
+          wf-id  (random-uuid)
+          at     "2026-03-28T12:00:00Z"
+          deltas (map str "abcdefghijkl")]
+      (es/publish! stream (wf-event :workflow/started wf-id at :workflow/spec {:name "Tied"}))
+      (es/publish! stream (wf-event :workflow/phase-started wf-id at :workflow/phase :plan))
+      (doseq [d deltas]
+        (es/publish! stream (wf-event :agent/chunk wf-id at :agent/id :plan :chunk/delta d)))
+      (es/publish! stream (wf-event :workflow/phase-started wf-id at :workflow/phase :implement))
+      (with-redefs [sut/events-dir-path (.getPath (temp-events-dir))]
+        (let [workflow (->> (sut/get-workflows state) (filter #(= wf-id (:id %))) first)]
+          (is (= (apply str deltas) (:latest-output workflow)) "chunks in publish order")
+          (is (= :implement (:phase workflow)) "the phase started last"))))))
+
 (deftest ^{:stratum 2} get-workflows-projects-dependency-health-test
   (testing "workflow summaries expose active dependency issues with attribution"
     (let [stream     (es/create-event-stream {:sinks []})
@@ -129,3 +151,35 @@
           (is (= :anthropic (:dependency/id issue)))
           (is (= :unavailable (:dependency/status issue)))
           (is (= :anthropic (:dependency/vendor (:failure-attribution workflow)))))))))
+
+(deftest ^{:stratum 2} get-workflows-summarizes-a-flooded-workflow-on-a-bounded-stream-test
+  (testing "a bounded stream drops old chunks but keeps every event the summary reads"
+    (let [stream     (es/create-event-stream {:sinks []
+                                              :retention {:max-workflows 3
+                                                          :max-events-per-workflow 20}})
+          state      (core/create-state {:event-stream stream})
+          events-dir (temp-events-dir)
+          wf-id      (random-uuid)
+          chunk-at   (partial iso-plus-seconds "2026-03-28T13:01:00Z")]
+      (es/publish! stream (wf-event :workflow/started wf-id "2026-03-28T13:00:00Z"
+                                    :workflow/spec {:name "Flooded"}))
+      (es/publish! stream (wf-event :workflow/phase-started wf-id "2026-03-28T13:00:01Z"
+                                    :workflow/phase :implement))
+      (doseq [i (range 300)]
+        (es/publish! stream (wf-event :agent/chunk wf-id (chunk-at i)
+                                      :agent/id :implementer :chunk/delta (str "d" i))))
+      (es/publish! stream (wf-event :workflow/phase-completed wf-id "2026-03-28T13:10:00Z"
+                                    :workflow/phase :implement :phase/tokens 42))
+      (es/publish! stream (wf-event :workflow/completed wf-id "2026-03-28T13:10:01Z"
+                                    :workflow/status :success))
+      (with-redefs [sut/events-dir-path (.getPath events-dir)]
+        (let [workflow (->> (sut/get-workflows state) (filter #(= wf-id (:id %))) first)]
+          (is (< (count (es/get-events stream)) 50) "304 events published, history bounded")
+          (is (= "Flooded" (:name workflow)))
+          (is (= :completed (:status workflow)))
+          (is (= :implement (:phase workflow)))
+          (is (= (parse-ts "2026-03-28T13:00:00Z") (:started-at workflow)))
+          (is (= (parse-ts "2026-03-28T13:10:01Z") (:completed-at workflow)))
+          (is (= 42 (get-in workflow [:metrics :tokens])))
+          (is (= (apply str (map #(str "d" %) (range 288 300)))
+                 (:latest-output workflow))))))))

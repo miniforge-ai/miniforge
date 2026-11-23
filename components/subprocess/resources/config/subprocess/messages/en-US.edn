@@ -1,0 +1,2 @@
+{:subprocess/messages
+ {:capture/cut-note "\n[output cut at {bytes} bytes; the rest was discarded]"}}

@@ -42,24 +42,50 @@
        (remove object/terminal?)
        (sort-by :object/id)))
 
-(defn- ^{:stratum 0} eligible-roles
-  "Roles subscribed to `event`, ordered by the manifest's role sequence so
-   selection never depends on map iteration order."
-  [workspace event]
-  (let [roles (get workspace :workspace/roles [])
-        table (get workspace :workspace/eligibility {})]
-    (filter (set (get table event #{})) roles)))
+(def ^{:stratum 0} event-only-responsibilities
+  "Responsibilities activated only by deadlock or budget events, never by
+   ordinary scheduling (N14 §5.2)."
+  #{:meta-watchdog})
 
-(defn- ^{:stratum 0} round-robin-next
-  "The role following the one that acted most recently, so no role starves."
+(defn ^{:stratum 0} responsibility-of
+  "The responsibility assigned to `participant`, else the participant itself."
+  [workspace participant]
+  (get-in workspace [:workspace/participant-roles participant] participant))
+
+;; The participant that acted most recently.
+(defn- ^{:stratum 0} last-actor
   [workspace]
-  (let [roles (vec (get workspace :workspace/roles []))
-        last-role (:tx/role (peek (get workspace :workspace/log [])))
-        position (.indexOf roles last-role)]
-    (when (seq roles)
-      (nth roles (mod (inc position) (count roles))))))
+  (let [logged (peek (get workspace :workspace/log []))]
+    (get workspace :workspace/last-actor
+         (or (:tx/participant logged) (:tx/role logged)))))
+
+;; The first of `candidates` following `previous` in `roster` order, wrapping.
+;; Rotation runs over the full roster, so a participant skipped this time
+;; never moves the rotation back to the start.
+(defn- ^{:stratum 0} next-after
+  [roster candidates previous]
+  (let [roster (vec roster)
+        [before after] (split-at (inc (.indexOf roster previous)) roster)]
+    (first (filter (set candidates) (concat after before)))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} ordinary-participants
+  "The quiescence population (N14 §7): manifest order, minus event-only and frame-refused."
+  [workspace]
+  (let [refused (get workspace :workspace/frame-refused #{})]
+    (remove #(or (contains? event-only-responsibilities (responsibility-of workspace %))
+                 (contains? refused %))
+            (get workspace :workspace/roles []))))
+
+;; Ordinary participants whose responsibility subscribes to `event`, in
+;; manifest order so selection never depends on map iteration order.
+;; Event-only participants never take structural work (N14 §5.2).
+(defn- ^{:stratum 1} eligible-participants
+  [workspace event]
+  (let [subscribed (set (get-in workspace [:workspace/eligibility event] #{}))]
+    (filter #(contains? subscribed (responsibility-of workspace %))
+            (ordinary-participants workspace))))
 
 (defn ^{:stratum 1} open-conflicts
   "Unresolved conflicts, the scheduler's highest structural priority."
@@ -85,27 +111,38 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(defn ^{:stratum 2} triggered-activation
+  "The highest §6.1 structural tier with work and an eligible participant, or nil."
+  [workspace]
+  (let [triggers [[:conflict (first (open-conflicts workspace))]
+                  [:blocked-goal (first (blocked-goals workspace))]
+                  [:stale-question (first (stale-questions workspace))]]
+        ;; A trigger only fires when something is waiting AND a participant
+        ;; is subscribed to it. An eligibility table that omits a
+        ;; subscription must not silently suppress the tiers beneath it.
+        fired (fn [[event target]]
+                (when-let [participant (and target
+                                            (next-after (get workspace :workspace/roles [])
+                                                        (eligible-participants workspace event)
+                                                        (last-actor workspace)))]
+                  {:activation/participant participant
+                   :activation/role (responsibility-of workspace participant)
+                   :activation/reason event
+                   :activation/target (:object/id target)}))]
+    (first (keep fired triggers))))
+
 (defn ^{:stratum 2} next-activation
-  "Select the next role to activate, or nil when nothing is eligible.
+  "Select the next participant to activate, or nil when nothing is eligible.
 
    Priority is the fixed §6.1 order: open conflicts, then blocked goals,
    then stale open questions, then round-robin. The trigger is returned
    alongside the role so the run loop can log why a role was chosen —
    §6.3 requires every scheduling decision to carry a reason."
   [workspace]
-  (let [triggers [[:conflict (first (open-conflicts workspace))]
-                  [:blocked-goal (first (blocked-goals workspace))]
-                  [:stale-question (first (stale-questions workspace))]]
-        ;; A trigger only fires when something is waiting AND a role is
-        ;; subscribed to it. An eligibility table that omits a subscription
-        ;; must not silently suppress the tiers beneath it, so a trigger with
-        ;; no eligible role is skipped rather than ending the search.
-        fired (fn [[event target]]
-                (when target
-                  (when-let [role (first (eligible-roles workspace event))]
-                    {:activation/role role
-                     :activation/reason event
-                     :activation/target (:object/id target)})))]
-    (or (first (keep fired triggers))
-        (when-let [role (round-robin-next workspace)]
-          {:activation/role role :activation/reason :round-robin}))))
+  (or (triggered-activation workspace)
+      (when-let [participant (next-after (get workspace :workspace/roles [])
+                                         (ordinary-participants workspace)
+                                         (last-actor workspace))]
+        {:activation/participant participant
+         :activation/role (responsibility-of workspace participant)
+         :activation/reason :round-robin})))

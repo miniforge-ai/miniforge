@@ -60,7 +60,64 @@
   [v]
   (not (or (nil? v) (number? v) (boolean? v) (inst? v) (uuid? v))))
 
-(defn ^{:stratum 0} secret-string?
+(defn ^{:stratum 0} pattern-secret-string?
+  "True when S matches one of the secret value patterns. Unlike
+   `secret-string?`, payment-card candidates are not checked: those are
+   found by checksum over any 12-19 digit run, which ordinary numbers in
+   source code pass one time in ten. False for anything not a string."
+  [s]
+  (boolean
+   (when (string? s)
+     (some #(re-find % s) (:redaction/secret-value-patterns @policy/policy)))))
+
+(defn ^{:stratum 0} pattern-secret-spans
+  "[start end] of every secret value pattern match in S, over the whole
+   string, so a match spanning lines is found whole. Payment-card
+   candidates are not checked (see `pattern-secret-string?`)."
+  [s]
+  (when (string? s)
+    (vec (for [^java.util.regex.Pattern pattern (:redaction/secret-value-patterns @policy/policy)
+               :let [m (re-matcher pattern s)]
+               span (loop [acc []]
+                      (if (.find m) (recur (conj acc [(.start m) (.end m)])) acc))]
+           span))))
+
+(defn ^{:stratum 0} redact-string
+  "Replace every secret-looking substring in S with the marker.
+
+   Substring replacement rather than whole-value replacement, so
+   `\"deploying with sk-live-abc…\"` keeps its sentence and loses only
+   the key. Whole-value replacement would destroy the audit trail the
+   marker exists to preserve.
+
+   A pattern with a named group `secret` has only that group replaced;
+   the rest of its match (a variable name, an `=`, quotes) is context
+   that locates the secret and stays. Any other pattern has its whole
+   match replaced."
+  [s]
+  ;; One pass per pattern rather than a single alternation over all of
+  ;; them: the alternation measured ~45% slower, because Java can use a
+  ;; literal-prefix optimization on each pattern separately and loses
+  ;; it once they are combined.
+  (let [marker (policy/marker)]
+    (payment-card/redact
+      (reduce (fn [acc ^java.util.regex.Pattern pattern]
+                (if (str/includes? (.pattern pattern) "(?<secret>")
+                  (let [m (re-matcher pattern acc)]
+                    (loop [from 0 parts []]
+                      (if (.find m)
+                        (recur (.end m "secret")
+                               (conj parts (subs acc from (.start m "secret")) marker))
+                        (apply str (conj parts (subs acc from))))))
+                  (str/replace acc pattern marker)))
+              s (:redaction/secret-value-patterns @policy/policy)) marker)))
+
+(defn ^{:stratum 0} redact-number [value]
+  (if (payment-card/present? value) (policy/marker) value))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} secret-string?
   "True when S contains a secret-shaped value.
 
    False for anything that is not a string. A predicate reached through
@@ -71,29 +128,7 @@
   (boolean
    (when (string? s)
      (or (payment-card/present? s)
-         (some #(re-find % s) (:redaction/secret-value-patterns @policy/policy))))))
-
-(defn ^{:stratum 0} redact-string
-  "Replace every secret-looking substring in S with the marker.
-
-   Substring replacement rather than whole-value replacement, so
-   `\"deploying with sk-live-abc…\"` keeps its sentence and loses only
-   the key. Whole-value replacement would destroy the audit trail the
-   marker exists to preserve."
-  [s]
-  ;; One str/replace per pattern rather than a single alternation over
-  ;; all of them: the alternation measured ~45% slower, because Java can
-  ;; use a literal-prefix optimization on each pattern separately and
-  ;; loses it once they are combined.
-  (let [marker (policy/marker)]
-    (payment-card/redact
-      (reduce (fn [acc pattern] (str/replace acc pattern marker))
-              s (:redaction/secret-value-patterns @policy/policy)) marker)))
-
-(defn ^{:stratum 0} redact-number [value]
-  (if (payment-card/present? value) (policy/marker) value))
-
-;------------------------------------------------------------------------------ Layer 1
+         (pattern-secret-string? s)))))
 
 (defn ^{:stratum 1} redact-key
   "Redact a secret hiding in K itself, by shape.

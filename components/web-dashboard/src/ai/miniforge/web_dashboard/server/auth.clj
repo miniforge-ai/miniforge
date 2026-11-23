@@ -79,14 +79,29 @@
    :headers (merge {"Location" location} headers)
    :body ""})
 
+(defn- ^{:stratum 0} secure-cookie?
+  "True when the session cookie must carry the Secure flag: the dashboard
+   is bound to a public address (`:public-bind?`, set at startup) and the
+   request reached it over TLS. http-kit does not terminate TLS, so a
+   public bind sits behind a TLS proxy; its X-Forwarded-Proto counts only
+   when the dashboard is configured to trust it (`:trust-proxy?`)."
+  [{:keys [public-bind? trust-proxy?]} req]
+  (boolean (and public-bind?
+                (or (= :https (:scheme req))
+                    (and trust-proxy?
+                         (= "https" (str/lower-case
+                                     (str/trim (str (get-in req [:headers "x-forwarded-proto"]))))))))))
+
 (defn- ^{:stratum 0} session-cookie-value
-  [{:keys [cookie-name session-ttl-ms]} token]
+  [{:keys [cookie-name session-ttl-ms]} token secure?]
   (str cookie-name "=" token
-       "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" (quot session-ttl-ms 1000)))
+       "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" (quot session-ttl-ms 1000)
+       (when secure? "; Secure")))
 
 (defn- ^{:stratum 0} clear-cookie-value
-  [{:keys [cookie-name]}]
-  (str cookie-name "=deleted; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"))
+  [{:keys [cookie-name]} secure?]
+  (str cookie-name "=deleted; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
+       (when secure? "; Secure")))
 
 (defn ^{:stratum 0} enabled?
   "True when dashboard login is configured."
@@ -272,7 +287,7 @@
   [auth-state req]
   (clear-session! auth-state req)
   (redirect-response "/login"
-                     {"Set-Cookie" (clear-cookie-value auth-state)}))
+                     {"Set-Cookie" (clear-cookie-value auth-state (secure-cookie? auth-state req))}))
 
 (defn ^{:stratum 2} control-unauthorized-response
   "Auth challenge for a state-mutating request that arrived without a
@@ -307,7 +322,8 @@
       (redirect-response "/")
       (if-let [session (authenticate! auth-state username password)]
         (redirect-response return-to
-                           {"Set-Cookie" (session-cookie-value auth-state (:token session))})
+                           {"Set-Cookie" (session-cookie-value auth-state (:token session)
+                                                               (secure-cookie? auth-state req))})
         (login-page-response {:status 401
                               :error "Invalid username or password."
                               :username username

@@ -16,6 +16,7 @@
    Layer 0: Gate registration"
   (:require
    [ai.miniforge.gate.pre-verify-lint.execution :as execution]
+   [ai.miniforge.gate.messages :as messages]
    [ai.miniforge.gate.registry :as registry]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -23,7 +24,7 @@
 (defmethod ^{:stratum 0} registry/get-gate :pre-verify-lint
   [_]
   {:name        :pre-verify-lint
-   :description "Run language linters before test execution to catch errors fast"
+   :description (messages/t :pre-verify-lint/description)
    :check       execution/check-pre-verify-lint
    :repair      execution/repair-pre-verify-lint})
 

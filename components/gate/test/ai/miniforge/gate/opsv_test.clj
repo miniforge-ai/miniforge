@@ -21,7 +21,10 @@
    [ai.miniforge.policy-pack.interface :as policy-pack]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
-   [clojure.test :refer [deftest is testing]]))
+   [clojure.test :refer [deftest is testing use-fixtures]]
+   [ai.miniforge.schema.interface :as schema]))
+
+(use-fixtures :once (schema/instrument-fixture 'ai.miniforge.gate.interface))
 
 ;------------------------------------------------------------------------------ Layer 0
 

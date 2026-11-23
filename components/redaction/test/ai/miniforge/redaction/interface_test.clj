@@ -55,6 +55,16 @@
 
 (defrecord ^{:stratum 0} Wrapper [inner])
 
+(deftest ^{:stratum 0} secret-key?-answers-by-name-test
+  (testing "a name the key patterns call secret is one, keyword or string,
+            whatever its value; a reference to a secret (a _NAME suffix) or
+            an ordinary name is not, and a non-name answers falsy"
+    (is (true? (sut/secret-key? "DBPASSWORD")))
+    (is (true? (sut/secret-key? :github_token)))
+    (is (false? (sut/secret-key? "GITHUB_TOKEN_NAME")))
+    (is (false? (sut/secret-key? "JAVA_HOME")))
+    (is (not (sut/secret-key? 42)))))
+
 (deftest ^{:stratum 0} secret-string?-answers-for-non-strings-test
   (testing "a predicate on the interface answers rather than throws"
     ;; Only a string can carry a secret by shape, so the answer for
@@ -183,7 +193,9 @@
           (is (not (str/includes? out body))
               "the base64 key material must not survive")))))
   (testing "connection string with inline credentials"
-    (is (str/includes? (sut/redact "postgres://user:pw@host/db") marker))))
+    (is (str/includes? (sut/redact "postgres://user:pw@host/db") marker))
+    (is (not (str/includes? (sut/redact "redis://:s3cret@redis:6379/0") "s3cret"))
+        "a password with an empty user name is still a credential")))
 
 (deftest ^{:stratum 1} free-text-keeps-its-sentence-test
   (testing "only the secret is replaced, so the message stays auditable"
