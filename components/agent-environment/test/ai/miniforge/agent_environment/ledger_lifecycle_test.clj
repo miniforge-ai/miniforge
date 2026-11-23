@@ -23,11 +23,9 @@
    [ai.miniforge.agent-environment.interface.ledger :as store]
    [ai.miniforge.agent-environment.lease :as lease]
    [ai.miniforge.agent-environment.ledger :as ledger]
-   [ai.miniforge.agent-environment.ledger-faults :refer [outage-world]]
+   [ai.miniforge.agent-environment.ledger-faults :as faults :refer [outage-world]]
    [ai.miniforge.anomaly.interface :as anomaly]
-   [clojure.test :refer [deftest is testing]])
-  (:import
-   [java.time Instant]))
+   [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -37,11 +35,7 @@
 
 (defn- ^{:stratum 0} second-controller
   [w]
-  (env/create-controller {:provider (get-in w [:c :controller/provider])
-                          :clock #(Instant/now)
-                          :emit! #(swap! (:receipts w) conj %)
-                          :persist! fx/memory-persister
-                          :ledger (get-in w [:c :controller/ledger])}))
+  (faults/controller-over w (get-in w [:c :controller/ledger])))
 
 (defn- ^{:stratum 0} acquire [w] (fx/acquire w (:a w) (fx/request w (:a w))))
 
@@ -124,16 +118,14 @@
     (is (nil? (:cancel! @(:calls w))))
     (is (= [:state/provisioned] (states w)))))
 
-(deftest ^{:stratum 1} test-a-release-the-ledger-misses-is-not-reported-done
+(deftest ^{:stratum 1} test-a-release-the-ledger-cannot-record-deletes-nothing
   (let [w (outage-world)
         current (:environment/lease (acquire w))]
     (swap! (:faults w) assoc :writes 0)
     (is (= unavailable (reason (env/release! (:c w) (:a w) current))))
-    (testing "given a delete the ledger misses → the receipt says it applied and why the ledger does not show it"
-      (is (= [:outcome/applied unavailable] (last-receipt w)))
-      (is (empty? (fake/live-namespaces (:fake w))))
-      (is (= [:state/provisioned] (states w))))
-    (testing "given the ledger back → the release is retried and recorded"
+    (is (nil? (:deprovision! @(:calls w))))
+    (is (= [:state/provisioned] (states w)))
+    (testing "given the ledger back → the release is recorded and runs"
       (swap! (:faults w) assoc :writes nil)
       (is (= {:call/outcome :outcome/applied} (env/release! (:c w) (:a w) current)))
       (is (= [:state/released] (states w))))))

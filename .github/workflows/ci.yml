@@ -124,6 +124,15 @@ jobs:
           bb lint:clj:all 2>&1 | tee clj-kondo.log
           echo "::endgroup::"
 
+      # clj-kondo reads the types generated from Malli function schemas. A
+      # schema change without `bb lint:malli-types` leaves them stale.
+      - name: Check Malli clj-kondo types
+        run: |
+          set -o pipefail
+          echo "::group::Malli clj-kondo types"
+          bb lint:malli-types:check 2>&1 | tee malli-types.log
+          echo "::endgroup::"
+
       # Guards the hand-maintained :extra-paths lists in bb.edn: loads each
       # such task's entry namespaces in a fresh bb process (no execution).
       # Without this, a grown require chain breaks `bb miniforge run` etc.
@@ -149,6 +158,7 @@ jobs:
           name: lint-logs-${{ github.sha }}
           path: |
             clj-kondo.log
+            malli-types.log
             bb-classpaths.log
             markdownlint.log
           retention-days: 7
@@ -211,8 +221,9 @@ jobs:
           fi
           echo "::endgroup::"
 
-      # Every *_test.clj under projects/miniforge/{test,integration} and
-      # projects/miniforge-core/test, on pull requests and main alike.
+      # Every *_test.clj under projects/miniforge/{test,integration},
+      # projects/miniforge-core/test and projects/agent-environments/test,
+      # on pull requests and main alike.
       # Polylith never runs these (they are not on the projects' :test
       # paths), so this step is their only CI coverage. It replaces the
       # per-namespace OPSV, gate-journal and failure-publication steps that

@@ -240,6 +240,27 @@
                  :intervention/target-id (random-uuid)}))
         (str verb " must be owned even with no live runner for its target"))))
 
+(deftest ^{:stratum 0} cancel-sources-map-onto-n3
+  (doseq [[source expected] {:cli :cli :tui :tui :native-app :tui :api :api
+                             :dashboard :api :meta-agent :supervisor :unknown :api}]
+    (is (= {:cancel/requested-by "op" :cancel/source expected}
+           (core/intervention-cancellation {:intervention/requested-by "op"
+                                            :intervention/request-source source
+                                            :intervention/justification "why"}))
+        (str source))))
+
+(deftest ^{:stratum 0} a-control-action-cancel-reports-its-action
+  (let [action-id (random-uuid)]
+    (doseq [id [action-id (str action-id)]]
+      (is (= {:cancel/requested-by "op" :cancel/source :control-action :action/id action-id}
+             (core/intervention-cancellation {:intervention/requested-by "op"
+                                              :intervention/request-source :dashboard
+                                              :intervention/details {:action/id id}})))))
+  (is (= "42" (:cancel/requested-by (core/intervention-cancellation
+                                     {:intervention/requested-by 42
+                                      :intervention/request-source :native-app})))
+      "a requester read off the wire as a non-string still records a string"))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} stage-golden!
@@ -292,6 +313,9 @@
       (let [stream (memory-stream)
             result (application/apply-intervention! stream (approved :cancel wid))]
         (is (true? (es/cancelled? cs)))
+        (is (= {:cancel/requested-by "test@example.invalid" :cancel/source :tui}
+               (es/cancellation cs))
+            "the cancel records who asked and from where, for :workflow/cancelled")
         (is (= :verified (:intervention/state result)))))))
 
 ;------------------------------------------------------------------------------ No-effect and unwired verbs

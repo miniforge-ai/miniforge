@@ -39,6 +39,7 @@
 
 (defn ^{:stratum 0} verify-publication!
   "Probe a protected, existing POSIX root for forced create-only and atomic replacement.
+   On macOS, refuse ACLs granting additional permissions on the resolved path.
    Returns :publication-verified or an anomaly. Does not establish backend
    persistence or interoperability with another process."
   [root]
