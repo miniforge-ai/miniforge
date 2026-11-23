@@ -18,7 +18,11 @@
       (require 'clojure.test)
       (try
         (let [suites '[ai.miniforge.file-durability.macos-acl-integration-test
-                       ai.miniforge.file-durability.native-probe-integration-test]]
+                       ai.miniforge.file-durability.native-probe-integration-test
+                       ai.miniforge.file-durability.directory-pin-scan-test
+                       ai.miniforge.file-durability.owned-resource-integration-test
+                       ai.miniforge.file-durability.directory-pin-integration-test
+                       ai.miniforge.file-durability.attached-directory-integration-test]]
           (clojure.core/run! require suites)
           (let [{:keys [fail error]} (apply clojure.test/run-tests suites)]
             (when-not (zero? (+ fail error))

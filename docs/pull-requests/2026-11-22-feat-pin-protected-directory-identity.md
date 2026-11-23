@@ -60,6 +60,7 @@ Validation completed on the actual native filesystem:
 - Nine exact safe REPL examples passed on Java 21 and Babashka.
 
 These are disposable local directory/process checks, not live provider actions.
+The existing Darwin CI packet includes the new suites in all four contexts.
 
 ## Deployment plan
 
