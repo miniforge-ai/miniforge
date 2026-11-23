@@ -18,7 +18,8 @@
 (ns ai.miniforge.gate.interface-test
   "Tests for the gate component."
   (:require
-   [clojure.test :refer [deftest is testing]]
+   [clojure.test :refer [deftest is testing use-fixtures]]
+   [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.gate.interface :as gate]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.event-stream.interface :as es]
@@ -28,6 +29,8 @@
    [ai.miniforge.gate.test]
    [ai.miniforge.gate.policy]
    [ai.miniforge.gate.format]))
+
+(use-fixtures :once (schema/instrument-fixture 'ai.miniforge.gate.interface))
 
 ;------------------------------------------------------------------------------ Layer 0
 

@@ -332,7 +332,7 @@
    first rung that leaked (coverage, routing, anchoring, delivery,
    attention, learning), and the gap report shows each rung beside its
    member misses. The ledger, classifier, phase wiring and report are on
-   main; two report slots are not yet measured."
+   main, and every slot is measured."
   :theme/informative-spec "work/done/codex-gap-instrument.spec.edn"
   :theme/normative-refs
   [{:doc "Thesium Codex SPEC T2 (SPEC-GAP.md)"
@@ -340,5 +340,9 @@
     :relation :primary}]
   :theme/completion-criteria
   ["Every slot of the gap report carries a measured value beside its member list; none reads :not-instrumented"]
-  :theme/status :in-flight
-  :theme/owner :christopher}}
+  :theme/status :complete
+  :theme/owner :christopher
+  :theme/completed #inst "2026-11-15"
+  :theme/completion-note
+  "The last two unmeasured slots landed: the consultation match rate
+   (#2519) and learning latency from miss to harvest decision (#2520)."}}

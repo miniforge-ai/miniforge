@@ -18,7 +18,8 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} decide
-  "Decide whether the requester's role permits this action on its target."
+  "Decide whether an ordinary control role permits the action on its target.
+   Full stop requires the separate run-scoped containment authorization."
   [roles action requester]
   (let [role (:role requester)
         role-perms (get roles role)
@@ -34,7 +35,9 @@
       (nil? category)
       (denied :anomalies/incorrect :control/unknown-target {:target-type target-type})
 
-      (and (keyword? action-type) (contains? permitted-actions action-type))
+      (and (keyword? action-type)
+           (not= :full-stop action-type)
+           (contains? permitted-actions action-type))
       (granted)
 
       :else

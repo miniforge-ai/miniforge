@@ -6,8 +6,8 @@
 
 # N8 — Observability Control Interface
 
-**Version:** 0.5.0-draft
-**Date:** 2026-11-04
+**Version:** 0.6.0-draft
+**Date:** 2026-11-15
 **Status:** Draft
 **Conformance:** MUST
 
@@ -165,16 +165,14 @@ Implementations MUST enforce capability levels:
 
 ### 2.3 RBAC Requirements
 
-CONTROL capability MUST integrate with RBAC:
+CONTROL capability MUST integrate with RBAC. The workflow permission map is
+defined in N4 §5.1.6. Authorizing any workflow control action requires its
+corresponding permission, including rollback, force-complete, and full stop.
 
 ```clojure
 {:rbac/role keyword                   ; Role identifier
  :rbac/permissions
- {:workflows                          ; Workflow-level permissions
-  {:pause boolean
-   :resume boolean
-   :retry boolean
-   :cancel boolean}
+ {:workflows workflow-permissions    ; Canonical workflow map from N4 §5.1.6
 
   :agents                             ; Agent-level permissions
   {:quarantine boolean
@@ -211,6 +209,7 @@ Implementations MUST support these control actions:
 | `retry`         | Retry current phase with optional context     | Medium     |
 | `rollback`      | Rollback to previous checkpoint               | Medium     |
 | `cancel`        | Cancel workflow execution                     | Medium     |
+| `full-stop`     | Fence all run work and destroy its isolated runtime (§3.5) | Critical |
 | `force-complete`| Force workflow to completed state (dangerous) | Critical   |
 
 #### 3.1.2 Agent Control
@@ -409,6 +408,7 @@ baseline. It MUST retain its own current authority and provider postconditions;
 safe-mode entry MUST NOT grant recovery authority or reopen general write circuits.
 Missing recovery authority MUST leave new forward effects fenced and produce
 an explicit unresolved recovery disposition for operator action.
+Full stop (§3.5) MUST take precedence over this compensation exception.
 
 #### 3.4.3 Safe-Mode Exit
 
@@ -459,6 +459,57 @@ Exiting safe-mode MUST require:
  :safe-mode/workflows-queued long        ; Number of workflows that were queued
  :message "Safe-mode exited after {duration}: {justification}"}
 ```
+
+---
+
+### 3.5 Full Stop
+
+Full stop is an operator-requested containment action for one workflow run,
+distinct from cancellation and system-wide safe mode. Implementations MUST
+authorize it through N4 using an explicit full-stop permission scoped to the
+target run, with Critical-risk approval where configured (§3.3). Cancellation
+permission or an experiment grant MUST NOT imply full-stop authority.
+
+After authorization, the host control plane MUST:
+
+1. Persist an irreversible full-stop fence for the run before dispatching
+   containment. All issuers and dispatchers MUST reject new workload effects
+   under that run, including recovery, PR creation, permanent apply, delegated
+   work, retries, and queued requests. Existing grants MUST NOT bypass the fence.
+2. Quarantine the run's authority and stop admitting work to its capsules.
+   The fence MUST survive controller restart and MUST be checked again at
+   effect dispatch; missing or unreadable fence state MUST fail closed.
+3. Contain and terminate only the proven run-owned isolation boundary under
+   N11 §4.4. These narrowly authorized control-plane actions and N3/N6 audit
+   persistence remain available; they MUST NOT invoke workload compensation
+   or become a general-purpose mutation escape path.
+4. Retain unresolved external effects and mark an active old run cancelled
+   under N2's terminality contract; an already terminal status MUST NOT change.
+   A stopped run MUST NOT be reopened by resume,
+   retry, safe-mode exit, checkpoint restoration, or a late provider response.
+
+Full stop MUST NOT wait for a phase boundary, workload cooperation, checkpoint
+export, or completion of an in-flight workload request before attempting
+containment. It MUST NOT claim to recall a request already accepted by an
+external provider. Runtime destruction alone MUST NOT imply that external
+effects were stopped, undone, or reconciled.
+
+The existing N3 §3.15 control-action audit and N6 §2.9 evidence contracts MUST
+record the requested action, actual containment outcome, and unresolved effects.
+Success MUST require a durable fence and provider-confirmed containment and
+termination. A partial failure MUST retain every applied fence and containment
+step; implementations MUST NOT roll them back to satisfy §12.2's ordinary
+failed-action rule. If persistence fails, the controller MUST still locally
+fence the run and attempt authorized containment under N3 §9.1.1.
+An outage MUST NOT waive run-scoped authorization, required Critical approval,
+or N11 ownership and identity verification. An unverifiable prerequisite MUST
+block the affected destructive action. The controller MUST report persistence
+failure and MUST NOT claim a restart-safe stop. Retrying containment MUST
+remain run/identity-bound and idempotent, never recreate the environment or
+admit workload execution.
+
+Recovery MUST use a fresh run and the known-safe checkpoint rules in the N2
+checkpoint delta §11. There is no full-stop exit action for the old run.
 
 ---
 
@@ -758,6 +809,7 @@ mf workflow resume <workflow-id>      # Resume workflow
 mf workflow retry <workflow-id>       # Retry current phase
 mf workflow rollback <workflow-id>    # Rollback to checkpoint
 mf workflow cancel <workflow-id>      # Cancel workflow
+mf workflow full-stop <workflow-id> --reason="..." # Contain and terminate this run (§3.5)
 
 mf agent quarantine <agent-id>        # Quarantine agent
 mf agent budget <agent-id> --tokens=N # Adjust agent budget
@@ -910,7 +962,7 @@ Conformance tests MUST verify:
 1. All control actions emit appropriate events
 2. High/Critical actions require approval when configured
 3. Control actions are recorded in evidence bundles
-4. Failed actions do not modify workflow state
+4. Failed actions do not modify workflow state, except full stop retains applied safety restrictions (§3.5)
 
 ### 12.3 Privacy Tests
 
@@ -944,13 +996,15 @@ deleted.
 
 | ID | Level | Requirement |
 |----|-------|-------------|
-| N8.CTL.1 | MUST | Emit `control-action/requested` and `control-action/executed` per N3 §3.15 for every action. |
+| N8.CTL.1 | MUST | Emit `control-action/requested` and `control-action/executed` per N3 §3.15 for every action. Authorized audit-outage containment retains these obligations under N3 §9.1.1. |
 | N8.CTL.2 | MUST | Require approval for High and Critical actions where configured (§3). |
 | N8.CTL.3 | MUST | Record every control action in the evidence bundle (N6 §2.1, §11). |
-| N8.CTL.4 | MUST NOT | Modify workflow state when an action fails (§12.2). |
+| N8.CTL.4 | MUST NOT | Modify workflow state when an ordinary action fails; a partial full stop retains applied safety restrictions (§3.5, §12.2). |
 | N8.CTL.5 | MUST | Carry `:scope/type` and the matching scope key on every control-action event (N3 §2.3). |
 | N8.CTL.6 | MUST | Treat control-action events as `:audit` retention class (§5.3, N3 §4.3.1). |
 | N8.CTL.7 | MUST | Fence forward OPSV effects while admitting only separately authorized staging-trial compensation during safe-mode (§3.4.2). |
+| N8.CTL.8 | MUST | Persist a dominant full-stop fence that blocks forward and recovery workload effects across restarts (§3.5). |
+| N8.CTL.9 | MUST | Retain partial containment and uncertain effects without claiming a successful stop or reopening the run (§3.5). |
 
 #### Privacy
 
@@ -986,6 +1040,11 @@ A conformance suite MUST cover, at minimum:
 7. **OPSV recovery isolation** — safe-mode rejects new forward effects and
    unauthorized compensation; valid recovery authority permits only bounded
    cleanup and verified original-baseline restoration (N8.CTL.7).
+8. **Full-stop dominance** — full stop rejects existing and new forward/recovery
+   grants, queued work, late results, and restart/resume bypasses.
+   Partial containment retains its fence and unresolved effects. Audit and
+   exact run-containment operations remain possible, not general workload writes
+   (N8.CTL.8, N8.CTL.9).
 
 ---
 
@@ -1059,6 +1118,10 @@ any requirement in §0–§14.
 ---
 
 **Version History:**
+
+- 0.6.0-draft (2026-11-15): Operator-approved full-stop containment, distinct
+  from safe mode's separately authorized recovery exception. Safe restart uses
+  the N2 checkpoint delta and run-owned destruction uses N11 §4.4.
 
 - 0.5.0-draft (2026-11-04): Aligned safe-mode with the approved separate OPSV
   staging-trial compensation path, without restoring forward mutation authority.

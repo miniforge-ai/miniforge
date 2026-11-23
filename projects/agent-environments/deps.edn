@@ -14,4 +14,8 @@
         ai.miniforge/file-durability {:local/root "../../components/file-durability"}
         ai.miniforge/kubernetes-target {:local/root "../../components/kubernetes-target"}
         ai.miniforge/messages {:local/root "../../components/messages"}
-        ai.miniforge/tenancy {:local/root "../../components/tenancy"}}}
+        ai.miniforge/tenancy {:local/root "../../components/tenancy"}}
+
+ ;; Cross-process tests start their own JVMs, so they run under
+ ;; `bb test:integration`, not Polylith's :test alias.
+ :aliases {:integration {:extra-paths ["test"]}}}

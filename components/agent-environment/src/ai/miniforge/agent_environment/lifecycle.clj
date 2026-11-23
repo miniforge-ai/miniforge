@@ -24,7 +24,9 @@
    [ai.miniforge.agent-environment.controller :as controller]
    [ai.miniforge.agent-environment.interface.protocol :as protocol]
    [ai.miniforge.agent-environment.lease :as lease]
+   [ai.miniforge.agent-environment.lifecycle.cleanup :as cleanup]
    [ai.miniforge.agent-environment.lifecycle.provisioning :as provisioning]
+   [ai.miniforge.agent-environment.lifecycle.reconcile :as reconcile]
    [ai.miniforge.agent-environment.lifecycle.support :as support]
    [ai.miniforge.agent-environment.receipt :as receipt]
    [ai.miniforge.agent-environment.refusal :as refusal]
@@ -43,12 +45,14 @@
 (defn- ^{:stratum 0} leased
   [c operation acting lease call]
   (let [subject (receipt/lease-subject acting lease)
-        entry (controller/entry c (lease/lease-key lease))
-        refusal (or (admission/tenant-refusal acting (:lease/tenant-id lease))
-                    (lease/lease-refusal entry operation lease (support/now c)))]
-    (if refusal
-      (controller/refuse! c subject operation refusal [])
-      (controller/finish! c subject operation (call (controller/target entry))))))
+        forged (admission/tenant-refusal acting (:lease/tenant-id lease))
+        entry (when-not forged (controller/entry c (lease/lease-key lease)))
+        refusal (when-not (anomaly/anomaly? entry) (lease/lease-refusal entry operation lease (support/now c)))]
+    (cond
+      forged (controller/refuse! c subject operation forged [])
+      (anomaly/anomaly? entry) (controller/refuse-anomaly! c subject operation entry)
+      refusal (controller/refuse! c subject operation refusal [])
+      :else (controller/finish! c subject operation (call (controller/target entry))))))
 
 (defn- ^{:stratum 0} observed
   [c lease target]
@@ -67,18 +71,35 @@
 
 (defn- ^{:stratum 0} stopped
   "Cancel in the ledger first, so no call is admitted while the provider
-   stops running work; the receipt says what the provider confirmed."
+   stops running work. A cancel the ledger did not record for this lease
+   never reaches the provider."
   [c lease target]
-  (controller/settle! c lease #(assoc % :entry/state :state/cancelled))
-  (let [steps (support/reported-steps (protocol/cancel! (support/provider c) target) :cancel/steps)]
-    {:call/value {:call/outcome (receipt/steps-outcome steps)} :call/steps steps}))
+  (let [now (support/now c)]
+    (anomaly/let-ok [changed (controller/settle! c lease (partial support/cancelled lease now))
+                     _ (support/lost-lease changed lease :environment/cancel now)]
+      (let [steps (support/reported-steps (protocol/cancel! (support/provider c) target) :cancel/steps)]
+        {:call/value {:call/outcome (receipt/steps-outcome steps)} :call/steps steps}))))
 
-(defn- ^{:stratum 0} settled
-  "Move the ledger to `state` whatever the provider confirmed: the ledger
-   stops admitting work on request, and the receipt says what applied."
-  [c lease steps state]
-  (controller/settle! c lease #(assoc % :entry/state state))
-  {:call/value {:call/outcome (receipt/steps-outcome steps)} :call/steps steps})
+(defn- ^{:stratum 0} provisioned
+  "Provision the reserved `generation` only while this controller still
+   holds it: the reservation is re-read just before the provider call, and
+   when that read fails or another controller may have reconciled it,
+   nothing is sent."
+  [c acting subject request generation]
+  (let [entry (controller/entry c (lease/request-key request))]
+    (cond
+      (anomaly/anomaly? entry) (controller/refuse-anomaly! c subject :environment/acquire entry)
+      (not (lease/claim-held? entry (:controller/id c) generation (support/now c))) (controller/refuse! c subject :environment/acquire :anomalies.agent-environment/claim-lost [])
+      :else (provisioning/provision c acting request generation))))
+
+(defn- ^{:stratum 0} once
+  "A decision reached after reconciling: a second reconcile is refused with
+   the entry's state reason, so an acquire reconciles at most once."
+  [decision]
+  (if (= :reconcile (:decision/kind decision))
+    (lease/decision :refuse (get lease/state->refusal (get-in decision [:decision/entry :entry/state])
+                                 :anomalies.agent-environment/acquire-in-flight))
+    decision))
 
 (defn ^{:stratum 0} preflight
   [c acting request]
@@ -93,29 +114,18 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} released
-  [c lease target]
-  (let [steps (support/reported-steps (protocol/deprovision! (support/provider c) target) :deprovision/steps)
-        state (if (= :outcome/applied (receipt/steps-outcome steps)) :state/released :state/cleanup-uncertain)]
-    (settled c lease steps state)))
-
-(defn ^{:stratum 1} acquire!
-  [c acting grant request]
-  (let [subject (receipt/request-subject acting request)
-        at (support/now c)
-        refused (or (admission/identity-refusal acting request)
-                    (admission/expiry-refusal request at)
-                    (admission/grant-refusal grant acting request at))
-        failures (when-not refused (support/preflight-failures c request))
-        decision (when-not (or refused (seq failures)) (controller/claim! c request))]
-    (cond
-      refused (controller/refuse! c subject :environment/acquire refused [])
-      (seq failures) (controller/refuse! c subject :environment/acquire
-                                         :anomalies.agent-environment/preflight-failed
-                                         (mapv support/failure-step failures))
-      (= :new (:decision/kind decision)) (provisioning/provision c acting request (:decision/generation decision))
-      (= :duplicate (:decision/kind decision)) (duplicate c acting request decision)
-      :else (controller/refuse! c subject :environment/acquire (:decision/reason decision) []))))
+(defn- ^{:stratum 1} acquisition
+  "Act on a claim decision: provision the new generation, return the
+   duplicate, or refuse. A `:reconcile` decision settles the stale
+   reservation first and acts on the fresh decision."
+  [c acting subject request decision]
+  (cond
+    (anomaly/anomaly? decision) (controller/refuse-anomaly! c subject :environment/acquire decision)
+    (= :new (:decision/kind decision)) (provisioned c acting subject request (:decision/generation decision))
+    (= :duplicate (:decision/kind decision)) (duplicate c acting request decision)
+    (= :reconcile (:decision/kind decision)) (acquisition c acting subject request
+                                                          (once (reconcile/reconcile! c acting request decision)))
+    :else (controller/refuse! c subject :environment/acquire (:decision/reason decision) [])))
 
 (defn ^{:stratum 1} readiness
   [c acting lease]
@@ -142,8 +152,24 @@
   [c acting lease]
   (leased c :environment/cancel acting lease #(stopped c lease %)))
 
+(defn ^{:stratum 1} release!
+  [c acting lease]
+  (leased c :environment/release acting lease #(cleanup/released! c lease %)))
+
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} release!
-  [c acting lease]
-  (leased c :environment/release acting lease #(released c lease %)))
+(defn ^{:stratum 2} acquire!
+  [c acting grant request]
+  (let [subject (receipt/request-subject acting request)
+        at (support/now c)
+        refused (or (admission/identity-refusal acting request)
+                    (admission/expiry-refusal request at)
+                    (admission/grant-refusal grant acting request at))
+        failures (when-not refused (support/preflight-failures c request))
+        decision (when-not (or refused (seq failures)) (controller/claim! c request))]
+    (cond
+      refused (controller/refuse! c subject :environment/acquire refused [])
+      (seq failures) (controller/refuse! c subject :environment/acquire
+                                         :anomalies.agent-environment/preflight-failed
+                                         (mapv support/failure-step failures))
+      :else (acquisition c acting subject request decision))))
