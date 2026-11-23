@@ -19,8 +19,10 @@
   "Boundary validation for the interface: an invalid input is an
    `:invalid-input` anomaly naming the schema it failed, and no receipt."
   (:require
+   [ai.miniforge.agent-environment.interface.ledger :as ledger]
    [ai.miniforge.agent-environment.interface.protocol :as protocol]
    [ai.miniforge.agent-environment.messages :as msg]
+   [ai.miniforge.agent-environment.schema :as schema]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.execution-grant.interface :as grant]
    [ai.miniforge.tenancy.interface :as tenancy]
@@ -31,6 +33,10 @@
 (defn- ^{:stratum 0} provider?
   [x]
   (satisfies? protocol/EnvironmentProvider x))
+
+(defn- ^{:stratum 0} ledger?
+  [x]
+  (satisfies? ledger/LedgerStore x))
 
 (defn- ^{:stratum 0} invalid
   [schema value]
@@ -43,14 +49,24 @@
 
 (def ^{:stratum 0} MaybeGrant [:maybe grant/ExecutionGrant])
 
+(defn- ^{:stratum 0} file?
+  [x]
+  (instance? java.io.File x))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} LedgerDir
+  "A ledger store directory: a non-blank path or a File."
+  [:or schema/NonBlank [:fn file?]])
 
 (def ^{:stratum 1} ControllerOptions
   [:map
    [:provider [:fn provider?]]
    [:clock fn?]
    [:emit! fn?]
-   [:persist! fn?]])
+   [:persist! fn?]
+   [:ledger [:fn ledger?]]
+   [:claim-ttl-ms {:optional true} pos-int?]])
 
 (defn- ^{:stratum 1} pair-failure
   [[schema value]]

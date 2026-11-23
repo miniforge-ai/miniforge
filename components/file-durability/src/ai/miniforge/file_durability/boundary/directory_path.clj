@@ -1,9 +1,10 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
-(ns ai.miniforge.workflow.boundary.checkpoint-path-policy
+(ns ai.miniforge.file-durability.boundary.directory-path
   "Validate lexical components before resolving trusted directory aliases."
-  (:require [ai.miniforge.workflow.boundary.checkpoint-directory-policy :as policy]
+  (:require [ai.miniforge.file-durability.boundary :as boundary]
+            [ai.miniforge.file-durability.boundary.directory-policy :as policy]
             [babashka.fs :as fs])
   (:import [java.nio.file Files]))
 
@@ -50,7 +51,7 @@
        (let [links (remove #(contains? seen (str (first %))) (checked-links current current-leaf?))
              visited (into seen (map (comp str first)) links)]
          (when (> (count visited) maximum-link-hops)
-           (policy/refuse! directory))
+           (boundary/refuse-directory! directory))
          (recur (into (pop pending) (map target-entry) links) visited))))))
 
 (comment ::trusted-original-directory-path)

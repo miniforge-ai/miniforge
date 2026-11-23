@@ -19,6 +19,7 @@
   (:require
    [ai.miniforge.agent-environment.controller :as controller]
    [ai.miniforge.agent-environment.lease :as lease]
+   [ai.miniforge.agent-environment.ledger.memory :as memory-ledger]
    [ai.miniforge.anomaly.interface :as anomaly]
    [clojure.test :refer [deftest is testing]])
   (:import
@@ -38,7 +39,8 @@
   {:environment/tenant-id #uuid "00000000-0000-0000-0000-00000000000a"
    :environment/run-id #uuid "00000000-0000-0000-0000-00000000000b"
    :environment/task-id #uuid "00000000-0000-0000-0000-00000000000c"
-   :environment/template-hash "t"})
+   :environment/template-hash "t"
+   :environment/expires-at (Instant/parse "2026-11-06T01:00:00Z")})
 
 (defn- ^{:stratum 0} collect! [receipts receipt] (swap! receipts conj receipt))
 
@@ -55,7 +57,10 @@
 (defn- ^{:stratum 1} fresh
   []
   (let [receipts (atom [])
-        c (controller/create {:provider nil :clock (constantly now) :emit! (partial collect! receipts)})]
+        c (controller/create {:provider nil
+                              :clock (constantly now)
+                              :emit! (partial collect! receipts)
+                              :ledger (memory-ledger/create)})]
     {:c c :receipts receipts}))
 
 (defn- ^{:stratum 1} provisioned!

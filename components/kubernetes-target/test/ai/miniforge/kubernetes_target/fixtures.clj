@@ -11,4 +11,20 @@
    :namespace-uid "namespace-uid"
    :workload-uid "deployment-uid"})
 
+(defn ^{:stratum 0} job []
+  {"apiVersion" "batch/v1"
+   "kind" "Job"
+   "metadata" {"namespace" "catalog" "name" "run-capsule" "uid" "original-job-uid"}})
+
+(defn ^{:stratum 0} pod [references]
+  {"metadata" {"namespace" "catalog" "ownerReferences" references}})
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} job-reference []
+  (let [parent (job)]
+    (merge (select-keys parent ["apiVersion" "kind"])
+           (select-keys (get parent "metadata") ["name" "uid"])
+           {"controller" true})))
+
 (comment ::mirrors-phase-opsv-kubernetes-membership-fixtures-target)

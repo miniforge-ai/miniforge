@@ -11,6 +11,7 @@
         ai.miniforge/redaction {:local/root "../redaction"}
         ai.miniforge/repo-analyzer {:local/root "../repo-analyzer"}
         ai.miniforge/response {:local/root "../response"}
+        ai.miniforge/schema {:local/root "../schema"}
         ai.miniforge/semantic-analyzer {:local/root "../semantic-analyzer"}
         ai.miniforge/logging {:local/root "../logging"}
         ai.miniforge/tool-registry {:local/root "../tool-registry"}
