@@ -214,6 +214,35 @@
         (finally
           (session/cleanup-session! s))))))
 
+(deftest ^{:stratum 0} write-cursor-mcp-config-preserves-unparseable-test
+  (let [tmp (java.nio.file.Files/createTempDirectory
+             "cursor-mcp" (make-array java.nio.file.attribute.FileAttribute 0))
+        dir (io/file (str tmp) ".cursor")
+        config-file (io/file dir "mcp.json")
+        backup-file (io/file dir "mcp.json.unparseable.bak")
+        server-cmd {:command "mf" :args ["mcp"]}]
+    (try
+      (.mkdirs dir)
+      (testing "an unparseable mcp.json is backed up before being replaced"
+        (spit config-file "{not json")
+        (cli-config/write-cursor-mcp-config! (str tmp) server-cmd)
+        (is (= "{not json" (slurp backup-file)))
+        (is (= "mf" (get-in (json/parse-string (slurp config-file))
+                            ["mcpServers" "artifact" "command"]))))
+      (testing "a second write does not clobber the first backup"
+        (spit config-file "[1,2]")
+        (cli-config/write-cursor-mcp-config! (str tmp) server-cmd)
+        (is (= "{not json" (slurp backup-file))))
+      (testing "a valid mcp.json is merged and not backed up"
+        (.delete backup-file)
+        (spit config-file (json/generate-string {"mcpServers" {"other" {"command" "x"}}}))
+        (cli-config/write-cursor-mcp-config! (str tmp) server-cmd)
+        (is (not (.exists backup-file)))
+        (is (= #{"other" "artifact"}
+               (set (keys (get (json/parse-string (slurp config-file)) "mcpServers"))))))
+      (finally
+        (doseq [f [config-file backup-file dir (io/file (str tmp))]] (.delete f))))))
+
 (deftest ^{:stratum 0} cursor-permission-allow-test
   (testing "mcp-tools translate to Mcp(...) + Write(**) rules"
     (let [allow (session/cursor-permission-allow session/mcp-tools nil)]

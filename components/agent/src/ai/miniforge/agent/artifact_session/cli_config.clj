@@ -70,10 +70,26 @@
 (def ^{:stratum 0} ^:private toml-table-pattern
   #"^\[[^]]+\]\s*$")
 
+(def ^{:stratum 0} ^:private cursor-mcp-unparseable-backup-suffix
+  "Suffix of the copy kept of a .cursor/mcp.json that is not a JSON object,
+   so replacing it never destroys the user's only copy."
+  ".unparseable.bak")
+
+(defn- ^{:stratum 0} read-cursor-mcp-config
+  "Parse an existing .cursor/mcp.json. Returns the JSON object map, or nil
+   when the content is not a JSON object (unparseable or another JSON type)."
+  [^java.io.File config-file]
+  (let [parsed (try (json/parse-string (slurp config-file))
+                    (catch Exception _ nil))]
+    (when (map? parsed) parsed)))
+
 (defn ^{:stratum 0} write-cursor-mcp-config!
   "Write or update .cursor/mcp.json with mcpServers.artifact entry.
 
    If the file exists, merges into existing JSON. Creates .cursor/ dir if needed.
+   An existing file that is not a JSON object is copied to
+   `mcp.json.unparseable.bak` (never overwriting an earlier copy) before it is
+   replaced, so the user's content is not silently lost.
 
    Returns the path to the config file."
   [config-root server-cmd]
@@ -81,11 +97,13 @@
         root (or config-root (System/getProperty "user.dir"))
         dir (io/file root ".cursor")
         config-file (io/file dir "mcp.json")
+        backup-file (io/file dir (str "mcp.json" cursor-mcp-unparseable-backup-suffix))
         entry {"command" command "args" args}
         existing (when (.exists config-file)
-                   (try (json/parse-string (slurp config-file))
-                        (catch Exception _ {})))
+                   (read-cursor-mcp-config config-file))
         config (assoc-in (or existing {}) ["mcpServers" "artifact"] entry)]
+    (when (and (.exists config-file) (nil? existing) (not (.exists backup-file)))
+      (io/copy config-file backup-file))
     (.mkdirs dir)
     (spit config-file (json/generate-string config {:pretty true}))
     (str config-file)))
