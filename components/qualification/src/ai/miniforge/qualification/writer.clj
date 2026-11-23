@@ -21,6 +21,7 @@
   (:require
    [ai.miniforge.qualification.messages :as msg]
    [cheshire.core :as json]
+   [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.string :as str]
    [slingshot.slingshot :refer [try+ throw+]])
@@ -60,6 +61,12 @@
    settings would follow the caller, and Babashka has no vars to reset."
   [report]
   (str (pr-str report) "\n"))
+
+(defn- ^{:stratum 0} reads-back?
+  "True when `text`, written as UTF-8, reads back as `report`."
+  [text report]
+  (try+ (= report (edn/read-string (String. (.getBytes ^String text "UTF-8") "UTF-8")))
+        (catch Exception _ false)))
 
 (defn- ^{:stratum 0} json-key
   "A map key as JSON text: a keyword keeps its namespace, `:report/gate-id`
@@ -116,8 +123,8 @@
 (defn ^{:stratum 2} write-report!
   "Write `report` under `out-dir` as EDN and JSON; returns the paths. Throws,
    leaving no new file, when a path leaves `out-dir` (as written or through
-   a symlink), when JSON would merge two keys, when a file exists, or when
-   a write fails."
+   a symlink), when JSON would merge two keys, when the EDN would not read
+   back as `report`, when a file exists, or when a write fails."
   [out-dir report]
   (let [{:keys [edn json] :as paths} (report-paths out-dir report)
         edn-body  (edn-text report)
@@ -126,6 +133,8 @@
       (refuse! :write/path-leaves-out-dir out-dir paths))
     (when-not json-body
       (refuse! :write/json-key-collision out-dir paths))
+    (when-not (reads-back? edn-body report)
+      (refuse! :write/edn-does-not-read-back out-dir paths))
     (io/make-parents edn)
     (when-not (and (real-inside? out-dir edn) (real-inside? out-dir json))
       (refuse! :write/directory-resolves-outside out-dir paths))

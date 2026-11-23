@@ -15,6 +15,7 @@
   :write/path-leaves-out-dir        "report path leaves the output directory"
   :write/json-key-collision         "two keys in one map would write the same JSON property"
   :write/directory-resolves-outside "report directory resolves outside the output directory"
+  :write/edn-does-not-read-back     "the report's EDN would not read back as the report"
 
   ;; Summary (run.clj)
   :summary/verdict          "Qualification {gate}: {verdict}, {passed} of {total} criteria passed"

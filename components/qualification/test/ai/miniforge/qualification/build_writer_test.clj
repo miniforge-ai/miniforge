@@ -107,10 +107,10 @@
                  (:edn (writer/report-paths "out" (assoc-in report [:report/build :build/git-sha] nil)))))))
 
 (deftest ^{:stratum 1} test-report-paths-stay-in-the-output-directory
-  (testing "given a gate id and a commit holding path separators and .. → both files beneath the output directory"
+  (testing "given a gate id of .. parts and a commit holding path separators and .. → both files beneath the output directory"
     (let [dir    (temp-dir)
           hostile (-> report
-                      (assoc :report/gate-id (keyword "../.." "escape"))
+                      (assoc :report/gate-id (keyword ".." ".."))
                       (assoc-in [:report/build :build/git-sha] "../../x"))
           base   (.getCanonicalPath (io/file dir))
           {:keys [edn json]} (writer/write-report! dir hostile)]
@@ -118,7 +118,7 @@
       (is (.startsWith (.getCanonicalPath (io/file json)) (str base "/"))))))
 
 (deftest ^{:stratum 1} test-writer-refuses-escapes-and-merged-keys
-  (testing "given a symlinked gate directory, two keys one JSON property, or an existing JSON file → throws, no new file"
+  (testing "given a symlinked gate directory, two keys one JSON property, EDN that would not read back, or an existing JSON file → throws, no new file"
     (let [dir     (temp-dir)
           outside (temp-dir)]
       (Files/createSymbolicLink (.toPath (io/file dir "fixture.gate")) (.toPath (io/file outside))
@@ -128,6 +128,10 @@
     (let [dir (temp-dir)]
       (is (thrown? Exception (writer/write-report! dir (assoc report :report/extra {:sink/calls 0 "sink/calls" 1}))))
       (is (empty? (.list (io/file dir)))))
+    (doseq [unreadable [(assoc report :report/gate-title "\uD800") (assoc report :report/extra (keyword "a b"))]]
+      (let [dir (temp-dir)]
+        (is (thrown? Exception (writer/write-report! dir unreadable)))
+        (is (empty? (.list (io/file dir))))))
     (let [dir (temp-dir) {:keys [edn json]} (writer/report-paths dir report)]
       (io/make-parents json) (spit json "old")
       (is (thrown? Exception (writer/write-report! dir report)))
