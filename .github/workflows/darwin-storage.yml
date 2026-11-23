@@ -1,0 +1,45 @@
+name: Darwin storage verification
+
+on:
+  pull_request:
+    paths:
+      - 'components/file-durability/**'
+      - 'projects/miniforge/test/ai/miniforge/file_durability/**'
+      - 'tasks/darwin_storage_test.clj'
+      - 'bb.edn'
+      - '.github/tool-versions.json'
+      - '.github/workflows/darwin-storage.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  native-acls:
+    name: Darwin ACL fixtures
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out the exact reviewed head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Read pinned tool versions
+        id: tools
+        run: jq -r 'to_entries[] | "\(.key)=\(.value)"' .github/tool-versions.json >> "$GITHUB_OUTPUT"
+
+      - name: Install Clojure and Babashka
+        uses: DeLaGuardo/setup-clojure@bc7570e912b028bbcc22f457adec7fdf98e2f4ed # 12.5
+        with:
+          cli: ${{ steps.tools.outputs.clojure-cli }}
+          bb: ${{ steps.tools.outputs.babashka }}
+
+      - name: Run isolated native storage fixtures
+        run: bb test:darwin-storage

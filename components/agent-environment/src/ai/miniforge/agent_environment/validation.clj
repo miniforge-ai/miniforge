@@ -65,7 +65,8 @@
    [:clock fn?]
    [:emit! fn?]
    [:persist! fn?]
-   [:ledger [:fn ledger?]]])
+   [:ledger [:fn ledger?]]
+   [:claim-ttl-ms {:optional true} pos-int?]])
 
 (defn- ^{:stratum 1} pair-failure
   [[schema value]]
