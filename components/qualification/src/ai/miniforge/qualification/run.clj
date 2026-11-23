@@ -72,6 +72,25 @@
   (and (= passed total)
        (= :verdict/incomplete (:report/verdict report))))
 
+(defn- ^{:stratum 0} passed-count [rows]
+  (count (filter #(= :status/pass (:criterion/status %)) rows)))
+
+(defn- ^{:stratum 0} verdict-line [report passed total]
+  (msg/t :summary/verdict {:gate    (:report/gate-id report)
+                           :verdict (name (:report/verdict report))
+                           :passed  passed
+                           :total   total}))
+
+(defn- ^{:stratum 0} row-line [row]
+  (msg/t :summary/row {:status      (name (:criterion/status row))
+                       :id          (:criterion/id row)
+                       :description (:criterion/description row)}))
+
+(defn- ^{:stratum 0} write-outcome-line [paths write-failure]
+  (if paths
+    (msg/t :summary/wrote {:path (:json paths)})
+    (msg/t :summary/write-failed {:message write-failure})))
+
 (defn ^{:stratum 0} exit-code
   "See `interface/exit-code`."
   [{:keys [report paths invalid-gate invalid-report]}]
@@ -94,19 +113,12 @@
 
     :else
     (let [rows   (:report/criteria report)
-          passed (count (filter #(= :status/pass (:criterion/status %)) rows))]
-      (-> [(msg/t :summary/verdict {:gate    (:report/gate-id report)
-                                    :verdict (name (:report/verdict report))
-                                    :passed  passed
-                                    :total   (count rows)})]
-          (cond-> (unpinned-pass? report passed (count rows)) (conj (msg/t :summary/unpinned)))
-          (into (map #(msg/t :summary/row {:status      (name (:criterion/status %))
-                                           :id          (:criterion/id %)
-                                           :description (:criterion/description %)})
-                     rows))
-          (conj (if paths
-                  (msg/t :summary/wrote {:path (:json paths)})
-                  (msg/t :summary/write-failed {:message write-failure})))))))
+          passed (passed-count rows)
+          total  (count rows)]
+      (-> [(verdict-line report passed total)]
+          (cond-> (unpinned-pass? report passed total) (conj (msg/t :summary/unpinned)))
+          (into (map row-line rows))
+          (conj (write-outcome-line paths write-failure))))))
 
 (defn- ^{:stratum 1} scenario-outcome
   "{:output o} for usable scenario output, else {:failure f}."
@@ -132,7 +144,9 @@
   (let [rows         (report-rows gate outcome)
         fixture-hash (when output (content-hash/content-hash (:scenario/fixtures output)))
         config-hash  (when output (content-hash/content-hash (:scenario/config output)))
-        pinned       (vocab/pinned? build fixture-hash config-hash)]
+        pinned       (vocab/pinned? build fixture-hash config-hash)
+        verdict      (vocab/report-verdict (map :criterion/status rows) pinned)
+        finished-at  (now)]
     (cond-> {:report/version      vocab/report-version
              :report/gate-id      (:gate/id gate)
              :report/gate-title   (:gate/title gate)
@@ -141,9 +155,9 @@
              :report/fixture-hash fixture-hash
              :report/config-hash  config-hash
              :report/started-at   started-at
-             :report/finished-at  (now)
+             :report/finished-at  finished-at
              :report/criteria     rows
-             :report/verdict      (vocab/report-verdict (map :criterion/status rows) pinned)}
+             :report/verdict      verdict}
       (:gate/issue gate) (assoc :report/issue (:gate/issue gate))
       failure            (assoc :report/failure failure))))
 

@@ -19,6 +19,7 @@
   "Write a report as EDN and JSON under an output directory, one directory
    per gate and one file pair per run."
   (:require
+   [ai.miniforge.qualification.messages :as msg]
    [cheshire.core :as json]
    [clojure.java.io :as io]
    [clojure.pprint :as pprint]
@@ -71,6 +72,11 @@
         parent  (.toRealPath (.getParent (.toAbsolutePath (.toPath (io/file path)))) no-opts)]
     (.startsWith parent base)))
 
+(defn- ^{:stratum 0} refuse!
+  "Throw the write refusal `message-key` names."
+  [message-key out-dir paths]
+  (throw (ex-info (msg/t message-key) {:out-dir out-dir :paths paths})))
+
 (defn- ^{:stratum 0} write-new!
   "Create `path` with `text`; fails if anything, a symlink too, is there."
   [path text]
@@ -107,17 +113,17 @@
    a symlink), when JSON would merge two keys, or when a file exists."
   [out-dir report]
   (let [{:keys [edn json] :as paths} (report-paths out-dir report)
-        refuse (fn [reason] (throw (ex-info reason {:out-dir out-dir :paths paths})))
-        bodies [(edn-text report) (when-not (json-key-collision? report) (json-text report))]]
+        edn-body  (edn-text report)
+        json-body (when-not (json-key-collision? report) (json-text report))]
     (when-not (and (inside? out-dir edn) (inside? out-dir json))
-      (refuse "report path leaves the output directory"))
-    (when-not (second bodies)
-      (refuse "two keys in one map would write the same JSON property"))
+      (refuse! :write/path-leaves-out-dir out-dir paths))
+    (when-not json-body
+      (refuse! :write/json-key-collision out-dir paths))
     (io/make-parents edn)
     (when-not (and (real-inside? out-dir edn) (real-inside? out-dir json))
-      (refuse "report directory resolves outside the output directory"))
-    (write-new! edn (first bodies))
-    (try+ (write-new! json (second bodies))
+      (refuse! :write/directory-resolves-outside out-dir paths))
+    (write-new! edn edn-body)
+    (try+ (write-new! json json-body)
           (catch Object _ (Files/deleteIfExists (.toPath (io/file edn))) (throw+)))
     paths))
 

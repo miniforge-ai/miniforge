@@ -11,6 +11,11 @@
   :result/duplicate         "more than one result for criterion {id}"
   :scenario/not-plain-data  "fixtures, config and results must be plain EDN data, so hashes repeat and the report can be written"
 
+  ;; Write refusals (writer.clj)
+  :write/path-leaves-out-dir        "report path leaves the output directory"
+  :write/json-key-collision         "two keys in one map would write the same JSON property"
+  :write/directory-resolves-outside "report directory resolves outside the output directory"
+
   ;; Summary (run.clj)
   :summary/verdict          "Qualification {gate}: {verdict}, {passed} of {total} criteria passed"
   :summary/unpinned         "  Every criterion passed, but the build is not a clean, identified commit, so the verdict is incomplete"
