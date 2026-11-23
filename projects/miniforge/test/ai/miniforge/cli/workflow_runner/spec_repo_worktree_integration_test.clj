@@ -47,8 +47,8 @@
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.supervisory-state.interface :as supervisory]
+   [ai.miniforge.workflow.isolation-support :as isolation]
    [babashka.fs :as fs]
-   [clojure.java.shell :as shell]
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]))
 
@@ -70,27 +70,15 @@
    (`task-<first 8 chars of the task id>`)."
   "task-")
 
-(def ^{:stratum 0} repo-config
-  "Local config of each throwaway repository: an identity for its seed
-   commit, and signing off."
-  [["user.email" "spec-repo-test@example.invalid"]
-   ["user.name" "Spec Repo Test"]
-   ["commit.gpgsign" "false"]])
-
 (def ^{:stratum 0} observed
   "What the probe phase saw of the worktree it ran in."
   (atom nil))
 
 (defn ^{:stratum 0} git!
-  "Trimmed stdout of git run in `dir`, with every GIT_* variable dropped
-   from the environment (a hook's GIT_DIR would otherwise send the command
-   to the hook's repository). Throws on a non-zero exit."
+  "Trimmed stdout of `isolation/git!` run in `dir` with the JVM's launch
+   environment, which that helper scrubs of every GIT_* variable."
   [dir & args]
-  (let [env (into {} (remove #(str/starts-with? (key %) "GIT_")) (System/getenv))
-        {:keys [exit out err]} (apply shell/sh "git" "-C" (str dir) (concat args [:env env]))]
-    (when-not (zero? exit)
-      (throw (ex-info "test git command failed" {:dir (str dir) :args args :err err})))
-    (str/trim out)))
+  (str/trim (:out (apply isolation/git! (isolation/launch-env) dir args))))
 
 (defn ^{:stratum 0} canonical [path] (str (fs/canonicalize path)))
 
@@ -99,10 +87,7 @@
    absent as \".\") pointed at `cwd-repo`."
   [acquire! cwd-repo]
   (fn [executor task-id env-config]
-    (let [repo-path (:repo-path env-config)]
-      (acquire! executor task-id
-                (cond-> env-config
-                  (or (nil? repo-path) (= "." (str repo-path))) (assoc :repo-path cwd-repo))))))
+    (acquire! executor task-id (isolation/redirect-repo-path env-config cwd-repo))))
 
 (defn ^{:stratum 0} home-config-loader
   "`load-merged-config` reading the user config from `home`."
@@ -160,15 +145,14 @@
   "A repository at `dir` on branch main, one commit holding the file at
    relative path `file`. Returns its canonical path."
   [dir file]
-  (let [config-file (str (fs/path dir ".git" "config"))]
-    (fs/create-dirs (fs/parent (fs/path dir file)))
-    (git! dir "init" "--quiet" "-b" "main")
-    (doseq [[k v] repo-config]
-      (git! dir "config" "--file" config-file k v))
-    (spit (str (fs/path dir file)) "{:spec/title \"probe\"}\n")
-    (git! dir "add" file)
-    (git! dir "commit" "--quiet" "--no-verify" "-m" "seed")
-    (canonical dir)))
+  (fs/create-dirs (fs/parent (fs/path dir file)))
+  (git! dir "init" "--quiet" "-b" isolation/host-branch)
+  (doseq [entry isolation/host-config]
+    (apply git! dir (isolation/config-args dir entry)))
+  (spit (str (fs/path dir file)) "{:spec/title \"probe\"}\n")
+  (git! dir "add" file)
+  (git! dir "commit" "--quiet" "--no-verify" "-m" "seed")
+  (canonical dir))
 
 (defn ^{:stratum 1} task-branches [repo]
   (remove str/blank? (str/split-lines (git! repo "branch" "--list" (str task-branch-prefix "*")

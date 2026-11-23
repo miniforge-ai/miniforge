@@ -45,22 +45,22 @@ Cause:
 
 ### Why `--worktree` does not override `:repo-path`
 
-`--worktree` is the execution worktree: the directory the backend preflight runs in, the Worktree line of the
-banner, and where the run works only if no task worktree can be acquired. #766 split it from
+`--worktree` is the execution worktree. The backend preflight runs in it, and the banner prints it as
+Worktree. The run works there only if no task worktree can be acquired. #766 split it from
 `:spec/source-dir` on purpose. Using it as the repository to cut from adds nothing and can reintroduce this
 bug:
 
-1. If `--worktree` is a worktree of the spec's repository, it shares that repository's git common dir, so
-   `git worktree add` from either path creates the same branch in the same repository. The base branch comes
-   from branch inference, not from `--worktree`.
+1. If `--worktree` is a worktree of the spec's repository, it shares that repository's git common dir.
+   `git worktree add` from either path then creates the same branch in the same repository. The base branch
+   comes from branch inference, not from `--worktree`.
 2. If `--worktree` is in another repository, cutting from it is this bug again.
 3. The observed run passed `--worktree` equal to the spec's repository and still failed, because nothing
    passed either path to the runner.
 
 ### Behavior change for same-repository runs
 
-A spec inside a linked worktree (for example `.claude/worktrees/<name>/work/x.spec.edn`) run from the main
-checkout now gets its task cut from that linked worktree's branch, not the main checkout's branch. The banner
+Take a spec inside a linked worktree, for example `.claude/worktrees/<name>/work/x.spec.edn`, run from the
+main checkout. Its task is now cut from that linked worktree's branch, not the main checkout's branch. The banner
 already printed that worktree and branch as Source and Branch. A spec in the working directory's own checkout,
 including `bb dogfood`, resolves to the same root and branch as before.
 
@@ -71,13 +71,17 @@ including `bb dogfood`, resolves to the same root and branch as before.
    temp repository stands in for the working directory: a `"."` repo path is sent there, so the developer
    checkout is never written to. The miniforge home is a temp dir. A probe phase records the git common dir,
    branch and files of the worktree it ran in.
-2. On main the test fails 5 of 6 assertions: the worktree belongs to the stand-in repository, is detached,
-   lacks the spec file, and the task branch is in the stand-in repository. With this change all pass (about
-   4.5 s, hence a project integration test).
+2. On main the test fails 5 of 6 assertions. The worktree belongs to the stand-in repository, is detached
+   and lacks the spec file, and the task branch is in the stand-in repository. With this change all pass
+   (about 4.5 s, hence a project integration test).
 3. 21 CLI test namespaces covering the changed functions (run, context, sandbox, identity, operator, manifest,
    kanban and related) pass: 95 tests, 282 assertions.
 4. After the runs, no `task-*` ref was created in the developer checkout and nothing was written under
    `~/.miniforge`.
+5. The test's git helper, repository config and `"."` redirect come from the project's
+   `ai.miniforge.workflow.isolation-support`. Its own git calls drop every `GIT_*` variable.
+   The CLI and executor calls under test inherit the test JVM's environment.
+   `tasks/test_runner.clj` strips `GIT_*` from that environment at launch.
 
 ## Deployment Plan
 
