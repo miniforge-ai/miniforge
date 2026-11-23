@@ -33,6 +33,15 @@ scratch. Verify primary/fatal/interruption priority and independent cleanup
 failures, both Java 21 products, source Babashka and a fresh package, with fault
 controls and safe examples. All local JVM work remains serialized.
 
+The final native packet passes 34 tests / 144 assertions in each Java 21
+product, source Babashka and a fresh package. The exact project integration
+alias passes the existing 7-test / 60-assertion cleanup packet. Eight changed
+namespace examples pass on Java 21 and Babashka, including the new 3-test /
+24-assertion provenance and 3-test / 7-assertion ownership-priority packets.
+Four new fault controls produce 6 / 4 / 2 / 6 expected failures and zero errors
+in both runtimes; five existing cleanup controls remain sensitive with
+4 / 5 / 1 / 1 / 2 failures and zero errors.
+
 ## Deployment plan
 
 No live providers, infrastructure actions or new effect authority. Unconfirmed
@@ -44,5 +53,5 @@ PR #2559 review comment 4664809703; #2555 retained root lifetime; merged #2560.
 
 ## Checklist
 
-- [ ] Implementation, regressions and owner standards/adversarial pass.
+- [x] Implementation, regressions and owner standards/adversarial pass.
 - [ ] Current-head CI, automatic and full reviews, resolved threads and merge gates.
