@@ -39,7 +39,8 @@
   {:environment/tenant-id #uuid "00000000-0000-0000-0000-00000000000a"
    :environment/run-id #uuid "00000000-0000-0000-0000-00000000000b"
    :environment/task-id #uuid "00000000-0000-0000-0000-00000000000c"
-   :environment/template-hash "t"})
+   :environment/template-hash "t"
+   :environment/expires-at (Instant/parse "2026-11-06T01:00:00Z")})
 
 (defn- ^{:stratum 0} collect! [receipts receipt] (swap! receipts conj receipt))
 
