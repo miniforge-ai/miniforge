@@ -34,6 +34,7 @@
      (catch InterruptedException _
        (.interrupt (Thread/currentThread))
        (capture/failure :interrupted))
+     (catch java.io.IOException _ (capture/failure :command-io-error))
      (catch Exception _ (capture/failure :command-error)))))
 
 (comment

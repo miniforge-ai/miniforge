@@ -17,6 +17,7 @@
    :interrupted process/interrupted-exit-code
    :output-limit process/output-limit-exit-code
    :input-error 1
+   :command-io-error 1
    :command-error 1})
 
 (defn ^{:stratum 0} start-drains! [^Process child acquired]
