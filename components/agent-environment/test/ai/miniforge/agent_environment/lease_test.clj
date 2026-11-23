@@ -65,19 +65,19 @@
 
 (deftest ^{:stratum 2} test-acquire-decision-per-ledger-state
   (testing "given no entry or a released one → a new generation"
-    (is (= :new (:decision/kind (lease/acquire-decision nil (request)))))
-    (is (= :new (:decision/kind (lease/acquire-decision (entry :state/released (request)) (request))))))
+    (is (= :new (:decision/kind (lease/acquire-decision nil (request) now))))
+    (is (= :new (:decision/kind (lease/acquire-decision (entry :state/released (request)) (request) now)))))
   (testing "given the identical request provisioned → duplicate"
-    (is (= :duplicate (:decision/kind (lease/acquire-decision (entry :state/provisioned (request)) (request))))))
+    (is (= :duplicate (:decision/kind (lease/acquire-decision (entry :state/provisioned (request)) (request) now)))))
   (testing "given a different request for the same key → conflict"
     (is (= :anomalies.agent-environment/conflicting-request
            (:decision/reason (lease/acquire-decision (entry :state/provisioned (request))
-                                                     (request :environment/template-hash "other"))))))
-  (testing "given an in-flight or uncertain entry → refused with the state's reason"
+                                                     (request :environment/template-hash "other")
+                                                     now)))))
+  (testing "given an in-flight entry → refused; an uncertain cleanup → reconciled"
     (is (= :anomalies.agent-environment/acquire-in-flight
-           (:decision/reason (lease/acquire-decision (entry :state/provisioning (request)) (request)))))
-    (is (= :anomalies.agent-environment/cleanup-uncertain
-           (:decision/reason (lease/acquire-decision (entry :state/cleanup-uncertain (request)) (request)))))))
+           (:decision/reason (lease/acquire-decision (entry :state/provisioning (request)) (request) now))))
+    (is (= :reconcile (:decision/kind (lease/acquire-decision (entry :state/cleanup-uncertain (request)) (request) now))))))
 
 (deftest ^{:stratum 2} test-reserve-advances-generation-past-released
   (let [claim (lease/claim controller-id expires-at)]
@@ -87,8 +87,30 @@
 (deftest ^{:stratum 2} test-requests-compare-by-digest
   (testing "given the same moment as a Date → the same request, a duplicate"
     (let [as-date (request :environment/expires-at (java.util.Date/from expires-at))
-          decision (lease/acquire-decision (entry :state/provisioned (request)) as-date)]
+          decision (lease/acquire-decision (entry :state/provisioned (request)) as-date now)]
       (is (= :duplicate (:decision/kind decision))))))
+
+(deftest ^{:stratum 2} test-a-claim-is-held-by-its-controller-for-its-generation
+  (let [held (entry :state/provisioning (request))]
+    (testing "given the same generation, controller and a live claim → held"
+      (is (lease/claim-held? held controller-id 1 now)))
+    (testing "given another generation, another controller, the claim's end, or no claim → not held"
+      (is (not (lease/claim-held? held controller-id 2 now)))
+      (is (not (lease/claim-held? held (random-uuid) 1 now)))
+      (is (not (lease/claim-held? held controller-id 1 expires-at)))
+      (is (not (lease/claim-held? (lease/reconciled held nil) controller-id 1 now))))
+    (testing "given a cleanup that kept the claim → not held"
+      (is (not (lease/claim-held? (assoc held :entry/state :state/releasing) controller-id 1 now))))))
+
+(deftest ^{:stratum 2} test-an-expired-claim-is-reconciled
+  (let [provisioning (entry :state/provisioning (request))]
+    (testing "given the claim's end has passed → reconcile, not in flight"
+      (is (= :reconcile (:decision/kind (lease/acquire-decision provisioning (request) expires-at)))))
+    (testing "given a provisioned entry past the claim's end → still a duplicate"
+      (is (= :duplicate (:decision/kind (lease/acquire-decision (entry :state/provisioned (request)) (request) expires-at)))))
+    (testing "given an environment → adopted; none → the reservation released"
+      (is (= [:state/provisioned nil] ((juxt :entry/state :entry/claim) (lease/reconciled provisioning {:environment/uid uid}))))
+      (is (= :state/released (:entry/state (lease/reconciled provisioning nil)))))))
 
 (deftest ^{:stratum 2} test-lease-refusal
   (let [current (lease/lease-for (request) uid 2)
@@ -126,12 +148,11 @@
     (testing "given any inst? expiry, java.sql.Date included → a decision, not an exception"
       (is (lease/expired? (request :environment/expires-at (java.sql.Date. 0)) deadline)))))
 
-(deftest ^{:stratum 2} test-a-cleanup-with-no-uid-keeps-holding-the-key
+(deftest ^{:stratum 2} test-a-cleanup-with-no-uid-is-reconciled-not-released-by-lease
   (let [uncertain (assoc (entry :state/cleanup-uncertain (request)) :entry/environment nil)]
-    (is (= :anomalies.agent-environment/cleanup-uncertain
-           (:decision/reason (lease/acquire-decision uncertain (request)))))
+    (is (= :reconcile (:decision/kind (lease/acquire-decision uncertain (request) now))))
     (is (= :anomalies.agent-environment/conflicting-request
-           (:decision/reason (lease/acquire-decision uncertain (request :environment/template-hash "other")))))
+           (:decision/reason (lease/acquire-decision uncertain (request :environment/template-hash "other") now))))
     (is (= :anomalies.agent-environment/unknown-lease
            (lease/lease-refusal uncertain :environment/release nil now)))))
 
