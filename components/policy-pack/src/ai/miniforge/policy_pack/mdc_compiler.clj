@@ -65,6 +65,20 @@
   (messages/create-translator "config/policy-pack/messages/system.edn"
                               :policy-pack/system))
 
+(defn- ^{:stratum 0} key-warnings
+  "One `message-key` message per key in `ks`: `translate` applied to
+   `params` plus that key under `:key`."
+  [translate message-key params ks]
+  (mapv #(translate message-key (assoc params :key %)) ks))
+
+(defn- ^{:stratum 0} compiled-value-warnings
+  "One `message-key` message per key in `ks`, each carrying under `:value`
+   the printed value the key has in `frontmatter`."
+  [translate message-key filename frontmatter ks]
+  (vec (for [k ks
+             :let [value (pr-str (get frontmatter k))]]
+         (translate message-key {:filename filename :key k :value value}))))
+
 ;; Detection and remediation config builders
 (defn- ^{:stratum 0} group-dotted-keys
   "Group dot-notation keys into nested maps.
@@ -141,11 +155,7 @@
 (defn ^{:stratum 0} parse-mdc
   "Parse an MDC file into its structured components.
 
-   `:frontmatter-raw` is the unparsed block. It is carried through because
-   the parse is lossy in one direction that matters: a nested YAML mapping
-   leaves no trace in the parsed map (see
-   `frontmatter/nested-block-keys`), so the only way to report it is to
-   re-read the source text.
+   `:frontmatter-raw` is the unparsed frontmatter block.
 
    Arguments:
    - content - Full .mdc file content string
@@ -205,6 +215,11 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} compile-failed-warning
+  "Pack-level warning for a failed `mdc->rule` result."
+  [{:keys [filename error]}]
+  (t :mdc/compile-failed {:filename filename :error error}))
+
 ;; Rule compilation
 (defn ^{:stratum 1} mdc->rule
   "Compile a single MDC file into a policy-pack rule map.
@@ -220,25 +235,17 @@
    - {:success? true  :rule <rule-map>}
    - {:success? false :error <message> :filename <string>}"
   [filename content]
-  ;; The two frontmatter-shape detectors run OUTSIDE the try, because one of
-  ;; the shapes they report (an indented dotted child) makes
-  ;; `group-dotted-keys` throw. Their findings have to survive into the
-  ;; failure result, or the author gets "Key must be integer" and nothing else.
+  ;; Detectors run outside the try so their warnings survive a throw from
+  ;; `group-dotted-keys`.
   (let [{:keys [frontmatter frontmatter-raw body]} (parse-mdc content)
-        nested-blocks   (frontmatter/nested-block-keys frontmatter-raw)
-        list-warnings
-        (into (mapv (fn [k]
-                      (t :mdc/commented-list-value
-                         {:filename filename
-                          :key      k
-                          :value    (pr-str (get frontmatter k))}))
-                    (frontmatter/commented-list-keys frontmatter-raw))
-              (mapv (fn [k]
-                      (t :mdc/interrupted-list
-                         {:filename filename
-                          :key      k
-                          :value    (pr-str (get frontmatter k))}))
-                    (frontmatter/interrupted-list-keys frontmatter-raw)))]
+        nested-blocks        (frontmatter/nested-block-keys frontmatter-raw)
+        commented-keys       (frontmatter/commented-list-keys frontmatter-raw)
+        interrupted-keys     (frontmatter/interrupted-list-keys frontmatter-raw)
+        commented-warnings   (compiled-value-warnings t :mdc/commented-list-value
+                                                      filename frontmatter commented-keys)
+        interrupted-warnings (compiled-value-warnings t :mdc/interrupted-list
+                                                      filename frontmatter interrupted-keys)
+        list-warnings        (into commented-warnings interrupted-warnings)]
    (try
     (let [fm           (group-dotted-keys frontmatter)
 
@@ -310,30 +317,23 @@
                  agent-behavior
                  (assoc :rule/agent-behavior agent-behavior))
 
-          ;; A nested-block key is a parse loss, not a parse error: the rule
-          ;; above compiled from frontmatter the author did not write. Report
-          ;; what it became, so a declared `hard-halt` silently landing on
-          ;; `:audit` with no detection is visible rather than inferred.
-          warnings
-          (into (mapv (fn [k]
-                        (t :mdc/nested-block-frontmatter
-                           {:filename  filename
-                            :key       k
-                            :detection (get detection :type)
-                            :action    action}))
-                      nested-blocks)
-                list-warnings)]
+          detection-type  (get detection :type)
+          nested-params   {:filename  filename
+                           :detection detection-type
+                           :action    action}
+          nested-warnings (key-warnings t :mdc/nested-block-frontmatter
+                                        nested-params nested-blocks)
+          warnings        (into nested-warnings list-warnings)]
 
       (schema-validation/success :rule rule
                                  (when (seq warnings)
                                    {:warnings warnings})))
 
     (catch Exception e
-      (let [warnings (into (mapv (fn [k]
-                                   (t :mdc/nested-block-compile-failed
-                                      {:filename filename :key k}))
-                                 nested-blocks)
-                           list-warnings)]
+      (let [nested-params   {:filename filename}
+            nested-warnings (key-warnings t :mdc/nested-block-compile-failed
+                                          nested-params nested-blocks)
+            warnings        (into nested-warnings list-warnings)]
         (cond-> (merge (schema-validation/failure :rule (.getMessage e))
                        {:filename filename})
           (seq warnings) (assoc :warnings warnings)))))))
@@ -402,22 +402,12 @@
                       :pack/created-at   now
                       :pack/updated-at   now}
 
-                ;; Collect warnings. Per-rule warnings from `mdc->rule` are
-                ;; folded in here: a rule can compile successfully and still
-                ;; have lost a declaration on the way (nested-block
-                ;; frontmatter), and the pack result is the only thing the
-                ;; `bb standards:pack` task prints.
+                ;; Collect warnings
                 warnings (cond-> []
                            (seq failures)
-                           (into (mapv #(t :mdc/compile-failed
-                                           {:filename (:filename %)
-                                            :error    (:error %)})
-                                       failures))
+                           (into (mapv compile-failed-warning failures))
 
-                           ;; Per-rule warnings ride on failures too: a
-                           ;; frontmatter shape that throws during grouping is
-                           ;; exactly the one whose bare exception explains
-                           ;; nothing.
+                           ;; Failed results carry warnings too, so read every result.
                            (some (comp seq :warnings) results)
                            (into (mapcat :warnings results))
 
