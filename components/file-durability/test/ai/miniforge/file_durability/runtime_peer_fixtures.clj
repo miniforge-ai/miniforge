@@ -37,4 +37,10 @@
   (or (System/getProperty peer-classpath-property)
       (when (= :jvm (protocol/runtime-kind)) (jvm-classpath))))
 
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} require-peer! []
+  (or (some-> (peer-classpath) peer-config)
+      (throw (ex-info "Native storage fixtures require the other installed runtime." {}))))
+
 (comment (peer-classpath))

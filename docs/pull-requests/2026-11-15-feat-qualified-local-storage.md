@@ -28,13 +28,17 @@ The approved boundary needs implementation and evidence, not an approval bypass.
 ## Changes in detail
 
 Foundation layer in file-durability; publication and ACL probes are in
-PRs #2532 and #2533.
+merged PRs #2532 and #2533; read-only backend observations are separated into
+PR #2552. This branch remains unpublished until that prerequisite merges.
 The internal API (surface class 1) requires a supported profile, an existing
 canonical protected root, and the other runtime's absolute launcher and classpath.
 There is no fallback based on POSIX permissions alone.
 
-Linux accepts an unambiguous writable ext4 or XFS mount with a non-virtual block
-device and no known unsafe flags. macOS requires writable APFS, enabled volume
+The initial Linux profile accepts an unambiguous writable single-device XFS mount,
+recognized AHCI or PCIe-NVMe driver ancestry, exact no-virtualization evidence from
+the installed native detector, and no known unsafe flags or separate journal/realtime
+devices. Missing or unknown evidence refuses. Ext4 remains deferred until positive
+journal-topology evidence exists. macOS requires writable APFS, enabled volume
 ownership, verified non-granting ACLs, and internal Apple Fabric backing.
 Unknown or unsupported topology refuses. The host must configure storage
 retained across restarts; workloads must not control the volume or its ownership.
@@ -52,10 +56,20 @@ ambiguous mount data, no peer proof, and root replacement. Test actual
 JVM/Babashka peers and forced publication on disposable files. Bound native
 storage metadata to a shared process/read deadline and a fixed output limit.
 
-Local macOS proof passed in both JVM products, Babashka source, and the
-fresh package. Each run passed 17 tests and 44 assertions. Each also
-qualified a disposable APFS root with real JVM/Babashka lock peers.
-The Linux mount policy has fixture coverage. This is not power-loss certification.
+The extended native packet passes 21 tests and 39 assertions in each JVM product,
+Babashka source and a fresh package. It covers the opaque-root contract, actual
+native ACL/metadata behavior, real JVM/Babashka mutual locks, and refusal to skip
+a missing peer runtime or classpath. The same packet is wired into the existing
+hosted Darwin gate. Local positive checks also qualified and resolved a disposable
+APFS root and attached its protected child, with three successful assertions in
+each mode. The Linux backend policy has producer-shaped fixture coverage in #2552.
+These are runtime/storage-contract checks, not power-loss certification or proof
+that an unsupported hosted VM qualifies as persistent authority storage.
+Targeted controls that bypass peer proof, root identity revalidation, or mandatory
+peer admission produce one, one and two assertion failures respectively, with no
+runtime errors, in both JVM and native Babashka. Ten exact qualification examples
+pass in each. The tooling regression pins product-relative and absolute peer
+classpath entries, including a path containing spaces.
 
 ## Deployment plan
 
@@ -70,5 +84,5 @@ PR #2530 consumes this prerequisite. PR #2528 owns the full-stop contract.
 ## Checklist
 
 - [ ] Implementation and adversarial standards pass complete.
-- [x] Serial qualification and packaged proofs complete.
+- [x] Serial native qualification and packaged proofs complete.
 - [ ] Current-head CI and full review settled.
