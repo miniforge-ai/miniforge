@@ -50,6 +50,7 @@
      components/policy-pack/src/.../schema.clj  — Rule schema (target format)
      .standards/                                 — source .mdc files (input)"
   (:require
+   [ai.miniforge.messages.interface :as messages]
    [ai.miniforge.policy-pack.mdc-compiler.agent-behavior :as agent-behavior]
    [ai.miniforge.policy-pack.mdc-compiler.dewey :as dewey]
    [ai.miniforge.policy-pack.mdc-compiler.frontmatter :as frontmatter]
@@ -59,6 +60,30 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private t
+  (messages/create-translator "config/policy-pack/messages/system.edn"
+                              :policy-pack/system))
+
+(defn- ^{:stratum 0} key-warnings
+  "One `message-key` message per key in `ks`: `translate` applied to
+   `params` plus that key under `:key`."
+  [translate message-key params ks]
+  (mapv #(translate message-key (assoc params :key %)) ks))
+
+(defn- ^{:stratum 0} compiled-value-warnings
+  "One `message-key` message per key in `ks`, each carrying under `:value`
+   the printed value the key has in `frontmatter`."
+  [translate message-key filename frontmatter ks]
+  (vec (for [k ks
+             :let [value (pr-str (get frontmatter k))]]
+         (translate message-key {:filename filename :key k :value value}))))
+
+(defn- ^{:stratum 0} rule-failure
+  "The `mdc->rule` failure result for `filename` and the exception it hit."
+  [filename ^Exception e]
+  (merge (schema-validation/failure :rule (.getMessage e))
+         {:filename filename}))
 
 ;; Detection and remediation config builders
 (defn- ^{:stratum 0} group-dotted-keys
@@ -136,15 +161,18 @@
 (defn ^{:stratum 0} parse-mdc
   "Parse an MDC file into its structured components.
 
+   `:frontmatter-raw` is the unparsed frontmatter block.
+
    Arguments:
    - content - Full .mdc file content string
 
    Returns:
-   - {:frontmatter {string-key value} :body string}"
+   - {:frontmatter {string-key value} :frontmatter-raw string :body string}"
   [content]
   (let [{:keys [frontmatter body]} (frontmatter/split-frontmatter content)]
-    {:frontmatter (frontmatter/parse-frontmatter frontmatter)
-     :body        body}))
+    {:frontmatter     (frontmatter/parse-frontmatter frontmatter)
+     :frontmatter-raw frontmatter
+     :body            body}))
 
 ;; Canonical taxonomy export — re-exported here (not just from `dewey`)
 ;; because `ai.miniforge.policy-pack.interface` and
@@ -193,6 +221,11 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} compile-failed-warning
+  "Pack-level warning for a failed `mdc->rule` result."
+  [{:keys [filename error]}]
+  (t :mdc/compile-failed {:filename filename :error error}))
+
 ;; Rule compilation
 (defn ^{:stratum 1} mdc->rule
   "Compile a single MDC file into a policy-pack rule map.
@@ -208,9 +241,21 @@
    - {:success? true  :rule <rule-map>}
    - {:success? false :error <message> :filename <string>}"
   [filename content]
+  ;; Detectors run outside the inner try so their warnings survive a throw
+  ;; from `group-dotted-keys`; the outer try turns a throw from parsing or
+  ;; the detectors into this file's failure instead of the pack's.
   (try
-    (let [{:keys [frontmatter body]} (parse-mdc content)
-          fm           (group-dotted-keys frontmatter)
+  (let [{:keys [frontmatter frontmatter-raw body]} (parse-mdc content)
+        nested-blocks        (frontmatter/nested-block-keys frontmatter-raw)
+        commented-keys       (frontmatter/commented-list-keys frontmatter-raw)
+        interrupted-keys     (frontmatter/interrupted-list-keys frontmatter-raw)
+        commented-warnings   (compiled-value-warnings t :mdc/commented-list-value
+                                                      filename frontmatter commented-keys)
+        interrupted-warnings (compiled-value-warnings t :mdc/interrupted-list
+                                                      filename frontmatter interrupted-keys)
+        list-warnings        (into commented-warnings interrupted-warnings)]
+   (try
+    (let [fm           (group-dotted-keys frontmatter)
 
           ;; ── Identity ────────────────────────────────────────────────────
           slug         (str/replace filename #"\.mdc$" "")
@@ -278,13 +323,29 @@
                  (assoc :rule/knowledge-content body-trimmed)
 
                  agent-behavior
-                 (assoc :rule/agent-behavior agent-behavior))]
+                 (assoc :rule/agent-behavior agent-behavior))
 
-      (schema-validation/success :rule rule {}))
+          detection-type  (get detection :type)
+          nested-params   {:filename  filename
+                           :detection detection-type
+                           :action    action}
+          nested-warnings (key-warnings t :mdc/nested-block-frontmatter
+                                        nested-params nested-blocks)
+          warnings        (into nested-warnings list-warnings)]
+
+      (schema-validation/success :rule rule
+                                 (when (seq warnings)
+                                   {:warnings warnings})))
 
     (catch Exception e
-      (merge (schema-validation/failure :rule (.getMessage e))
-             {:filename filename}))))
+      (let [nested-params   {:filename filename}
+            nested-warnings (key-warnings t :mdc/nested-block-compile-failed
+                                          nested-params nested-blocks)
+            warnings        (into nested-warnings list-warnings)]
+        (cond-> (rule-failure filename e)
+          (seq warnings) (assoc :warnings warnings))))))
+  (catch Exception e
+    (rule-failure filename e))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -353,16 +414,18 @@
                 ;; Collect warnings
                 warnings (cond-> []
                            (seq failures)
-                           (into (mapv #(str "Failed to compile "
-                                             (:filename %) ": " (:error %))
-                                       failures))
+                           (into (mapv compile-failed-warning failures))
+
+                           ;; Failed results carry warnings too, so read every result.
+                           (some (comp seq :warnings) results)
+                           (into (mapcat :warnings results))
 
                            ;; Warn about always-inject + empty phases (meta range)
                            (some (fn [r]
                                    (and (:rule/always-inject? r)
                                         (empty? (get-in r [:rule/applies-to :phases]))))
                                  sorted-rules)
-                           (conj "Some always-inject rules have no applicable phases (Dewey 900 meta range)"))]
+                           (conj (t :mdc/always-inject-no-phases)))]
 
             (schema-validation/success :pack pack {:warnings       warnings
                                         :compiled-count (count successes)

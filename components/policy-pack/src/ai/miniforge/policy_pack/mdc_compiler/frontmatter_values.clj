@@ -16,9 +16,10 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.policy-pack.mdc-compiler.frontmatter-values
-  "MDC frontmatter scalar-value parsing: quote-stripping and the
-   YAML-like value grammar (booleans, quoted strings, inline arrays,
-   bare strings). Split out of `ai.miniforge.policy-pack.mdc-compiler`
+  "MDC frontmatter scalar-value parsing: quote-stripping, backslash-escape
+   expansion for literal-text fields, and the YAML-like value grammar
+   (booleans, quoted strings, inline arrays, bare strings). Split out of
+   `ai.miniforge.policy-pack.mdc-compiler`
    (rule 210: the parent namespace measured 9 real layers, max 3; each
    concern moves to its own layer-coherent file — same approach as the
    dag-orchestrator split, miniforge#1485, and the workflow-runner
@@ -36,7 +37,39 @@
     (and (str/starts-with? s "'")  (str/ends-with? s "'"))  (subs s 1 (dec (count s)))
     :else s))
 
+(def ^{:stratum 0} ^:private escape-sequence-re
+  "One backslash plus the character it escapes. `.` excludes a newline, so a
+   value's trailing lone backslash simply does not match and survives as-is."
+  #"\\(.)")
+
+(defn- ^{:stratum 0} expand-escape
+  "Expand one `escape-sequence-re` match into the character it denotes.
+
+   `\\n`, `\\t` and `\\\\` are the recognized escapes. Every other sequence —
+   `\\s`, `\\d`, `\\b`, `\\(`, `\\.` — is returned verbatim, including its
+   backslash, so a value that is regex source passes through byte-for-byte."
+  [[match escaped-char]]
+  (case escaped-char
+    "n"  "\n"
+    "t"  "\t"
+    "\\" "\\"
+    match))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} unescape-literal-text
+  "Expand `\\n`, `\\t` and `\\\\` in a frontmatter value that is literal text;
+   every other backslash sequence, and any non-string, is returned unchanged.
+   One left-to-right pass, so `\\\\n` is a backslash followed by `n`.
+
+   Only for literal-text fields. Regex source (`detection.pattern`,
+   `detection.emailPattern`) and regex replacement strings
+   (`remediation.replacement`) must not pass through it: expanding escapes
+   there would change what a rule matches. The caller knows the field."
+  [s]
+  (if (string? s)
+    (str/replace s escape-sequence-re expand-escape)
+    s))
 
 (defn- ^{:stratum 1} parse-inline-array
   "Parse a JSON/YAML-style inline array string: [\"a\", \"b\", c].

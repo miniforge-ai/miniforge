@@ -17,8 +17,11 @@
 ;; limitations under the License.
 (ns ai.miniforge.policy-pack.mdc-compiler.frontmatter
   "MDC frontmatter line-grammar: splitting a file into frontmatter/body,
-   and parsing the frontmatter block's lines (key: value, multi-line
-   `- item` lists) into a string-keyed map. Split out of
+   parsing the frontmatter block's lines (key: value, multi-line
+   `- item` lists) into a string-keyed map, and reporting keys written
+   in a form the grammar cannot represent (`nested-block-keys`,
+   `commented-list-keys`, `interrupted-list-keys`).
+   Split out of
    `ai.miniforge.policy-pack.mdc-compiler` (rule 210: slice 2/6 of the
    same split train as
    `ai.miniforge.policy-pack.mdc-compiler.frontmatter-values`, miniforge#1729
@@ -70,7 +73,90 @@
       [k (assoc acc k [])]
       [nil (assoc acc k (frontmatter-values/parse-frontmatter-value v))])))
 
+(def ^{:stratum 0} ^:private blank-valued-key-re
+  "A `key:` line with no inline value. A trailing `# comment` counts as
+   no value."
+  #"^([A-Za-z][A-Za-z0-9._-]*)[ \t]*:[ \t]*(?:#.*)?$")
+
+(def ^{:stratum 0} ^:private indented-kv-re
+  "An indented `child: ...` line, dotted children included. An indented
+   `- item` line does not match."
+  #"^[ \t]+[A-Za-z][A-Za-z0-9._-]*[ \t]*:")
+
+(def ^{:stratum 0} ^:private commented-key-re
+  "A `key: # comment` line: a key whose only value is a comment."
+  #"^([A-Za-z][A-Za-z0-9._-]*)[ \t]*:[ \t]*#.*$")
+
+(def ^{:stratum 0} ^:private list-item-re
+  "A `- item` line, indented or flush-left."
+  #"^[ \t]*-[ \t]")
+
+(def ^{:stratum 0} ^:private comment-line-re
+  "A comment-only line, at any indentation."
+  #"^[ \t]*#")
+
+(def ^{:stratum 0} ^:private bare-key-re
+  "A `key:` line with no value and no trailing comment."
+  #"^([A-Za-z][A-Za-z0-9._-]*)[ \t]*:[ \t]*$")
+
+(def ^{:stratum 0} ^:private colon-comment-re
+  "A comment-only line that contains a colon."
+  #"^[ \t]*#.*:")
+
+(defn- ^{:stratum 0} frontmatter-lines
+  "Lines of `frontmatter-str` as a vector; empty when it is blank."
+  [frontmatter-str]
+  (if (str/blank? frontmatter-str)
+    []
+    (vec (str/split-lines frontmatter-str))))
+
+(defn- ^{:stratum 0} adjacent-pairs
+  "Each element of `coll` paired with the element after it, in order."
+  [coll]
+  (map vector coll (rest coll)))
+
+(defn- ^{:stratum 0} line-tails
+  "Each suffix of the `lines` vector, in order: a line followed by every
+   line below it."
+  [lines]
+  (map #(subvec lines %) (range (count lines))))
+
+(defn- ^{:stratum 0} key-over-child
+  "Key captured by `key-re` on `parent` when `child` matches `child-re`,
+   else nil."
+  [key-re child-re [parent child]]
+  (when (re-find child-re child)
+    (second (re-matches key-re parent))))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} noise-line?
+  "True when `line` is blank or comment-only."
+  [line]
+  (boolean (or (str/blank? line)
+               (re-find comment-line-re line))))
+
+(defn- ^{:stratum 1} list-block-line?
+  "True when `line` is blank, comment-only, or a `- item` line."
+  [line]
+  (boolean (or (str/blank? line)
+               (re-find comment-line-re line)
+               (re-find list-item-re line))))
+
+(defn- ^{:stratum 1} item-below-colon-comment?
+  "True when a `- item` line comes after the first colon-bearing comment
+   in `block`."
+  [block]
+  (->> block
+       (drop-while #(not (re-find colon-comment-re %)))
+       rest
+       (some #(re-find list-item-re %))
+       boolean))
+
+(defn- ^{:stratum 1} bare-key
+  "Key name when `line` is a bare `key:` line, else nil."
+  [line]
+  (second (re-matches bare-key-re line)))
 
 (defn- ^{:stratum 1} process-frontmatter-line
   "Process one frontmatter line. Returns [current-key acc]."
@@ -88,6 +174,51 @@
     :else [current-key acc]))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} nested-block-keys
+  "Keys written as a nested YAML mapping, which this grammar cannot
+   represent.
+
+   A key qualifies when it has no inline value (a trailing comment counts
+   as none) and its next line that is neither blank nor comment-only is
+   an indented `child: value`. Returns a vector of key names in file
+   order, [] when none qualify."
+  [frontmatter-str]
+  (->> (frontmatter-lines frontmatter-str)
+       (remove noise-line?)
+       adjacent-pairs
+       (keep #(key-over-child blank-valued-key-re indented-kv-re %))
+       vec))
+
+(defn ^{:stratum 2} commented-list-keys
+  "Keys written as `key: # comment` over a `- item` list.
+
+   A key qualifies when its only value is a comment and its next line
+   that is neither blank nor comment-only is a `- item` line, indented or
+   flush-left. Returns a vector of key names in file order, [] when none
+   qualify."
+  [frontmatter-str]
+  (->> (frontmatter-lines frontmatter-str)
+       (remove noise-line?)
+       adjacent-pairs
+       (keep #(key-over-child commented-key-re list-item-re %))
+       vec))
+
+(defn ^{:stratum 2} interrupted-list-keys
+  "Keys whose `- item` list has items below a comment line containing a
+   colon.
+
+   A key qualifies when it is a bare `key:` line and, in the run of
+   blank, comment-only and `- item` lines directly below it, a `- item`
+   line comes after the first colon-bearing comment. A colon-bearing
+   comment below the last item does not qualify. Returns a vector of key
+   names in file order, [] when none qualify."
+  [frontmatter-str]
+  (vec (for [[opener & below] (line-tails (frontmatter-lines frontmatter-str))
+             :let  [k     (bare-key opener)
+                    block (take-while list-block-line? below)]
+             :when (and k (item-below-colon-comment? block))]
+         k)))
 
 (defn ^{:stratum 2} parse-frontmatter
   "Parse YAML-like frontmatter text into a string-keyed map.

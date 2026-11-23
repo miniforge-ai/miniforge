@@ -29,6 +29,7 @@
   :classify/header-absent   "Copyright header absent; can be prepended"
   :classify/header-incorrect "Copyright header content incorrect; manual correction required"
   :classify/semantic-review  "Requires LLM semantic review"
+  :classify/manual-strategy "Rule declares a manual remediation strategy; not machine-applicable"
   :classify/unknown-rule    "Unknown rule; manual review required"
 
   ;; Scan phase — violation current-value labels
