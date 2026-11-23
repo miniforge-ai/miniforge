@@ -14,6 +14,12 @@
   "Use the installed peer classpath rather than assuming the JVM and BB layouts match."
   "miniforge.test.lock-peer-classpath")
 
+(def ^{:stratum 0} limits
+  "Native fixtures allow cold peer startup; deployments supply their own EDN bounds."
+  {:lock/timeout-ms 20000
+   :lock/poll-interval-ms 15
+   :lock/exit-timeout-ms 5000})
+
 (defn- ^{:stratum 0} peer-executable []
   (case (protocol/runtime-kind)
     :jvm (fs/which "bb")

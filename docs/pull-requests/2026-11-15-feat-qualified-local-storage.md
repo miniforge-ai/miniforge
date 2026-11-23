@@ -33,7 +33,8 @@ merged PR #2552. This branch is based on main with those prerequisites included.
 The internal API (surface class 1) requires a supported profile, an existing
 canonical protected root, and the other runtime's absolute launcher and classpath.
 There is no fallback based on POSIX permissions alone.
-Qualification now requires explicit finite pin-enumeration and acquisition limits.
+Qualification requires explicit finite pin-enumeration, acquisition and peer-lock
+limits, in separate pin and lock sections of the host configuration.
 After a read-only storage preflight, it captures native identity before acquiring
 the directory pin and compares that identity with the authoritative observation
 under the pin. The resulting opaque handle owns the pin for its entire lifetime.
@@ -118,9 +119,13 @@ explicit in every affected product; final composed validation includes these cas
 Host-only opt-in with trusted, installed launchers and a persistent root.
 Requalify after a controller restart. No cluster access, runtime shutdown,
 experiments or credential actions.
-The pending peer-lock foundation (#2559) and its cleanup prerequisite (#2560)
-must merge before this branch is published again. Its lock-limit contract then
-replaces the old timing constants; no compatibility arity or implicit bounds remain.
+The documented dependency chain is #2560 → #2559 → this PR. The local checkout
+is composed with pending #2559 at 3bb50af64 while its CI/review cycle runs;
+it will not be published until that prerequisite merges to main and the
+main-based composed diff is within budget and passes every gate. Its explicit
+lock-limit contract replaces the old timing constants; no compatibility arity
+or implicit bounds remain. New shared numeric schemas keep count bounds
+distinct from time units without duplicating their native integer constraint.
 
 ## Related issues/PRs
 

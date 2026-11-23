@@ -64,10 +64,12 @@
 (defn- ^{:stratum 0} verify-invalid-limits! [root]
   (with-redefs [pin/open! race/reject-io!]
     (doseq [limits [nil {}
-                    (dissoc fixtures/limits :pin/entry-limit)
-                    (assoc fixtures/limits :pin/entry-limit 0)
-                    (assoc fixtures/limits :pin/timeout-ms (inc Integer/MAX_VALUE))
-                    (assoc fixtures/limits :pin/timeout-ms Double/NaN)
+                    (update fixtures/limits :qualification/pin-limits dissoc :pin/entry-limit)
+                    (assoc-in fixtures/limits [:qualification/pin-limits :pin/entry-limit] 0)
+                    (assoc-in fixtures/limits [:qualification/pin-limits :pin/timeout-ms] (inc Integer/MAX_VALUE))
+                    (assoc-in fixtures/limits [:qualification/pin-limits :pin/timeout-ms] Double/NaN)
+                    (dissoc fixtures/limits :qualification/lock-limits)
+                    (assoc-in fixtures/limits [:qualification/lock-limits :lock/timeout-ms] 0)
                     (assoc fixtures/limits :unknown/limit 1)]]
       (is (= :invalid-input
              (:anomaly/type (durability/qualify-local-root! root fixtures/profile (fixtures/peer root) limits)))))))

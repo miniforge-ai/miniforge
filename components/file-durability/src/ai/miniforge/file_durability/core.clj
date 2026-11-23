@@ -8,6 +8,7 @@
             [ai.miniforge.file-durability.io :as file-io]
             [ai.miniforge.file-durability.boundary.directory-policy :as directory-policy]
             [ai.miniforge.file-durability.boundary.protected-directory :as directory]
+            [ai.miniforge.file-durability.boundary.runtime-locks :as locks]
             [ai.miniforge.file-durability.boundary.publication-probe :as publication-probe]
             [ai.miniforge.file-durability.boundary.qualified-root :as qualified-root]
             [ai.miniforge.file-durability.boundary.root-qualification :as qualification]))
@@ -42,6 +43,10 @@
     (boundary/call-with-exception-handling :resolve-qualified-root nil
                                           (partial qualified-root/resolve-root root) identity)
     (boundary/invalid-input :resolve-qualified-root)))
+
+(defn ^{:stratum 0} verify-runtime-locks! [root peer limits]
+  (boundary/call-with-exception-handling :verify-runtime-locks root
+                                        (partial locks/verify! root peer limits) identity))
 
 (defn ^{:stratum 0} verify-attached-directory [parent child]
   (boundary/call-with-exception-handling :verify-attached-directory child

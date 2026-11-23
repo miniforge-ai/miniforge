@@ -22,7 +22,7 @@
 
 (defn- ^{:stratum 0} reject-probe! [& _] (throw (AssertionError.)))
 
-(defn- ^{:stratum 0} replace-during-proof! [previous root _]
+(defn- ^{:stratum 0} replace-during-proof! [previous root _ _limits]
   (fs/move root previous)
   (durability/prepare-protected-directory! (fs/file root))
   true)

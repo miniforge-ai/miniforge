@@ -22,13 +22,13 @@
   (Files/delete (fs/path root))
   (durability/prepare-protected-directory! (fs/file root)))
 
-(defn ^{:stratum 0} close-before-confirmation! [held _root _peer]
+(defn ^{:stratum 0} close-before-confirmation! [held _root _peer _limits]
   (lease/release! @held)
   true)
 
-(defn ^{:stratum 0} fail-proof! [_held _root _peer] false)
+(defn ^{:stratum 0} fail-proof! [_held _root _peer _limits] false)
 
-(defn ^{:stratum 0} throw-proof! [_held _root _peer] (throw (IOException.)))
+(defn ^{:stratum 0} throw-proof! [_held _root _peer _limits] (throw (IOException.)))
 
 (defn ^{:stratum 0} reject-io! [& _] (throw (AssertionError.)))
 

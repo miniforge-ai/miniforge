@@ -11,6 +11,7 @@
             [ai.miniforge.file-durability.boundary.publication-probe :as publication]
             [ai.miniforge.file-durability.boundary.root-identity :as identity]
             [ai.miniforge.file-durability.interface :as durability]
+            [ai.miniforge.file-durability.runtime-peer-fixtures :as peer-runtime]
             [babashka.fs :as fs]
             [slingshot.slingshot :refer [try+]]))
 
@@ -24,7 +25,8 @@
 
 (def ^{:stratum 0} limits
   "Finite fixture budgets, supplied through the same required host configuration."
-  {:pin/entry-limit 256 :pin/timeout-ms 3000})
+  {:qualification/pin-limits {:pin/entry-limit 256 :pin/timeout-ms 3000}
+   :qualification/lock-limits peer-runtime/limits})
 
 (def ^{:stratum 0 :private true} native-release! lease/release!)
 

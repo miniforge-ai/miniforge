@@ -30,11 +30,11 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} prove! [directory profile peer before pin]
+(defn- ^{:stratum 1} prove! [directory profile peer limits before pin]
   (anomaly/let-ok [observation (observed! directory profile before)
                   published (publication/check! (:storage/root observation))]
     (if (and (= :publication-verified published)
-             (true? (locks/check! (:storage/root observation) peer)))
+             (true? (locks/check! (:storage/root observation) peer limits)))
       (confirmed! directory profile observation pin)
       (boundary/unqualified-store directory profile))))
 
@@ -43,7 +43,8 @@
 (defn ^{:stratum 2} qualify! [directory profile peer limits]
   (if (contains? store/observers [profile (System/getProperty "os.name")])
     (anomaly/let-ok [_ (store/observe profile directory)]
-      (admission/call! directory limits (partial prove! directory profile peer)))
+      (admission/call! directory (:qualification/pin-limits limits)
+                        (partial prove! directory profile peer (:qualification/lock-limits limits))))
     (boundary/unqualified-store directory profile)))
 
 (comment (keys store/observers))

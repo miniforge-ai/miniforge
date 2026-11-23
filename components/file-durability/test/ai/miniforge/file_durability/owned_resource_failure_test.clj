@@ -40,9 +40,9 @@
 (deftest ^{:stratum 2} test-failed-release-preserves-native-interruption-and-restores-the-flag
   (try+
     (let [primary (InterruptedException.)
-          secondary (java.io.IOException.)]
-      (let [interrupted? (verify-priority! primary secondary primary secondary)]
-        (is interrupted?)))
+          secondary (java.io.IOException.)
+          interrupted? (verify-priority! primary secondary primary secondary)]
+      (is interrupted?))
     (finally (Thread/interrupted))))
 
 (comment (clojure.test/run-tests 'ai.miniforge.file-durability.owned-resource-failure-test))

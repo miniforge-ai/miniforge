@@ -3,7 +3,7 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.file-durability.interface
   "API surface class 1: trusted-process filesystem primitives using caller-owned Files.
-   Writes return the input File; directory operations return resolved Paths or profiles.
+   Writes return Files, resolution returns Paths, qualification returns owned handles.
    Failures return anomalies and must propagate; native defaults are not protection proof.
    Stores own path authorization, publication atomicity, and record identity.
    Complete writes force file contents; publication needs a subsequent confirm!."
@@ -50,7 +50,7 @@
 (defn ^{:stratum 0} qualify-local-root!
   "Return an opaque, process-local root or an anomaly. Call from trusted host
    configuration with the other installed runtime and its absolute classpath.
-   Caller supplies finite pin limits and must release the handle after use.
+   Caller supplies finite pin and lock limits and must release the handle after use.
    The host must separately establish persistence of the configured store."
   [root profile peer limits]
   (if (m/validate spec/QualificationArguments [root profile peer limits])
@@ -74,6 +74,18 @@
   (if (m/validate spec/TextWrite [file text])
     (core/write-new-text! file text)
     (boundary/invalid-input :write-new)))
+
+(defn ^{:stratum 0} verify-runtime-locks!
+  "Return :runtime-locks-verified or an anomaly for an existing canonical POSIX root.
+   Trusted host configuration supplies an opposite installed runtime, absolute
+   classpath and finite :lock/timeout-ms, :lock/poll-interval-ms, :lock/exit-timeout-ms.
+   Proof waits share a host deadline; cleanup has its own :lock/exit-timeout-ms budget.
+   Unconfirmed termination retains private scratch and returns an anomaly.
+   This disposable native proof does not qualify backend persistence or authorize effects."
+  [root peer limits]
+  (if (m/validate spec/RuntimeLockArguments [root peer limits])
+    (core/verify-runtime-locks! root peer limits)
+    (boundary/invalid-input :verify-runtime-locks)))
 
 (defn ^{:stratum 0} verify-attached-directory
   "Return a canonical protected direct child on the parent's device, or refuse.
@@ -114,4 +126,6 @@
     (core/confirm! file)
     (boundary/invalid-input :confirm)))
 
-(comment (verify-attached-directory nil nil))
+(comment
+  (verify-runtime-locks! nil nil nil)
+  (verify-attached-directory nil nil))
