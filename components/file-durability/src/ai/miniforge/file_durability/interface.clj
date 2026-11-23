@@ -58,7 +58,8 @@
   "Return :runtime-locks-verified or an anomaly for an existing canonical POSIX root.
    Trusted host configuration supplies an opposite installed runtime, absolute
    classpath and finite :lock/timeout-ms, :lock/poll-interval-ms, :lock/exit-timeout-ms.
-   One host handshake deadline covers all marker/exit waits; cleanup may follow it.
+   Proof waits share a host deadline; cleanup has its own :lock/exit-timeout-ms budget.
+   Unconfirmed termination retains private scratch and returns an anomaly.
    This disposable native proof does not qualify backend persistence or authorize effects."
   [root peer limits]
   (if (m/validate spec/RuntimeLockArguments [root peer limits])

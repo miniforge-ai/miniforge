@@ -3,12 +3,10 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.file-durability.boundary.lock-probe
   "Start a distinct trusted runtime, then verify genuine mutual file-lock exclusion."
-  (:require [ai.miniforge.file-durability.boundary.directory-policy :as directory-policy]
-            [ai.miniforge.file-durability.boundary.lock-protocol :as protocol]
+  (:require [ai.miniforge.file-durability.boundary.lock-protocol :as protocol]
             [ai.miniforge.file-durability.boundary.lock-peer :as peer]
-            [ai.miniforge.file-durability.boundary.native-probe :as native]
             [ai.miniforge.file-durability.boundary.probe-deadline :as deadline]
-            [babashka.fs :as fs]
+            [ai.miniforge.file-durability.boundary.probe-resources :as resources]
             [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -38,19 +36,19 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} check! [directory peer limits]
-  (fs/with-temp-dir [root {:dir directory
-                          :prefix probe-prefix
-                          :posix-file-permissions directory-policy/private-permissions}]
-    (let [child (volatile! nil)
-          until (deadline/after-ms (:lock/timeout-ms limits))]
+(defn- ^{:stratum 1} prove! [peer limits root child]
+  (let [until (deadline/after-ms (:lock/timeout-ms limits))]
+    (try+
       (protocol/allocate! root)
-      (try+
-        (boolean
-         (and (protocol/with-attempt root (partial start-peer! child root peer limits until))
-              (confirm-peer-held! root @child limits until)))
-        (catch InterruptedException _ (interrupted-proof))
-        (finally
-          (when-let [started @child] (native/stop! started)))))))
+      (boolean
+       (and (protocol/with-attempt root (partial start-peer! child root peer limits until))
+            (confirm-peer-held! root @child limits until)))
+      (catch InterruptedException _ (interrupted-proof)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} check! [directory peer limits]
+  (resources/call! directory probe-prefix (:lock/exit-timeout-ms limits)
+                   (partial prove! peer limits)))
 
 (comment (protocol/runtime-kind))

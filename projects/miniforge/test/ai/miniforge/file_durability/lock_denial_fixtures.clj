@@ -3,9 +3,20 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.file-durability.lock-denial-fixtures
   "Native fault peers; production marker and lock policy remains unchanged."
-  (:require [babashka.process :as process]))
+  (:require [babashka.process :as process]
+            [clojure.test :refer [is]])
+  (:import [java.util.concurrent TimeUnit]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0 :private true} fixture-exit-ms
+  "Independent teardown after assertions, never a grace period for the production result."
+  2000)
+
+(defn ^{:stratum 0} delete-after-death! [observed delete! root]
+  (when-let [[child] @observed]
+    (is (not (.isAlive ^Process (:proc child)))))
+  (delete! root))
 
 (def ^{:stratum 0} scenarios
   "Fault peers speak the marker protocol but cannot prove mutual exclusion."
@@ -18,6 +29,13 @@
   (await root marker until poll-ms))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} dispose! [observed]
+  (Thread/interrupted)
+  (when-let [[child] @observed]
+    (let [^Process worker (:proc child)]
+      (.destroyForcibly worker)
+      (is (.waitFor worker fixture-exit-ms TimeUnit/MILLISECONDS)))))
 
 (defn ^{:stratum 1} launch! [mode observed root _configuration _limits]
   (let [child (process/process ["/bin/sh" "-c" (get scenarios mode) "lock-denial-fixture" (str root)])]

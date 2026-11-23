@@ -19,7 +19,7 @@
   "Accept bounded native storage metadata, not an unbounded command stream."
   65536)
 
-(defn ^{:stratum 0} stop! [child]
+(defn- ^{:stratum 0} stop! [child]
   (when-let [^Process worker (:proc child)]
     (when (.isAlive worker) (.destroyForcibly worker))))
 

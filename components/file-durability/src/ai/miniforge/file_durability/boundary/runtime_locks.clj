@@ -17,7 +17,7 @@
     (if (and (= path (.toPath root))
              (= :posix (policy/filesystem-profile path))
              (= path (acl/check! path))
-             (probe/check! path peer limits))
+             (true? (probe/check! path peer limits)))
       :runtime-locks-verified
       (boundary/unverified-locks root))))
 
