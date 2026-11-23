@@ -106,6 +106,12 @@ current identity revalidation and actual native release.
 The final composed packet must be rerun after the unsupported-store preflight
 regression and after consuming the independently reviewed peer-lock foundation.
 No current-head review or merge gate is waived by these local results.
+The owner pass also reproduced a failure-priority defect in the adopted resource
+transfer helper: failed close masked fatal operation errors and interruption
+(three tests, six failures, zero runtime errors before the fix). It now uses
+the existing resource-cleanup interface so fatal/cancellation causes survive
+and independent close failures remain suppressed. The required dependency is
+explicit in every affected product; final composed validation includes these cases.
 
 ## Deployment plan
 
