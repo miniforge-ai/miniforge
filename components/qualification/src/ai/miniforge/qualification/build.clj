@@ -61,10 +61,14 @@
     (when (and sha (re-matches #"[0-9a-f]{40}" sha)) sha)))
 
 (defn ^{:stratum 1} clean?
-  "True only when git reports no changed or untracked files in `root`.
-   Untracked files are listed whatever `status.showUntrackedFiles` says."
+  "True only when git reports no changed or untracked files in `root`,
+   whatever config says about untracked files and submodules, and no file
+   is marked assume-unchanged or skip-worktree, which hides it from status."
   [root]
-  (= "" (git-output root "status" "--porcelain" "--untracked-files=all")))
+  (boolean
+   (and (= "" (git-output root "status" "--porcelain" "--untracked-files=all" "--ignore-submodules=none"))
+        (when-let [files (git-output root "ls-files" "-v")]
+          (not (re-find #"(?m)^[a-zS] " files))))))
 
 (defn ^{:stratum 1} deps-hash
   "Content hash of the dependency files in `root`, keyed by file name; a

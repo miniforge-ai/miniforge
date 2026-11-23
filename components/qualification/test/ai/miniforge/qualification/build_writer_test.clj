@@ -69,6 +69,22 @@
         (is (= {:build/git-sha nil :build/clean? false}
                (select-keys (build/build-identity dir) [:build/git-sha :build/clean?])))))))
 
+(deftest ^{:stratum 1} test-change-hidden-from-status-is-not-clean
+  (testing "given a committed file → clean; marked assume-unchanged, then changed → status empty, not clean"
+    (when (not-any? #(System/getenv %) repository-env-vars)
+      (let [dir (temp-dir)
+            git (fn [& args] (apply shell/sh "git" "-c" "user.name=t" "-c" "user.email=t@t.invalid"
+                                    "-c" "commit.gpgsign=false" (concat args [:dir dir])))]
+        (git "init" "-q")
+        (spit (io/file dir "f") "a")
+        (git "add" "f")
+        (git "commit" "-q" "-m" "c")
+        (is (true? (build/clean? dir)))
+        (git "update-index" "--assume-unchanged" "f")
+        (spit (io/file dir "f") "b")
+        (is (= "" (:out (git "status" "--porcelain"))))
+        (is (false? (build/clean? dir)))))))
+
 (deftest ^{:stratum 1} test-deps-hash-follows-dependency-files
   (testing "given the same files → the same hash; a changed deps.edn → a different hash"
     (let [a (temp-dir) b (temp-dir)]

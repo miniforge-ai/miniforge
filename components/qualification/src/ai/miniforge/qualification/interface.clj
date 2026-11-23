@@ -56,7 +56,8 @@
    and write the report as EDN and JSON under `:out-dir`. Options:
    `:out-dir` (default \"target/qualification\"), `:command` (the argv
    that repeats the run), `:root` (the workspace whose build is recorded,
-   default \".\").
+   default \".\"), `:build-fn` (reads the build from `:root`; default
+   reads git there, and a caller that passes another vouches for it).
 
    Returns {:report r :paths {:edn :json}}; {:report r :write-failure
    message}; {:report r :invalid-report problems}, writing nothing, when the
