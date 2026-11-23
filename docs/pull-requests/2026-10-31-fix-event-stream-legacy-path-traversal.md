@@ -19,8 +19,10 @@ same segment.
 A raw id such as `../outside` made the legacy probe resolve to a
 directory beside the events directory. If that directory existed, it was
 returned as the run's events directory. Resume and event queries then
-read from outside the events directory. Ids can arrive from the
-unauthenticated ingest endpoint, so the id is untrusted input.
+read from outside the events directory. Ids arrive inside ingested
+events, so the id is untrusted input. The dashboard's ingest endpoint
+requires a token, but a token holder still chooses the id. The path
+must be safe whatever the id is.
 
 A missing id had a related fault. `(str nil)` is the empty string, so
 the legacy probe resolved to the events directory itself.
