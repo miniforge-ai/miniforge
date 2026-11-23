@@ -18,7 +18,7 @@
   "/proc/self/mountinfo")
 
 (defn- ^{:stratum 0} mount-row [device]
-  (str "36 35 " device " / / rw - ext4 /dev/root rw"))
+  (str "36 35 " device " / / rw - xfs /dev/root rw"))
 
 (def ^{:stratum 0} ^:private transport-path
   "The namespace's controller supplies the authoritative NVMe transport attribute."

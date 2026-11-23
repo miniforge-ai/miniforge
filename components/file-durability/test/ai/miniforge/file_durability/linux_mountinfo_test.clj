@@ -11,7 +11,7 @@
 
 (def ^{:stratum 0 :private true} root
   "An eligible ancestor must not mask an unsupported, more specific mount."
-  "36 35 98:0 / / rw - ext4 /dev/root rw")
+  "36 35 98:0 / / rw - xfs /dev/root rw")
 
 (defn- ^{:stratum 0} nested [type mount-options super-options]
   (str "37 36 98:1 / /mnt/local\\040disk " mount-options
@@ -33,12 +33,17 @@
     (is (= "36" (:mount/id (observe "/mnt/local disk-unrelated/run" (nested "tmpfs" "rw" "rw")))))))
 
 (deftest ^{:stratum 2} test-unsupported-most-specific-mount-does-not-fall-back
-  (doseq [type ["tmpfs" "nfs4" "overlay" "fuse.example" "unknown"]]
+  (doseq [type ["tmpfs" "nfs4" "overlay" "fuse.example" "unknown" "ext4"]]
     (is (nil? (observe "/mnt/local disk/run" (nested type "rw" "rw"))))))
 
 (deftest ^{:stratum 2} test-read-only-filesystems-and-known-unsafe-barrier-options-are-refused
   (doseq [[mount-options super-options] [["ro" "rw"] ["rw" "ro"] ["rw" "rw,barrier=0"] ["rw" "rw,norecovery"]]]
-    (is (nil? (observe "/mnt/local disk/run" (nested "ext4" mount-options super-options))))))
+    (is (nil? (observe "/mnt/local disk/run" (nested "xfs" mount-options super-options))))))
+
+(deftest ^{:stratum 2} test-separate-journal-and-realtime-devices-are-not-inferred-from-the-data-device
+  (doseq [option ["logdev=/dev/vdb1" "rtdev=/dev/vdb2" "logdev=/dev/vdb1,rtdev=/dev/vdb2"]
+          [mount-options super-options] [[(str "rw," option) "rw"] ["rw" (str "rw," option)]]]
+    (is (nil? (observe "/mnt/local disk/run" (nested "xfs" mount-options super-options))))))
 
 (deftest ^{:stratum 2} test-ambiguous-or-unparseable-mount-tables-are-refused
   (let [path "/mnt/local disk/run"
