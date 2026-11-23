@@ -5,8 +5,10 @@
   (:require [ai.miniforge.dag-executor.protocols.executor :as executor]
             [ai.miniforge.dag-executor.protocols.impl.kubernetes :as kubernetes]
             [ai.miniforge.dag-executor.protocols.impl.kubernetes-client :as client]
+            [ai.miniforge.dag-executor.protocols.impl.runtime.deadline-command :as command]
             [ai.miniforge.dag-executor.result :as result]
             [ai.miniforge.dag-executor.kubernetes-creation-fixtures :as fixtures]
+            [ai.miniforge.dag-executor.kubernetes-pod-fixtures :as pods]
             [cheshire.core :as json]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
@@ -24,6 +26,7 @@
 (def ^{:stratum 0 :private true} transport-settings
   "Distinct request, readiness and poll budgets expose cross-wired settings."
   {:kubernetes/creation-request-timeout-ms 4500
+   :kubernetes/pod-observation-request-timeout-ms 7000
    :kubernetes/pod-ready-timeout-ms 16000
    :kubernetes/pod-ready-poll-interval-ms 500})
 
@@ -69,6 +72,10 @@
 (defn- ^{:stratum 0} readiness [& _]
   (result/ok {:pod-name "mock-capsule-pod"}))
 
+(defn- ^{:stratum 0} expected-owner-readback [timeout-ms created until arguments]
+  (is (some #{(str "--request-timeout=" timeout-ms "ms")} arguments))
+  (pods/read-pod! created until arguments))
+
 (defn- ^{:stratum 0} reject-io! [& _] (throw (AssertionError.)))
 
 (defn- ^{:stratum 0} invalid-setting [options]
@@ -105,6 +112,7 @@
 (deftest ^{:stratum 1} test-invalid-transport-budgets-are-rejected-at-configuration
   (with-redefs [shell/sh reject-io!]
     (doseq [key [:kubernetes/creation-request-timeout-ms
+                 :kubernetes/pod-observation-request-timeout-ms
                  :kubernetes/pod-ready-timeout-ms
                  :kubernetes/pod-ready-poll-interval-ms]
             invalid [nil false 0 1.5 (inc Integer/MAX_VALUE)]]
@@ -135,8 +143,11 @@
 
 (deftest ^{:stratum 1} test-acquire-creates-once-and-retains-the-exact-job-receipt
   (let [instance (kubernetes/create-kubernetes-executor {:namespace "capsules"})
-        submitted (atom [])]
-    (with-redefs [shell/sh (partial capture-request! submitted shipped-request-timeout-ms (:default capsule-budgets))
+        submitted (atom [])
+        created (atom nil)]
+    (with-redefs [shell/sh (partial pods/capture-created! created
+                                   (partial capture-request! submitted shipped-request-timeout-ms (:default capsule-budgets)))
+                  command/run! (partial pods/read-pod! created)
                   client/wait-for-pod-ready readiness
                   kubernetes/delete-job reject-io!]
       (let [acquired (executor/acquire-environment! instance (random-uuid) {})
@@ -145,12 +156,16 @@
         (is (= 1 (count @submitted)))
         (is (= (:uid fixtures/identity-metadata) (:job-uid metadata)))
         (is (= (:resourceVersion fixtures/identity-metadata) (:job-creation-resource-version metadata)))
-        (is (= "capsules" (:namespace metadata)))))))
+        (is (= "capsules" (:namespace metadata)))
+        (is (= "observed-pod-uid" (:pod-uid metadata)))
+        (is (= "observed-pod-version" (:pod-observed-resource-version metadata)))))))
 
 (deftest ^{:stratum 1} test-explicit-capsule-budgets-are-submitted-and-confirmed
   (let [instance (kubernetes/create-kubernetes-executor (capsule-resources (:executor capsule-budgets)))
-        submitted (atom [])]
-    (with-redefs [shell/sh (partial capture-budget! submitted)
+        submitted (atom [])
+        created (atom nil)]
+    (with-redefs [shell/sh (partial pods/capture-created! created (partial capture-budget! submitted))
+                  command/run! (partial pods/read-pod! created)
                   client/wait-for-pod-ready readiness]
       (is (result/ok? (executor/acquire-environment! instance (random-uuid) {})))
       (is (result/ok? (executor/acquire-environment! instance (random-uuid)
@@ -193,8 +208,12 @@
   (let [settings transport-settings
         instance (kubernetes/create-kubernetes-executor settings)
         submitted (atom [])
+        created (atom nil)
         timeout-ms (:kubernetes/creation-request-timeout-ms settings)]
-    (with-redefs [shell/sh (partial capture-request! submitted timeout-ms (:default capsule-budgets))
+    (with-redefs [shell/sh (partial pods/capture-created! created
+                                   (partial capture-request! submitted timeout-ms (:default capsule-budgets)))
+                  command/run! (partial expected-owner-readback
+                                        (:kubernetes/pod-observation-request-timeout-ms settings) created)
                   client/wait-for-pod-ready (partial expected-readiness settings)]
       (is (result/ok? (executor/acquire-environment! instance (random-uuid) {}))))))
 

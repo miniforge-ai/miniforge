@@ -29,6 +29,7 @@
    resources/executor/kubernetes/job-template.yaml"
   (:require
    [ai.miniforge.dag-executor.protocols.impl.kubernetes-acquisition :as acquisition]
+   [ai.miniforge.dag-executor.protocols.impl.kubernetes-admission :as admission]
    [ai.miniforge.dag-executor.protocols.impl.kubernetes-client :as client]
    [ai.miniforge.dag-executor.protocols.impl.kubernetes-defaults :as defaults]
    [ai.miniforge.dag-executor.protocols.impl.kubernetes-job-creation :as creation]
@@ -164,14 +165,6 @@
                   :raw (:out result)})
       (result/ok {:status :unknown :error (:err result)}))))
 
-(defn- ^{:stratum 0} retain-environment!
-  "Retain the confirmed Job incarnation alongside the legacy Pod cache."
-  [cache {:keys [job-name task-id workdir options]} receipt {:keys [pod-name]}]
-  (swap! cache assoc job-name pod-name)
-  (result/ok (proto/create-environment-record
-              job-name :kubernetes task-id workdir
-              (assoc options :metadata (assoc receipt :pod-name pod-name)))))
-
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; ============================================================================
@@ -208,8 +201,9 @@
         (acquisition/acquire! (partial creation/create! kubectl-path job-spec
                                                      (:kubernetes/creation-request-timeout-ms config))
                             (partial client/wait-for-pod-ready kubectl-path namespace job-name config)
-                            (partial delete-job kubectl-path namespace job-name)
-                            (partial retain-environment! pod-cache context)))))
+                            (constantly nil)
+                            (partial admission/retain! pod-cache context kubectl-path
+                                     (:kubernetes/pod-observation-request-timeout-ms config))))))
 
   (execute! [_this environment-id command opts]
     (try+

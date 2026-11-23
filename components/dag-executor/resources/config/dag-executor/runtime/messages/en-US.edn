@@ -14,6 +14,7 @@
   :kubernetes/invalid-deadline "Kubernetes capsule :resources/timeout-seconds must be a positive integer within the signed 64-bit range."
   :kubernetes/invalid-setting "Invalid Kubernetes executor setting: {key}."
   :kubernetes/job-creation-unconfirmed "Kubernetes did not confirm creation of the exact Job. Reconcile its identity before retrying."
+  :kubernetes/pod-owner-unconfirmed "Kubernetes did not confirm that the observed Pod belongs to the created Job. Reconcile its identity before retrying."
 
   ;; OCI runtime adapter diagnostics
   :oci/acquire-failed        "OCI runtime acquire failed"
