@@ -41,7 +41,7 @@ not hardware attestation or a power-loss guarantee.
 Use producer-shaped mount and disk-metadata fixtures. Pin rejection of unsupported
 mounts, ambiguous tables, virtual or unmapped devices, mismatched root devices,
 disabled APFS ownership and invalid UUID types. Mock only native I/O boundaries.
-The packet passes 17 tests and 106 assertions in each JVM product, Babashka source,
+The packet passes 20 tests and 115 assertions in each JVM product, Babashka source,
 and a fresh package. Disabling the filesystem allowlist, device checks or ownership
 check fails five, two and two assertions respectively on JVM and Babashka, with no
 runtime errors. Ignoring the selected native exit protocol fails two further assertions.
@@ -52,6 +52,10 @@ Read-only local metadata checks confirm the macOS fixture shape;
 the optional physical-classification field is absent even on this host's backing
 partition. Strict lint and actual dependency-layer checks pass.
 All nine exact namespace REPL examples pass on JVM and native Babashka.
+The packet includes the existing real macOS ACL fixtures. Its missing-path
+interceptor calls the captured three-argument probe directly, so redefining the
+public probe cannot intercept its own default-arity delegation. Production ACL
+validation remains unchanged; the dedicated hosted Darwin gate stays required.
 
 ## Deployment plan
 

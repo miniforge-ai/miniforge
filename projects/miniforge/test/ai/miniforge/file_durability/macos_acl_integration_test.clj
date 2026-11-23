@@ -32,7 +32,7 @@
   (throw (AssertionError.)))
 
 (defn- ^{:stratum 0} read-with-missing-path [read-output missing args input]
-  (read-output (conj args missing) input))
+  (read-output (conj args missing) input #{0}))
 
 ;------------------------------------------------------------------------------ Layer 1
 
