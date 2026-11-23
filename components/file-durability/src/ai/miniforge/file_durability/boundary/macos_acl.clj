@@ -35,4 +35,4 @@
         (boundary/refuse-acl! canonical-path))))
   canonical-path)
 
-(comment ::posix-plus-macos-acls)
+(comment (macos?))

@@ -38,7 +38,9 @@
 
 (defn ^{:stratum 2} read-output [arguments input]
   (let [start (System/nanoTime)
-        child (process/process arguments {:in input :out :stream :err :discard})
+        child (process/process arguments {:in input
+                                         :out :stream
+                                         :err :discard})
         captured (future (read-utf8 (:out child)))]
     (try+
       (let [result (deref child (remaining-ms start) nil)]
@@ -47,3 +49,6 @@
       (finally
         (future-cancel captured)
         (stop! child)))))
+
+(comment
+  (read-utf8 (java.io.ByteArrayInputStream. (byte-array 0))))
