@@ -33,6 +33,14 @@ merged PR #2552. This branch is based on main with those prerequisites included.
 The internal API (surface class 1) requires a supported profile, an existing
 canonical protected root, and the other runtime's absolute launcher and classpath.
 There is no fallback based on POSIX permissions alone.
+Qualification now requires explicit finite pin-enumeration and acquisition limits.
+After a read-only storage preflight, it captures native identity before acquiring
+the directory pin and compares that identity with the authoritative observation
+under the pin. The resulting opaque handle owns the pin for its entire lifetime.
+The host must explicitly release it after all consumers finish; release is
+idempotent, returns a specific acknowledgement, and permanently refuses further
+resolution before filesystem observation. A closed handle cannot revive when
+device/inode numbers are later reused.
 
 The initial Linux profile accepts an unambiguous writable single-device XFS mount,
 recognized AHCI or PCIe-NVMe driver ancestry, exact no-virtualization evidence from
@@ -74,6 +82,9 @@ pass in each. The tooling regression pins product-relative and absolute peer
 classpath entries, including a path containing spaces.
 The real peer-process lock scenario lives in project integration tests, outside
 the fast component packet.
+Root-qualification tests also live in project integration tests because they now
+acquire native directory descriptors. Their lifetime fixture independently releases
+every acquired pin, including an unexpected success under fault injection.
 Denial scenarios retain the production coordinator and OS locks, replacing only
 native peer launch with processes that exit prematurely, never acknowledge, or
 claim a lock they do not hold. Each refuses qualification proof, terminates its
@@ -86,11 +97,24 @@ both displaced directories alive to prevent inode reuse. Qualification refuses
 the new, unprobed root. Ignoring the original observation fails that assertion
 on both runtimes, with zero errors.
 
+The retained-pin packet passed 44 tests / 127 assertions in each Java 21 product,
+source Babashka and a fresh package before the final read-only-preflight guard.
+Six lifetime fault controls produce 2 / 2 / 1 / 1 / 1 / 2 expected failures with
+zero errors in Java 21 and Babashka. They cover the before-pin identity binding,
+failed-proof resource transfer, late pin closure, closed-before-I/O refusal,
+current identity revalidation and actual native release.
+The final composed packet must be rerun after the unsupported-store preflight
+regression and after consuming the independently reviewed peer-lock foundation.
+No current-head review or merge gate is waived by these local results.
+
 ## Deployment plan
 
 Host-only opt-in with trusted, installed launchers and a persistent root.
 Requalify after a controller restart. No cluster access, runtime shutdown,
 experiments or credential actions.
+The pending peer-lock foundation (#2559) and its cleanup prerequisite (#2560)
+must merge before this branch is published again. Its lock-limit contract then
+replaces the old timing constants; no compatibility arity or implicit bounds remain.
 
 ## Related issues/PRs
 
@@ -98,6 +122,6 @@ PR #2530 consumes this prerequisite. PR #2528 owns the full-stop contract.
 
 ## Checklist
 
-- [x] Implementation and adversarial standards pass complete.
-- [x] Serial native qualification and packaged proofs complete.
+- [ ] Final composed implementation and adversarial standards pass complete.
+- [ ] Final serial native qualification and packaged proofs complete.
 - [ ] Current-head CI and full review settled.

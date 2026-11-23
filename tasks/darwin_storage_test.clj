@@ -22,6 +22,7 @@
         (let [suites '[ai.miniforge.file-durability.macos-acl-integration-test
                        ai.miniforge.file-durability.native-probe-integration-test
                        ai.miniforge.file-durability.qualification-test
+                       ai.miniforge.file-durability.qualified-root-lifetime-integration-test
                        ai.miniforge.file-durability.runtime-peer-fixtures-test
                        ai.miniforge.file-durability.lock-protocol-test
                        ai.miniforge.file-durability.lock-denial-integration-test
