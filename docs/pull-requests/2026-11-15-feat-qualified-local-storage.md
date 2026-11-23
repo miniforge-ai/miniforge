@@ -58,7 +58,7 @@ ambiguous mount data, no peer proof, and root replacement. Test actual
 JVM/Babashka peers and forced publication on disposable files. Bound native
 storage metadata to a shared process/read deadline and a fixed output limit.
 
-The extended native packet passes 23 tests and 47 assertions in each JVM product,
+The extended native packet passes 24 tests and 62 assertions in each JVM product,
 Babashka source and a fresh package. It covers the opaque-root contract, actual
 native ACL/metadata behavior, real JVM/Babashka mutual locks, and refusal to skip
 a missing peer runtime or classpath. The same packet is wired into the existing
@@ -74,6 +74,13 @@ pass in each. The tooling regression pins product-relative and absolute peer
 classpath entries, including a path containing spaces.
 The real peer-process lock scenario lives in project integration tests, outside
 the fast component packet.
+Denial scenarios retain the production coordinator and OS locks, replacing only
+native peer launch with processes that exit prematurely, never acknowledge, or
+claim a lock they do not hold. Each refuses qualification proof, terminates its
+owned peer and removes its scratch directory. Bypassing exclusion produces one
+assertion failure; disabling peer termination produces four, with zero runtime
+errors on both JVM and Babashka. Fixtures independently clean their own processes
+even when production cleanup is deliberately disabled by those controls.
 
 ## Deployment plan
 
