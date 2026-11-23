@@ -21,8 +21,7 @@ API surface class 1: in-process EDN.
 
 Domain (the lease rule) and Application (the cleanup).
 
-Base branch: `feat/agent-environment-acquisition-reconcile`. Depends on PR #2524, which is stacked
-on PRs #2540 and #2539. All three are open. Retarget down the stack as each merges.
+Base branch: `main`. PRs #2539, #2540 and #2524, which this was stacked on, are merged.
 
 ## Motivation
 
@@ -84,5 +83,5 @@ Issue #2506; parent tracker issue #2439. Stacked on PR #2524.
 ## Checklist
 
 - [x] Pending lease-less cleanups reconcilable past the cleaner's claim, with tests
-- [ ] PRs #2539, #2540 and #2524 merged; retarget to `main`
+- [x] PRs #2539, #2540 and #2524 merged; this PR retargeted to `main`
 - [ ] CI green, Copilot threads resolved, squash-merged
