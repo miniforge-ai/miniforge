@@ -36,6 +36,9 @@
                                  :pending | :running | :paused | :completed |
                                  :failed | :cancelled |
                                  :completed-with-warnings
+   :execution/cancellation     — Who cancelled a :cancelled run and from where
+                                 (`es/cancel!`'s record), for its
+                                 :workflow/cancelled event
    :execution/fsm-machine      — Compiled execution machine for this run
    :execution/fsm-state        — Authoritative machine snapshot
 
@@ -65,6 +68,8 @@
    :execution/current-phase    — Derived projection of the active machine state
    :execution/phase-index      — Derived projection of the active machine state
    :execution/redirect-count   — Derived from machine context
+   :execution/unpersisted-phases — Phases whose boundary persist committed
+                                 nothing; the next boundary commit names them
 
    ### Phase Result Schema
    Entries in :execution/phase-results follow the shape:
@@ -124,7 +129,9 @@
    :policy-packs   — Policy packs the pack gates evaluate
    (the full list is execution-passthrough-option-keys)"
   (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.event-stream.interface :as es]
             [ai.miniforge.logging.interface :as log]
+            [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
             [ai.miniforge.workflow.fsm :as fsm]
@@ -132,6 +139,17 @@
             [ai.miniforge.agent.interface :as agent]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private unrecorded-cancellation
+  "N3 requires a cancel's requester and source. A stop set with no record
+   (`es/cancel!` with one argument, which only the control-plane adapter's
+   uncalled `send-command` does) reports this."
+  {:cancel/requested-by "unknown" :cancel/source :api})
+
+(defn ^{:stratum 0} cancelled?
+  "True for a run that ended :cancelled (N2 2.2)."
+  [ctx]
+  (= :cancelled (:execution/status ctx)))
 
 ;------------------------------------------------------------------------------ Internal helpers
 (def ^{:stratum 0} execution-passthrough-option-keys
@@ -223,13 +241,35 @@
       (string? wid) (parse-uuid wid)
       :else         nil)))
 
+(defn- ^{:stratum 0} opts-origin-id
+  "The run this one continues, from opts :origin-id (a resume attempt under
+   a new run id passes the original run's). A uuid or uuid-shaped string;
+   anything else is nil."
+  [opts]
+  (let [origin (:origin-id opts)]
+    (cond
+      (uuid? origin)   origin
+      (string? origin) (parse-uuid origin)
+      :else            nil)))
+
 (defn ^{:stratum 0} merge-metrics
   "Merge phase metrics into execution metrics.
-   Nil-safe: treats nil values as 0 to prevent NPE from merge-with +."
+   Nil-safe: treats nil values as 0 to prevent NPE from merge-with +.
+
+   A phase that spent tokens without a `:cost-usd`, or that carries
+   `:cost-unavailable?` itself (a rolled-up DAG run), marks the total
+   `:cost-unavailable? true`. The summed `:cost-usd` then covers only the
+   priced part of the run, and summaries must not show it as the run's
+   measured cost."
   [exec-metrics phase-metrics]
-  (merge-with (fn [a b] (+ (or a 0) (or b 0)))
-              exec-metrics
-              (select-keys phase-metrics [:tokens :cost-usd :duration-ms])))
+  (let [tokens (:tokens phase-metrics)
+        unpriced? (or (true? (:cost-unavailable? phase-metrics))
+                      (and (number? tokens) (pos? tokens)
+                           (nil? (:cost-usd phase-metrics))))]
+    (cond-> (merge-with (fn [a b] (+ (or a 0) (or b 0)))
+                        exec-metrics
+                        (select-keys phase-metrics [:tokens :cost-usd :duration-ms]))
+      unpriced? (assoc :cost-unavailable? true))))
 
 (defn- ^{:stratum 0} ->epoch-millis
   "Coerce a :execution/started-at / :execution/ended-at value to a
@@ -252,6 +292,24 @@
     :else                                nil))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} run-outcome
+  "How a finished run RESULT ended, for its reports: :completed (as
+   `phase/succeeded?` reads it), :cancelled or :failed."
+  [result]
+  (cond (phase/succeeded? result) :completed
+        (cancelled? result) :cancelled
+        :else :failed))
+
+(defn ^{:stratum 1} cancellation
+  "Who cancelled the run in CTX and from where, for its :workflow/cancelled
+   event: as recorded at the stop, else from its control state. A missing
+   record, or one N3 does not accept, reports `unrecorded-cancellation`,
+   so the run's terminal event is never refused for it."
+  [ctx]
+  (let [recorded (or (:execution/cancellation ctx)
+                     (some-> (get-in ctx [:execution/opts :control-state]) es/cancellation))]
+    (if (es/valid-cancellation? recorded) recorded unrecorded-cancellation)))
 
 (defn- ^{:stratum 1} passthrough-option-values
   [opts]
@@ -352,10 +410,14 @@
   (let [execution-machine (fsm/compile-execution-machine workflow)
         fsm-state (let [initial-state (fsm/initialize-execution execution-machine)]
                     (fsm/start-execution execution-machine initial-state))
-        checkpoint-root (checkpoint-paths/resolve-checkpoint-root opts)]
+        checkpoint-root (checkpoint-paths/resolve-checkpoint-root opts)
+        run-id (or (opts-run-id opts) (random-uuid))]
     (sync-machine-projections
      (merge
-      {:execution/id (or (opts-run-id opts) (random-uuid))
+      {:execution/id run-id
+       ;; The run's lineage: its own id, or the run a resume attempt
+       ;; continues. Effects keyed on it outlive attempt ids.
+       :execution/origin-id (or (opts-origin-id opts) run-id)
        :execution/workflow workflow
        :execution/workflow-id (:workflow/id workflow)
        :execution/workflow-version (:workflow/version workflow)
@@ -408,6 +470,9 @@
        :execution/fsm-machine execution-machine
        :execution/fsm-state fsm-state
        :execution/input (get machine-snapshot :execution/input input)
+       :execution/origin-id (or (:execution/origin-id machine-snapshot)
+                                (opts-origin-id opts)
+                                (:execution/id machine-snapshot))
        :execution/phase-results phase-results
        ;; From the SNAPSHOT, never from `opts`. A resumed run is still
        ;; acting under the authority it was started with; taking this
@@ -437,6 +502,33 @@
         (assoc ctx :execution/status :completed))
       (assoc :execution/ended-at (System/currentTimeMillis))
       stamp-wall-clock-duration))
+
+(defn ^{:stratum 2} transition-to-cancelled
+  "End the run :cancelled (N2 §2.2), a terminal state apart from :failed,
+   with the same ended-at and wall-clock duration stamps as the other
+   terminal transitions. Records who cancelled it, from the run's control
+   state, as :execution/cancellation.
+
+   A run whose stopped phase already sent the machine to :cancelled keeps
+   that state. A run that completed or failed before the stop keeps its
+   outcome: the stop does not rewrite a terminal state. One parked in a
+   state with no :cancel transition is marked :cancelled directly, as
+   `transition-to-failed` does for :fail."
+  [ctx]
+  (let [status (:execution/status ctx)]
+    (if (contains? #{:completed :completed-with-warnings :failed} status)
+      ctx
+      (-> (cond
+            (cancelled? ctx) ctx
+            (:execution/fsm-machine ctx)
+            (let [result (transition-execution-result ctx :cancel)]
+              (if (anomaly/anomaly? result)
+                (assoc ctx :execution/status :cancelled)
+                result))
+            :else (assoc ctx :execution/status :cancelled))
+          (assoc :execution/cancellation (cancellation ctx))
+          (update :execution/ended-at #(or % (System/currentTimeMillis)))
+          stamp-wall-clock-duration))))
 
 (defn ^{:stratum 2} transition-to-failed
   "Transition workflow to failed state using FSM. Same wall-clock

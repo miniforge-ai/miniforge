@@ -539,7 +539,9 @@
   loader/load-rules-from-directory)
 
 (def ^{:stratum 0} load-project-docs
-  "Load project documentation files (agents.md, claude.md, etc.) into knowledge store.
+  "Load project instruction files (AGENTS.md, CLAUDE.md, .claude/CLAUDE.md,
+   etc.) into knowledge store. Names match case-insensitively; a file
+   reached under two names (e.g. a symlink) loads once.
 
    Arguments:
    - knowledge-store - KnowledgeStore instance
@@ -547,6 +549,7 @@
 
    Returns:
    - {:loaded int :failed int :files [string...]}
+     :files are root-relative paths with each file's real name.
 
    Example:
      (load-project-docs store \".\")"

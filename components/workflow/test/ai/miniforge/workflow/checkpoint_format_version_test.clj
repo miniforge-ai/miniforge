@@ -7,7 +7,6 @@
    format is refused, naming the file and both versions."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.workflow.checkpoint-store :as store]
-            [ai.miniforge.workflow.checkpoint-store-paths :as paths]
             [ai.miniforge.workflow.checkpoint-store-records :as records]
             [ai.miniforge.workflow.checkpoint-test-support :as fixture]
             [ai.miniforge.workflow.context :as context]
@@ -29,11 +28,10 @@
                                         {:checkpoint/root root})
                 (assoc :execution/current-phase :plan
                        :execution/phase-results {:plan {:status :completed}}))
-        run-id (:execution/id ctx)]
-    (store/persist-execution-state! ctx)
-    [run-id {:snapshot (paths/machine-snapshot-path root run-id)
-             :manifest (paths/manifest-path root run-id)
-             :plan (paths/phase-checkpoint-path root run-id :plan)}]))
+        written (store/persist-execution-state! ctx)]
+    [(:execution/id ctx) {:snapshot (:checkpoint/machine-snapshot-path written)
+                          :manifest (:checkpoint/manifest-path written)
+                          :plan (:checkpoint/phase-path written)}]))
 
 (defn- ^{:stratum 0} rewrite! [path f]
   (spit path (pr-str (f (edn/read-string (slurp path))))))

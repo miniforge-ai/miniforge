@@ -11,7 +11,8 @@
 ;; Usage:
 ;;   bb scripts/test-changed-bricks.bb
 
-(require '[babashka.fs :as fs]
+(require '[ai.miniforge.bb-test-runner.interface :as bb-test-runner]
+         '[babashka.fs :as fs]
          '[babashka.process :as p]
          '[clojure.string :as str])
 
@@ -19,21 +20,17 @@
 
 (def ^:private clean-git-env
   "Environment with GIT_INDEX_FILE stripped.
-   Prevents worktree-specific index from leaking into subprocesses that
-   run git commands (Polylith, Clojure test JVM). Without this, git
+   Prevents worktree-specific index from leaking into Polylith's change
+   query, which runs git. The test JVM gets `test-env`. Without this, git
    operations inside subprocesses can corrupt the committing worktree's
    index, causing empty or wrong-tree commits."
   (dissoc (into {} (System/getenv)) "GIT_INDEX_FILE"))
 
 (def ^:private test-env
-  "Environment for the test JVM with git worktree vars stripped.
-   Test namespaces shell out to git against temp repos and worktrees, so the
-   caller's worktree-specific git vars must not leak into child JVMs."
-  (dissoc (into {} (System/getenv))
-          "GIT_INDEX_FILE"
-          "GIT_DIR"
-          "GIT_WORK_TREE"
-          "GIT_COMMON_DIR"))
+  "Environment for the test JVM, without git's repository-binding
+   variables. Test namespaces run git against temp repos and worktrees,
+   so the caller's repository must not reach them through the environment."
+  (bb-test-runner/sanitize-git-worktree-env (into {} (System/getenv))))
 
 (defn poly-changed-names
   "Query poly for changed brick names since main. Returns a vector of strings."

@@ -30,7 +30,7 @@
         success? (= status :completed)
         hr       (apply str (repeat 65 "━"))]
     (concat [(ansi/colorize :cyan (str "\n" hr))
-             (lines/status-line success?)]
+             (lines/status-line status)]
             (lines/phase-lines result)
             (lines/failed-task-lines result)
             (lines/pr-lines result)

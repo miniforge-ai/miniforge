@@ -6,16 +6,23 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} cause [throwable]
+(defn ^{:stratum 0} find-cause [predicate throwable]
   (loop [current throwable seen #{}]
     (cond
       (nil? current) nil
       (contains? seen current) nil
-      (or (instance? Error current) (instance? InterruptedException current)) current
+      (predicate current) current
       :else (recur (.getCause ^Throwable current) (conj seen current)))))
+
+(defn- ^{:stratum 0} critical? [failure]
+  (or (instance? Error failure) (instance? InterruptedException failure)))
 
 (defn ^{:stratum 0} propagate! [throwable]
   (when (instance? InterruptedException throwable) (.interrupt (Thread/currentThread)))
   (throw throwable))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} cause [throwable] (find-cause critical? throwable))
 
 (comment (cause nil))

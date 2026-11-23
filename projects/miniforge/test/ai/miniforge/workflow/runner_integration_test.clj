@@ -19,6 +19,7 @@
   "Integration tests for the workflow runner that execute real phase pipelines."
   (:require
    [ai.miniforge.event-stream.interface :as events]
+   [ai.miniforge.workflow.durable-stream-support :as durable]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase-opsv.lifecycle-result :as opsv-result]
    [ai.miniforge.response.interface :as response]
@@ -39,7 +40,8 @@
    [ai.miniforge.gate.test]
    [ai.miniforge.gate.policy]))
 
-(use-fixtures :each checkpoint-root-support/with-temp-checkpoint-root)
+(use-fixtures :each checkpoint-root-support/with-temp-checkpoint-root
+  durable/with-event-dir-cleanup)
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -100,7 +102,7 @@
   (testing "the real :observe enter skips when there are no PRs; its :leave still
             runs and fails the phase its gate denied"
     (let [ctx {:execution/id (random-uuid)
-               :event-stream (events/create-event-stream {:sinks []})
+               :event-stream (durable/durable-event-stream)
                :execution/current-phase :observe
                :execution/metrics {} :execution/errors []
                :execution/response-chain (response/create :observe-gate)}
@@ -118,7 +120,7 @@
   (testing "response chain records phase results"
     (let [;; Gated phases advance only on an acknowledged :gate/decision.
           result (runner/run-pipeline plan-workflow plan-input
-                                      {:event-stream (events/create-event-stream {:sinks []})})
+                                      {:event-stream (durable/durable-event-stream)})
           chain (:execution/response-chain result)]
       (is (= :completed (:execution/status result)))
       ;; [:plan :done] has no :implement phase: after the DAG runs the
@@ -141,8 +143,8 @@
 (deftest ^{:stratum 1} refused-decision-finalizes-the-plan-as-failed-test
   (testing "a stream that rejects only the gate decision: the real leave-plan finalizes
             a failed plan (no success completion or milestone) and the DAG never runs"
-    (let [stream (events/create-event-stream {:sinks []})
-          result (with-redefs [events/publish! (partial decision-rejecting-publish events/publish!)]
+    (let [stream (durable/durable-event-stream)
+          result (with-redefs [events/publish-persisted! (partial decision-rejecting-publish events/publish-persisted!)]
                    (runner/run-pipeline plan-workflow plan-input {:event-stream stream}))
           history (events/get-events stream)]
       (is (= :failed (:execution/status result)))
@@ -156,7 +158,7 @@
 (deftest ^{:stratum 1} denied-plan-never-reaches-the-dag-test
   (testing "an acknowledged denial: leave-plan does not turn the plan back to :completed
             and the DAG executor does not run the denied plan's tasks"
-    (let [stream (events/create-event-stream {:sinks []})
+    (let [stream (durable/durable-event-stream)
           result (runner/run-pipeline denied-plan-workflow plan-input {:event-stream stream})
           [decision] (events-of (events/get-events stream) :gate/decision)]
       (is (= :deny (get-in decision [:gate/decision-envelope :envelope/decision])))
@@ -173,7 +175,7 @@
         (let [interceptor (assoc (phase/get-phase-interceptor {:phase phase-kw :gates [:review-approved]})
                                  :enter (partial finished-phase-enter phase-kw))
               ctx {:execution/id (random-uuid)
-                   :event-stream (events/create-event-stream {:sinks []})
+                   :event-stream (durable/durable-event-stream)
                    :execution/current-phase phase-kw
                    :execution/metrics {} :execution/errors []
                    :execution/response-chain (response/create :gate-families)}

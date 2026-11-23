@@ -2,7 +2,9 @@
  :deps {ai.miniforge/anomaly {:local/root "../anomaly"}
         ai.miniforge/workflow {:local/root "../workflow"}
         ai.miniforge/artifact {:local/root "../artifact"}
+        ai.miniforge/config {:local/root "../config"}
         ai.miniforge/dag-executor {:local/root "../dag-executor"}
+        ai.miniforge/effect-transaction {:local/root "../effect-transaction"}
         ai.miniforge/logging {:local/root "../logging"}
         ai.miniforge/messages {:local/root "../messages"}
         ai.miniforge/redaction {:local/root "../redaction"}

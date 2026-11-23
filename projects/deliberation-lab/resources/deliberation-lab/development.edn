@@ -1,0 +1,15 @@
+;; Synthetic development experiment; no G0/G1 adoption claim.
+{:schema-version 1
+ :mode :development
+ :model "claude-sonnet-4-6"
+ :conditions [:single :independent :relay :workspace :workspace-ablated]
+ :replicates 3
+ :max-input-bytes 48000
+ ;; Provider dollar guard per call: a backstop, not a strict cost bound.
+ :adapter {:call-cap-usd 0.20}
+ ;; Accounting weights, not a claim about current vendor prices.
+ :price-table {:id "development-normalization-v1"
+               :input-per-million 3.0 :output-per-million 15.0}
+ ;; Each allowance includes the final synthesis/selection turn.
+ :tiers [{:id :small :activations 7 :max-normalized-usd 1.00 :wall-seconds 360}
+         {:id :large :activations 10 :max-normalized-usd 2.00 :wall-seconds 540}]}

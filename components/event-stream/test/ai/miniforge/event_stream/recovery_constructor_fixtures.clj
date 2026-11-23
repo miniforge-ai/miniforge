@@ -9,10 +9,10 @@
 
 (def ^{:stratum 0} cases
   [[:workflow/checkpoint-written events/checkpoint-written
-    [:phase/name :checkpoint/path :checkpoint/size-bytes]]
+    [:phase/name :checkpoint/path :checkpoint/size-bytes :checkpoint/root]]
    [:workflow/checkpoint-write-failed events/checkpoint-write-failed [:phase/name ::payload]]
    [:workflow/machine-snapshot-written events/machine-snapshot-written
-    [:machine/state :snapshot/path :snapshot/size-bytes]]
+    [:machine/state :snapshot/path :snapshot/size-bytes :checkpoint/root]]
    [:workflow/machine-snapshot-write-failed events/machine-snapshot-write-failed
     [:machine/state ::payload]]
    [:workflow/resumed events/workflow-resumed [:from-state :from-phase :skipping]]

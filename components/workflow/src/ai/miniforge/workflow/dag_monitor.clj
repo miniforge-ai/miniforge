@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.dag-monitor
   "Monitors a PR train assembled from DAG task results.
 
@@ -31,37 +30,24 @@
    [ai.miniforge.pr-lifecycle.interface :as pr-lifecycle]
    [ai.miniforge.pr-train.interface :as pr-train]
    [ai.miniforge.logging.interface :as log]
-   [ai.miniforge.workflow.merge-resolution :as merge-resolution]))
+   [ai.miniforge.workflow.merge-resolution :as merge-resolution]
+   [ai.miniforge.workflow.messages :as messages]
+   [ai.miniforge.workflow.stop-signal :as stop-signal]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Result constructors & predicates
 
-(defn monitor-result
-  "Construct a monitor result map."
-  [success? merged-prs failed-prs train]
-  {:success? success? :merged-prs merged-prs :failed-prs failed-prs :train train})
-
-(defn monitor-error
+;; Results, predicates, controllers and one monitor cycle
+(defn ^{:stratum 0} monitor-error
   "Construct a monitor error result map."
   [error train]
   {:success? false :error error :train train})
 
-(defn pr-terminal?
-  "Check if a controller is in a terminal state."
-  [controller]
-  (#{:merged :failed} (:status @controller)))
-
-(defn all-prs-terminal?
-  "Check if all PR controllers are in terminal states."
+(defn ^{:stratum 0} all-prs-terminal?
+  "Check if all PR controllers are in terminal states (merged or failed)."
   [controllers]
-  (every? pr-terminal? (vals controllers)))
+  (every? #(#{:merged :failed} (:status @%)) (vals controllers)))
 
-(defn all-prs-merged?
-  "Check if all PR controllers are merged."
-  [controllers]
-  (every? #(= :merged (:status @%)) (vals controllers)))
-
-(defn create-pr-controllers
+(defn ^{:stratum 0} create-pr-controllers
   "Create a pr-lifecycle controller for each PR in the train.
 
    Arguments:
@@ -115,13 +101,11 @@
                    :max-fix-iterations (get context :max-fix-iterations 5))]))
          (into {}))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Monitor cycle helpers
-
-(defn build-monitor-result
+(defn ^{:stratum 0} build-monitor-result
   "Build the final monitor result when all PRs have reached terminal states.
 
-   Partitions controllers into merged and failed, then returns a monitor-result."
+   Partitions controllers into merged and failed, then returns
+   `{:success? :merged-prs :failed-prs :train}`."
   [controllers manager train-id logger cycle]
   (let [merged (->> controllers
                     (filter (fn [[_ ctrl]] (= :merged (:status @ctrl))))
@@ -135,17 +119,19 @@
                 {:data {:merged (count merged)
                         :failed (count failed)
                         :cycles cycle}}))
-    (monitor-result (empty? failed) merged failed train)))
+    {:success? (empty? failed) :merged-prs merged :failed-prs failed :train train}))
 
-(defn execute-monitor-cycle!
+(defn ^{:stratum 0} execute-monitor-cycle!
   "Execute one monitor cycle: check ready PRs and attempt merges.
 
    For each PR that the train gate marks as ready-to-merge and whose
    controller is in :ready-to-merge status, attempts the merge and
-   updates train state accordingly."
-  [controllers manager train-id logger]
+   updates train state accordingly. Once `control-state` is stopped, no
+   further merge is attempted."
+  [controllers manager train-id logger control-state]
   (let [ready-prs (pr-train/get-ready-to-merge manager train-id)]
-    (doseq [pr-num ready-prs]
+    (doseq [pr-num ready-prs
+            :while (not (stop-signal/stopped? control-state))]
       (when-let [ctrl (get controllers pr-num)]
         (when (= :ready-to-merge (:status @ctrl))
           (try
@@ -162,10 +148,10 @@
               (pr-train/fail-merge manager train-id pr-num
                                     (.getMessage e)))))))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Train monitoring loop & entry point
+;------------------------------------------------------------------------------ Layer 1
 
-(defn monitor-pr-train
+;; Train monitoring loop
+(defn ^{:stratum 1} monitor-pr-train
   "Monitor all PRs in a train through CI, review, and merge.
 
    For each monitoring cycle:
@@ -177,16 +163,20 @@
    Arguments:
    - train-state: Map with :train-id :manager :train from dag-train assembly
    - controllers: Map of pr-number -> controller atom
-   - context: Execution context
+   - context: Execution context. Its `:control-state` stops the loop: a
+     cancel ends the poll wait, and no further merge is attempted.
 
    Returns:
    {:success? boolean
     :merged-prs [pr-numbers]
     :failed-prs [pr-numbers]
-    :train final-train-state}"
+    :train final-train-state}
+   A stopped run returns that map with `:success? false :stopped? true`
+   and an `:error` message."
   [train-state controllers context]
   (let [{:keys [train-id manager]} train-state
         logger (:logger context)
+        control-state (:control-state context)
         max-cycles (get context :max-monitor-cycles 100)
         poll-interval-ms (get context :monitor-poll-interval-ms 30000)]
 
@@ -200,6 +190,16 @@
         (all-prs-terminal? controllers)
         (build-monitor-result controllers manager train-id logger cycle)
 
+        (stop-signal/stopped? control-state)
+        (do
+          (when logger
+            (log/info logger :dag-monitor :monitor/stopped {:data {:cycles cycle}}))
+          ;; The PRs merged before the cancel are reported; nil skips the completion log.
+          (assoc (build-monitor-result controllers manager train-id nil cycle)
+                 :success? false
+                 :stopped? true
+                 :error (messages/t :status/stopped-control)))
+
         (>= cycle max-cycles)
         (do
           (when logger
@@ -211,11 +211,14 @@
 
         :else
         (do
-          (execute-monitor-cycle! controllers manager train-id logger)
-          (Thread/sleep poll-interval-ms)
+          (execute-monitor-cycle! controllers manager train-id logger control-state)
+          (stop-signal/sleep! control-state poll-interval-ms)
           (recur (inc cycle)))))))
 
-(defn monitor-dag-prs
+;------------------------------------------------------------------------------ Layer 2
+
+;; Entry point
+(defn ^{:stratum 2} monitor-dag-prs
   "Top-level entry point: create controllers and monitor the train.
 
    Arguments:

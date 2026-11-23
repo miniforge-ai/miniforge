@@ -3,9 +3,25 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.file-durability.core
   (:require [ai.miniforge.file-durability.boundary :as boundary]
-            [ai.miniforge.file-durability.io :as file-io]))
+            [ai.miniforge.file-durability.io :as file-io]
+            [ai.miniforge.file-durability.boundary.directory-policy :as directory-policy]
+            [ai.miniforge.file-durability.boundary.protected-directory :as directory]
+            [ai.miniforge.file-durability.boundary.publication-probe :as publication-probe]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} prepare-protected-directory! [file]
+  (boundary/call-with-exception-handling :prepare-directory file (partial directory/prepare! file) identity))
+
+(defn ^{:stratum 0} resolve-protected-directory [file]
+  (boundary/call-with-exception-handling :resolve-directory file (partial directory/existing! file) identity))
+
+(defn ^{:stratum 0} filesystem-profile [file]
+  (boundary/call-with-exception-handling :filesystem-profile file (partial directory-policy/filesystem-profile file) identity))
+
+(defn ^{:stratum 0} verify-publication! [root]
+  (boundary/call-with-exception-handling :verify-publication root
+                                        #(publication-probe/check! (directory/existing! root)) identity))
 
 (defn ^{:stratum 0} write-new-text! [file encoded]
   (boundary/call-with-exception-handling :write-new file

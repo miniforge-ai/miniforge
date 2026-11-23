@@ -44,18 +44,33 @@
                  {:task-ids (str/join ", " task-ids)})]))
 
 (defn ^{:stratum 0} metrics-lines
+  "The metrics line. When some spend had no known price
+   (`:cost-unavailable?`), the cost reads as unavailable, or as a lower
+   bound when part of the run was priced; never as a measured $0.0000."
   [metrics]
   (when metrics
-    [(messages/t :workflow-runner/metrics
-                 {:tokens   (get metrics :tokens 0)
-                  :cost     (format "%.4f" (get metrics :cost-usd 0.0))
-                  :duration (fmt/format-duration (get metrics :duration-ms 0))})]))
+    (let [cost-usd (get metrics :cost-usd 0.0)
+          cost (cond
+                 (not (:cost-unavailable? metrics))
+                 (messages/t :workflow-runner/cost {:cost (format "%.4f" cost-usd)})
+
+                 (pos? cost-usd)
+                 (messages/t :workflow-runner/cost-partial {:cost (format "%.4f" cost-usd)})
+
+                 :else
+                 (messages/t :workflow-runner/cost-unavailable))]
+      [(messages/t :workflow-runner/metrics
+                   {:tokens   (get metrics :tokens 0)
+                    :cost     cost
+                    :duration (fmt/format-duration (get metrics :duration-ms 0))})])))
 
 (defn ^{:stratum 0} status-line
-  [success?]
-  (if success?
-    (ansi/colorize :green (messages/t :workflow-runner/summary-success))
-    (ansi/colorize :red   (messages/t :workflow-runner/summary-failure))))
+  "The summary's outcome line for a run that ended with STATUS."
+  [status]
+  (case status
+    :completed (ansi/colorize :green  (messages/t :workflow-runner/summary-success))
+    :cancelled (ansi/colorize :yellow (messages/t :workflow-runner/summary-cancelled))
+    (ansi/colorize :red (messages/t :workflow-runner/summary-failure))))
 
 (defn ^{:stratum 0} pr-lines
   [result]

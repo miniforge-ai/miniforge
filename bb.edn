@@ -1,4 +1,4 @@
-{:min-bb-version "1.3.0"
+{:min-bb-version "1.12.215"
 
  :deps {io.github.lispyclouds/bblgum {:git/sha "df647fb50f32e05b26e46e58d7249b4798e469e6"}
         ai.miniforge/bb-utils {:local/root "projects/bb-utils"}}
@@ -60,6 +60,18 @@
    :requires ([lint])
    :task (lint/stratum-staged)}
 
+  lint:malli-types
+  {:doc  "Regenerate the clj-kondo types (.clj-kondo/metosin/malli-types-clj/config.edn) from every brick function's Malli schema; commit the result"
+   :task (let [exit (run-clojure-stream! "-X:dev" "ai.miniforge.malli-types/emit!")]
+           (when-not (zero? exit)
+             (System/exit exit)))}
+
+  lint:malli-types:check
+  {:doc  "Fail when the committed clj-kondo Malli types differ from the current function schemas"
+   :task (let [exit (run-clojure-stream! "-X:dev" "ai.miniforge.malli-types/check!")]
+           (when-not (zero? exit)
+             (System/exit exit)))}
+
   check:bb-classpaths
   {:doc  "Load-check entry namespaces of every bb.edn task declaring :extra-paths + :requires (catches classpath drift; load only, no task execution)"
    :requires ([ai.miniforge.bb-task-classpath.interface :as task-classpath])
@@ -95,6 +107,11 @@
   ;; ──────────────────────────────────────────────────────────────────────────
   ;; Testing
   ;; ──────────────────────────────────────────────────────────────────────────
+
+  test:darwin-storage
+  {:doc "Verify native storage protection in both JVM products and Babashka on macOS"
+   :requires ([darwin-storage-test])
+   :task (darwin-storage-test/run!)}
 
   test
   {:doc  "Run stable-derived changed-and-affected project tests"
@@ -144,21 +161,8 @@
 
   test:poly
   {:doc  "Run ALL brick + project tests via Polylith (full, serial)"
-   ;; `:all` runs every brick's tests + all project tests regardless of
-   ;; change-scope. Plain `poly test` only tests bricks changed since the
-   ;; stable tag — which silently SKIPS a test namespace that is broken but
-   ;; out of scope (e.g. a non-compiling test, or a reverse-dependency test a
-   ;; change breaks). A non-loaded namespace cannot fail, so compile errors
-   ;; and cross-brick breakage passed CI. `:all` loads+runs everything, so the
-   ;; suite actually compiles every test namespace. Matches this task's
-   ;; "full, serial" contract; use `bb test` (since-stable) for fast local runs.
-   :task (do
-           (println "🧪 Running tests via poly test :all...")
-           (println "Command: clojure -M:poly test :all")
-           (let [exit (run-clojure-stream! "-M:poly" "test" ":all")]
-             (when-not (zero? exit)
-               (println "❌ Tests failed with exit code:" exit)
-               (System/exit exit))))}
+   :requires ([test-runner])
+   :task (test-runner/poly-all)}
 
   test:integration
   {:doc  "Run project-level integration tests"
@@ -496,7 +500,6 @@
                ;; other author, including mf's own release commit in this clone.
                (when install-hooks? (run 'setup:hooks))
                (println "\n📦 Installing the mf CLI...\n")
-               (bootstrap/check-private-dep-access!)
                (run 'install:local)
                (bootstrap/check-mf-install! (str (fs/home) "/.local/bin/mf"))
                (println "\n🎉 Bootstrap complete. Run 'mf version' to check the CLI, 'bb' to list tasks.\n"))}
@@ -672,15 +675,21 @@
                dirs (when (fs/directory? root)
                       (sort (filter fs/directory? (fs/list-dir root))))
                reads (map (fn [d] (codex-gap/read-ledger (str d))) dirs)
+               consults (map (fn [d] (codex-gap/read-consultations (str d))) dirs)
                entries (vec (mapcat :entries reads))
-               skipped (reduce + 0 (keep :skipped reads))
-               anchoring (some-> (System/getenv "MINIFORGE_CODEX_PATH")
-                                 codex-gap/codex-anchoring-stats)]
+               skipped (reduce + 0 (keep :skipped (concat reads consults)))
+               codex-dir (System/getenv "MINIFORGE_CODEX_PATH")
+               anchoring (some-> codex-dir codex-gap/codex-anchoring-stats)
+               harvest (some-> codex-dir codex-gap/harvest-decisions)]
            (println (codex-gap/render-report
                      (codex-gap/build-report
                       entries {:skipped skipped
                                :run-count (count (filter (fn [r] (seq (:entries r))) reads))
-                               :anchoring anchoring}))))}
+                               :anchoring anchoring
+                               :harvest harvest
+                               :consultations (vec (mapcat :entries consults))
+                               :unreadable-consultations (count (filter codex-gap/incomplete-read? consults))
+                               :unreadable-ledgers (count (filter codex-gap/incomplete-read? reads))}))))}
 
   mcp-context-server
   {:doc     "Run MCP context server (JSON-RPC 2.0 over stdin/stdout)"
@@ -830,6 +839,7 @@
                  "components/effect-transaction/resources"
                  "components/execution-grant/src"
                  "components/execution-grant/resources"
+                 "components/kubernetes-target/src"
                  "components/file-durability/src"
                  "components/file-durability/resources"
                  "components/automation-edge-correlator/src"
@@ -838,6 +848,8 @@
                  "components/dag-primitives/src"
                  "components/dag-executor/src"
                  "components/dag-executor/resources"
+                 "components/subprocess/src"
+                 "components/subprocess/resources"
                  "components/task-executor/src"
                  "components/task-executor/resources"
                  "components/pr-lifecycle/src"
@@ -1003,13 +1015,29 @@
                  "components/workflow-financial-etl/src"
                  "components/workflow-financial-etl/resources"
                  "components/workflow-security-compliance/src"
-                 "components/workflow-security-compliance/resources"]
+                 "components/workflow-security-compliance/resources"
+                 ;; bb-miniforge-classpath-test fails when this list misses a
+                 ;; brick projects/miniforge depends on, or the CLI or a phase
+                 ;; namespace cannot load on it.
+                 "components/governance-provenance/src"
+                 "components/knowledge-pack/src"
+                 "components/kubernetes-target/src"
+                 "components/opsv-actuation/src"
+                 "components/opsv-actuation/resources"
+                 "components/opsv-adapter-simulated/src"
+                 "components/opsv-provider-github/src"
+                 "components/opsv-provider-github/resources"
+                 "components/pr-label-watcher/src"
+                 "components/workbench-orchestration-adapter/src"
+                 "components/workbench-orchestration-adapter/resources"
+                 "components/workflow-opsv/resources"]
    :extra-deps {metosin/malli {:mvn/version "0.16.1"}
                 clj-statecharts/clj-statecharts {:mvn/version "0.1.5"}
                 aero/aero        {:mvn/version "1.1.6"}
                 io.github.lispyclouds/bblgum {:git/sha "df647fb50f32e05b26e46e58d7249b4798e469e6"}
                 http-kit/http-kit {:mvn/version "2.8.0"}
                 hiccup/hiccup     {:mvn/version "2.0.0-RC3"}
-                slingshot/slingshot {:mvn/version "0.12.2"}}
+                slingshot/slingshot {:mvn/version "0.12.2"}
+                org.clojure/data.json {:mvn/version "2.4.0"}}
    :requires ([ai.miniforge.cli.main :as cli])
    :task    (apply cli/-main *command-line-args*)}}}

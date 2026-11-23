@@ -32,6 +32,7 @@
    [clojure.string :as str]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.display :as display]
+   [ai.miniforge.cli.main.commands.resume-anomaly :as resume-anomaly]
    [ai.miniforge.cli.main.display.classified-error :as classified-error]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.workflow-selection-config :as selection-config]
@@ -40,6 +41,7 @@
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.supervisory-state.interface :as supervisory]
+   [ai.miniforge.tenancy.interface :as tenancy]
    [ai.miniforge.automation-edge-correlator.interface :as correlator]
    [ai.miniforge.workflow.interface :as workflow]
    [ai.miniforge.workflow-resume.interface :as wr]
@@ -60,13 +62,6 @@
   "Workflow runner dependency, exposed as a var so tests can rebind the
    CLI boundary without dynamic namespace resolution."
   workflow/run-pipeline)
-
-(defn- ^{:stratum 0} anomaly-category
-  [a]
-  (case (:anomaly/type a)
-    :not-found :anomalies/not-found
-    :invalid-input :anomalies/incorrect
-    :anomalies/fault))
 
 ;; Status semantics
 (def ^{:stratum 0} terminal-statuses
@@ -273,17 +268,56 @@
     (when (:workflow/spec-hash readable)
       (select-keys readable [:workflow/spec-path :workflow/spec-hash]))))
 
+(defn ^{:stratum 0} unowned-resume-anomaly
+  "With [:tenancy :require-operator?] set, an anomaly when the recorded run
+   carries no valid acting context; otherwise nil. Checked before the
+   resume writes anything, so a refusal leaves the run's checkpoint as it
+   was."
+  [recorded]
+  (when (context/require-operator?)
+    (let [acting (tenancy/require-acting (:machine-snapshot recorded)
+                                         :execution/acting)]
+      (when (anomaly/anomaly? acting)
+        (anomaly/anomaly :invalid-input
+                         (messages/t :resume/operator-required
+                                     {:reason (:anomaly/message acting)})
+                         {:config/key [:tenancy :require-operator?]})))))
+
+(defn ^{:stratum 0} resolve-resume-workflow
+  "Resolve workflow identity for a resumed run, using the CLI's
+   default selection profile as fallback. Thin wrapper over the
+   component's `resolve-workflow-identity`."
+  [reconstructed]
+  (let [result (wr/resolve-workflow-identity
+                reconstructed
+                #(selection-config/resolve-selection-profile :default))]
+    (resume-anomaly/throw-resume-anomaly! result)
+    result))
+
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} throw-resume-anomaly!
-  [a]
-  (when (anomaly/anomaly? a)
-    (response/throw-anomaly! (anomaly-category a)
-                             (:anomaly/message a)
-                             (merge (:anomaly/data a)
-                                    (select-keys a [:anomaly/type
-                                                    :anomaly/subtype
-                                                    :anomaly/at])))))
+(defn- ^{:stratum 1} refuse-live-run!
+  "Throw when run `workflow-id` is still running (its runner holds the
+   owner lock under its checkpoint root) or when the root or lock cannot be
+   looked up; with `force?`, an unknown root is checked at the default root."
+  [workflow-id force?]
+  (let [run-id (str workflow-id)
+        found  (workflow/run-checkpoint-root run-id events-dir)
+        root   (if (and force? (anomaly/anomaly? found))
+                 (do (display/print-info (messages/t :resume/root-unknown-forced
+                                                     {:run-id run-id :error (:anomaly/message found)}))
+                     nil)
+                 found)
+        _      (resume-anomaly/throw-resume-anomaly! root)
+        owner  (workflow/run-owner run-id root)]
+    (resume-anomaly/throw-resume-anomaly! owner)
+    (when (some? owner)
+      (response/throw-anomaly! :anomalies/conflict
+                               (messages/t :resume/run-live
+                                           {:run-id run-id
+                                            :pid (get owner :owner/pid "?")
+                                            :started-at (get owner :owner/started-at "?")})
+                               {:run-id run-id :run/owner owner}))))
 
 ;; Thin delegations kept for compatibility with existing callers/tests
 (defn ^{:stratum 1} read-event-file
@@ -336,8 +370,12 @@
    directory its readers do not read, now or once the cleanup archives
    it (see `resumable-in-place?`). A `--run-id` naming another run that has a run
    directory under `events-dir` or a checkpoint is refused: the attempt
-   would write into that run."
-  [events-dir workflow-id machine-snapshot run-id-opt]
+   would write into that run.
+
+   SNAPSHOT-ENDED? (its status is terminal) also rules out its own id: a
+   run that checkpointed its end but stopped before publishing it has no
+   ending event, and must still never continue under its id (N2 2.2)."
+  [events-dir workflow-id machine-snapshot run-id-opt snapshot-ended?]
   (let [requested (uuid-option "--run-id" run-id-opt)
         snapshot-id (:execution/id machine-snapshot)
         ;; Not a set literal: the two ids are usually equal, and a literal
@@ -348,31 +386,18 @@
                                            (messages/t message-key {:run-id run-id-opt})
                                            {:run-id run-id-opt}))]
     (cond
-      (and requested own? (not (resumable-in-place? events-dir requested)))
+      (and requested own? (or snapshot-ended? (not (resumable-in-place? events-dir requested))))
       (refuse! :resume/run-id-archived)
       (and requested (not own?) (or (run-recorded? events-dir requested) (checkpointed? requested)))
       (refuse! :resume/run-id-taken)
       requested requested
-      (and snapshot-id (resumable-in-place? events-dir snapshot-id)) snapshot-id
+      (and snapshot-id (not snapshot-ended?) (resumable-in-place? events-dir snapshot-id)) snapshot-id
       :else (random-uuid))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} resolve-resume-workflow
-  "Resolve workflow identity for a resumed run, using the CLI's
-   default selection profile as fallback. Thin wrapper over the
-   component's `resolve-workflow-identity`."
-  [reconstructed]
-  (let [result (wr/resolve-workflow-identity
-                reconstructed
-                #(selection-config/resolve-selection-profile :default))]
-    (throw-resume-anomaly! result)
-    result))
-
-;------------------------------------------------------------------------------ Layer 3
-
 ;; Public API — invoked by both `mf resume <id>` and `mf run --resume`
-(defn ^{:stratum 3} resume-workflow
+(defn ^{:stratum 2} resume-workflow
   "Resume a workflow from its last checkpoint.
 
    Reconstructs context via the workflow-resume component, trims the
@@ -382,8 +407,10 @@
         _ (when-not quiet
             (display/print-info (messages/t :resume/resuming
                                             {:workflow-id workflow-id})))
+        _ (refuse-live-run! workflow-id (:force opts))
         recorded (wr/reconstruct-context events-dir (str workflow-id))
-        _ (throw-resume-anomaly! recorded)
+        _ (resume-anomaly/throw-resume-anomaly! recorded)
+        _ (resume-anomaly/throw-resume-anomaly! (unowned-resume-anomaly recorded))
         ;; Shown even when quiet: an unreadable checkpoint file means work
         ;; the run already paid for may be done again.
         _ (doseq [failure (:checkpoint-read-failures recorded)]
@@ -418,7 +445,10 @@
                                         #(wr/extract-workspace-checkpoints (read-event-file workflow-id)))
         ;; Checked before a completed run is reported done: an invalid
         ;; request is refused, not answered "already completed".
-        resume-run-id (run-id-for events-dir workflow-id (:machine-snapshot reconstructed) (:run-id opts))
+        ;; Terminality from the run as recorded: a rewind drops the snapshot.
+        resume-run-id (run-id-for events-dir workflow-id (:machine-snapshot reconstructed) (:run-id opts)
+                                  (terminal-status? (get-in recorded
+                                                            [:machine-snapshot :execution/status])))
         ;; `--correlation-id` lands on the run's lifecycle events; the
         ;; operator's launcher passes its intervention id and waits for
         ;; it. Absent, none is imposed and the runner's default applies
@@ -443,7 +473,7 @@
             ;; From the run as recorded: a rewind drops the snapshot, which
             ;; names the workflow when no spec was recorded.
             identity (resolve-resume-workflow recorded)
-            _ (throw-resume-anomaly! identity)
+            _ (resume-anomaly/throw-resume-anomaly! identity)
             {:keys [workflow-type workflow-version]} identity
             {:keys [workflow]} (load-workflow workflow-type workflow-version {})
 
@@ -451,15 +481,28 @@
             ;; Another id than the run's own: a new attempt, whose events
             ;; and cost are its own.
             new-attempt? (not= (str resume-run-id) (str (or (:execution/id restored-snapshot) workflow-id)))
+            ;; The run every attempt continues, kept across new attempt ids
+            ;; so effects keyed on it (the release branch and PR) are found
+            ;; again. From the recorded snapshot: a rewind drops the
+            ;; reconstructed one.
+            recorded-snapshot (:machine-snapshot recorded)
+            origin-id (or (:execution/origin-id recorded-snapshot)
+                          (:execution/id recorded-snapshot)
+                          (parse-uuid (str workflow-id)))
             machine-snapshot (some-> restored-snapshot
-                                     (assoc :execution/id resume-run-id)
+                                     (assoc :execution/id resume-run-id
+                                            :execution/origin-id origin-id)
                                      (cond-> new-attempt? (assoc :execution/metrics {:tokens 0 :cost-usd 0.0
                                                                                      :duration-ms 0})))
-            failed-checkpoint? (and machine-snapshot (:failed? reconstructed))
-            resume-workflow (if (and machine-snapshot (not failed-checkpoint?))
+            ;; A run that ended :failed or :cancelled is terminal (N2 §8.3):
+            ;; its snapshot is not continued, a new attempt starts from it.
+            terminal-checkpoint? (and machine-snapshot
+                                      (or (:failed? reconstructed)
+                                          (when (workflow/cancelled? machine-snapshot) true)))
+            resume-workflow (if (and machine-snapshot (not terminal-checkpoint?))
                               workflow
                               (wr/trim-pipeline workflow completed-phases))
-            _ (throw-resume-anomaly! resume-workflow)
+            _ (resume-anomaly/throw-resume-anomaly! resume-workflow)
             remaining-pipeline (:workflow/pipeline resume-workflow)
             _ (when-not quiet
                 (if (= (str resume-run-id) (str (:execution/id restored-snapshot)))
@@ -515,11 +558,12 @@
                                       ;; above; without it a snapshot-less
                                       ;; resume minted a second id.
                                       :workflow-id resume-run-id
+                                      :origin-id origin-id
                                       :workflow-run/correlation-id correlation-id
                                       :event-stream event-stream
                                       :control-state control-state
                                       :resume-machine-snapshot machine-snapshot
-                                      :resume-reset-terminal? failed-checkpoint?
+                                      :resume-reset-terminal? terminal-checkpoint?
                                       ;; Never event telemetry; a rewind has
                                       ;; already cut them to the kept phases.
                                       :resume-phase-results (when (wr/checkpointed-phase-results recorded)

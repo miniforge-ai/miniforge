@@ -32,6 +32,8 @@
    [ai.miniforge.workflow.interface.registry :as registry]
    [ai.miniforge.workflow.interface.runtime :as runtime]
    [ai.miniforge.workflow.interface.supervision :as supervision]
+   [ai.miniforge.workflow.run-owner-lock :as run-owner-lock]
+   [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
    [ai.miniforge.workflow.visualize :as visualize]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -247,6 +249,20 @@
    Returns a vector of phase interceptors."
   pipeline/build-pipeline)
 
+(def ^{:stratum 0} cancelled?
+  "True for a run result that ended :cancelled (N2 2.2)."
+  pipeline/cancelled?)
+
+(def ^{:stratum 0} run-outcome
+  "How a finished run result ended: :completed, :cancelled or :failed."
+  pipeline/run-outcome)
+
+(def ^{:stratum 0} cancellation
+  "Who cancelled a :cancelled run result and from where, as its
+   :workflow/cancelled event reports it: {:cancel/requested-by
+   :cancel/source :cancel/reason? :action/id?}."
+  pipeline/cancellation)
+
 (def ^{:stratum 0} validate-pipeline
   "Validate a workflow's pipeline (phase + execution-machine checks). Args:
    [workflow]. Returns {:valid? boolean :errors [...] :warnings [...]}."
@@ -282,6 +298,17 @@
    it holds the run, else the root its events announce, else nil. Args:
    [workflow-run-id events-dir]."
   checkpoint-gc/run-checkpoint-root)
+
+(defn ^{:stratum 0} run-owner
+  "The process running a run, from the owner lock run-pipeline holds for
+   the run's lifetime: its record ({:owner/pid :owner/started-at ...}, {}
+   when unreadable), nil when no process runs it, or an :unavailable
+   anomaly on an I/O error. Args: [workflow-run-id] or [workflow-run-id
+   checkpoint-root], nil root meaning the default."
+  ([workflow-run-id] (run-owner workflow-run-id nil))
+  ([workflow-run-id checkpoint-root]
+   (run-owner-lock/owner (or checkpoint-root (checkpoint-paths/resolve-checkpoint-root))
+                         workflow-run-id)))
 
 (def ^{:stratum 0} pin-checkpoint!
   "Pin a run's checkpoint: `:pinned? true` in its manifest, which the

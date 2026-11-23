@@ -86,22 +86,26 @@
        (is (fs/exists? (paths/pin-marker-path root (:execution/id ctx))))))))
 
 (deftest ^{:stratum 1} a-pin-taken-during-a-checkpoint-write-is-kept
-  ;; The checkpoint write reads the manifest, the pin lands, then the write
-  ;; finishes: the pin must survive the manifest being written over.
+  ;; The checkpoint write reads the manifest and a pin is asked for: the
+  ;; pin waits for the write's lock, lands after it, and survives.
   (fixture/call-with-temp-checkpoint-root
    (fn [root]
      (let [ctx (run-ctx root {})
            opts {:checkpoint/root root}
-           build records/build-manifest]
+           build records/build-manifest
+           pin (promise)]
        (store/persist-execution-state! ctx)
        (with-redefs [records/build-manifest
                      (fn [& args]
                        (let [built (apply build args)]
                          ;; The merge with the manifest read from disk.
                          (when (some? (nth args 2 nil))
-                           (workflow/pin-checkpoint! (:execution/id ctx) opts))
+                           (let [pinning (future (workflow/pin-checkpoint! (:execution/id ctx) opts))]
+                             (is (= ::waiting (deref pinning 200 ::waiting)) "the write holds the lock")
+                             (deliver pin pinning)))
                          built))]
          (store/persist-execution-state! (assoc ctx :execution/redirect-count 1)))
+       (is (string? (deref @pin 5000 nil)) "the pin lands once the write is done")
        (age-run! root ctx 90)
        (is (= [(:execution/id ctx)]
               (get-in (workflow/gc-checkpoints! opts) [:kept :pinned])))))))

@@ -7,6 +7,7 @@
             [ai.miniforge.dag-executor.interface :as dag-exec]
             [ai.miniforge.llm.interface :as llm-impl]
             [ai.miniforge.phase.interface :as phase]
+            [ai.miniforge.tenancy.interface :as tenancy]
             [ai.miniforge.workflow.context :as ctx]
             [ai.miniforge.workflow.fsm :as workflow-fsm]
             [ai.miniforge.workflow.messages :as messages]
@@ -35,8 +36,15 @@
 
 (defn ^{:stratum 0} acquire-environment
   "Acquire an isolated execution environment (worktree or Docker capsule).
-   Returns [acquired-env opts'] where acquired-env is nil when pre-acquired."
+   Returns [acquired-env opts'] where acquired-env is nil when pre-acquired.
+   First refuses a run that is not governed when the user config requires
+   governed execution, and a governed run whose LLM client gives the Codex
+   agent network access, whether or not its environment was pre-acquired."
   [workflow input opts]
+  (env/refuse-local-when-governed-required! (:workflow/id workflow) (:execution-mode opts)
+                                            (:executor opts))
+  (env/refuse-network-access-when-governed! (:workflow/id workflow) (:execution-mode opts)
+                                            (llm-impl/client-network-access? (:llm-backend opts)))
   (if (and (:executor opts) (:environment-id opts))
     [nil opts]
     (let [repo-url (get opts :repo-url (get input :repo-url))
@@ -69,6 +77,20 @@
 (defn- ^{:stratum 0} governed-capsule? [opts]
   (boolean (and (= :governed (:execution-mode opts))
                 (:executor opts) (:environment-id opts))))
+
+(defn- ^{:stratum 0} unowned-run-anomaly
+  "With `:require-operator?` set, an anomaly when a fresh run has no valid
+   `:acting` context; otherwise nil. A resume is not checked here: the
+   runner would persist the refusal over the run's checkpoint, so the
+   resume command refuses before it writes anything."
+  [opts]
+  (when (and (:require-operator? opts)
+             (not (:resume-machine-snapshot opts)))
+    (let [acting (tenancy/require-acting opts :acting)]
+      (when (anomaly/anomaly? acting)
+        (anomaly/anomaly :invalid-input
+                         (messages/t :tenancy/operator-required)
+                         {:tenancy/refusal acting})))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -146,13 +168,15 @@
 
    Returns the assembled execution context on success, or an
    `:invalid-input` anomaly when `:governed` mode is requested but no
-   capsule executor + `:environment-id` were supplied in `opts`. Governed
-   mode forbids worktree fallback (N11 §7.4).
+   capsule executor + `:environment-id` were supplied in `opts` (governed
+   mode forbids worktree fallback, N11 §7.4), or when `:require-operator?`
+   is set and a fresh run has no valid acting context.
 
    The supplied run-pipeline port is stored unchanged for nested execution;
    context preparation has no dependency on the runner namespace."
   [workflow input opts run-pipeline]
   (or (governed-capsule-missing-anomaly opts)
+      (unowned-run-anomaly opts)
       (assemble-initial-context workflow input opts run-pipeline)))
 
 (comment ::runner-preparation)

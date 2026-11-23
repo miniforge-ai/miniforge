@@ -23,6 +23,7 @@
    [ai.miniforge.workflow.boundary.chain-admission :as chain-admission]
    [ai.miniforge.workflow.boundary.chain-retention :as chain-retention]
    [ai.miniforge.workflow.chain-loader :as chain-loader]
+   [ai.miniforge.workflow.context :as context]
    [ai.miniforge.workflow.dag-orchestrator :as dag-orchestrator]
    [ai.miniforge.workflow.runner :as runner]))
 
@@ -41,6 +42,20 @@
    Returns the final execution context map; throws a slingshot anomaly on
    governed-mode misconfiguration."
   runner/run-pipeline)
+
+(def ^{:stratum 0} cancelled?
+  "True for a run result that ended :cancelled (N2 2.2)."
+  context/cancelled?)
+
+(def ^{:stratum 0} run-outcome
+  "How a finished run result ended: :completed, :cancelled or :failed."
+  context/run-outcome)
+
+(def ^{:stratum 0} cancellation
+  "Who cancelled a :cancelled run result and from where, as its
+   :workflow/cancelled event reports it: {:cancel/requested-by
+   :cancel/source :cancel/reason? :action/id?}."
+  context/cancellation)
 
 (def ^{:stratum 0} build-pipeline
   "Build the interceptor pipeline from a workflow config. Args: [workflow].

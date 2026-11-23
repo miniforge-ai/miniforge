@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.dag-executor.execution-plan
   "Execution plan data structure for sandboxed task isolation.
 
@@ -32,9 +31,9 @@
    [malli.error :as me]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Trust levels and network profiles
 
-(def trust-levels
+;; Trust levels and network profiles
+(def ^{:stratum 0} trust-levels
   "Valid trust levels for an execution plan.
 
    - :untrusted   External / community PRs. Maximum sandbox restrictions.
@@ -42,7 +41,7 @@
    - :privileged  Admin or CI pipelines. May access secrets and full network."
   #{:untrusted :trusted :privileged})
 
-(def network-profiles
+(def ^{:stratum 0} network-profiles
   "Valid network profiles for an execution plan.
 
    - :none        Air-gapped. No outbound or inbound network access.
@@ -51,24 +50,32 @@
    - :full        Unrestricted network access (privileged tasks only)."
   #{:none :restricted :standard :full})
 
-;------------------------------------------------------------------------------ Layer 1
-;; Malli schemas
+(def ^{:stratum 0} env-name-pattern
+  "An environment variable name: a letter or underscore, then letters,
+   digits and underscores. Anchored with \\A and \\z, not ^ and $, so a
+   trailing line break cannot pass under either `re-find` (Malli's :re) or
+   `re-matches`."
+  #"\A[A-Za-z_][A-Za-z0-9_]*\z")
 
-(def MountSchema
+;; Malli schemas
+(def ^{:stratum 0} MountSchema
   "Schema for a filesystem mount binding a host path into the container."
   [:map
    [:host-path      :string]
    [:container-path :string]
    [:read-only?     :boolean]])
 
-(def ExecutionPlanSchema
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} ExecutionPlanSchema
   "Schema for an execution plan.
 
    Fields:
    - :image-digest      Content-addressed container image (sha256:...).
    - :command           Argv vector, e.g. [\"bb\" \"run\" \"task\"].
    - :mounts            Vector of mount maps (see MountSchema).
-   - :env               String->string environment variable map.
+   - :env               String->string environment variable map; names match
+                        `env-name-pattern`.
    - :secrets-refs      Optional vector of secret reference identifiers.
    - :network-profile   Optional network-profiles keyword.
    - :time-limit-ms     Optional wall-clock timeout in milliseconds.
@@ -78,7 +85,7 @@
    [:image-digest    :string]
    [:command         [:vector :string]]
    [:mounts          [:vector MountSchema]]
-   [:env             [:map-of :string :string]]
+   [:env             [:map-of [:re env-name-pattern] :string]]
    [:secrets-refs {:optional true} [:vector :string]]
    [:network-profile {:optional true} (into [:enum] network-profiles)]
    [:time-limit-ms {:optional true} [:int {:min 1}]]
@@ -86,9 +93,9 @@
    [:trust-level     (into [:enum] trust-levels)]])
 
 ;------------------------------------------------------------------------------ Layer 2
-;; Constructor and validator
 
-(defn validate-plan
+;; Constructor and validator
+(defn ^{:stratum 2} validate-plan
   "Validate a map against the ExecutionPlanSchema.
 
    Arguments:
@@ -104,7 +111,9 @@
                   (m/explain plan)
                   me/humanize)}))
 
-(defn create-execution-plan
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} create-execution-plan
   "Construct and validate an execution plan.
 
    Arguments:

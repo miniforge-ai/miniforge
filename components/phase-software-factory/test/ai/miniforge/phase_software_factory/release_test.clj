@@ -28,75 +28,22 @@
   (:require
    [clojure.test :refer [deftest testing is use-fixtures]]
    [clojure.java.io :as io]
-   [clojure.java.shell :as shell]
-   [clojure.string :as str]
-   [babashka.fs :as fs]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.event-stream.interface :as es]
-   [ai.miniforge.logging.interface :as log]
-   [ai.miniforge.phase-software-factory.codex-pin :as codex-pin]
    [ai.miniforge.phase-software-factory.release :as release]
+   [ai.miniforge.phase-software-factory.release-state :as release-state]
+   [ai.miniforge.phase-software-factory.release-test-support
+    :refer [with-unconfigured-codex phase-test-config-resource
+            mock-code-artifact mock-implement-result capturing-logger
+            entry-events readiness-ctx verify-passed review-decided
+            with-test-worktree create-empty-context create-base-context
+            write-and-commit-mock-files!]]
+   [ai.miniforge.phase-software-factory.release-worktree :as release-worktree]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase.loader :as loader]
    [ai.miniforge.release-executor.interface :as release-executor]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-;------------------------------------------------------------------------------ Test Fixtures
-(defn ^{:stratum 0} with-unconfigured-codex
-  "Run `f` with no codex configured.
-
-   `build-executor-context` consults the codex for the release situation
-   and appends the rendered landings to `:task/behavior-addendum`. The
-   codex location comes from the environment (`MINIFORGE_CODEX_PATH`),
-   so on a machine with one exported — the trap bench treated arm,
-   2026-09-03 — the addendum assertions below saw pack text plus codex
-   text where the test had stubbed only the pack. Nothing in this
-   namespace is about the consultation itself; the pinning contract lives
-   in codex-pin-test."
-  [f]
-  (with-redefs [codex-pin/configured-codex-dir (constantly nil)]
-    (f)))
-
-(def ^{:stratum 0} phase-test-config-resource
-  "config/phase/test-support-namespaces.edn")
-
-(defn ^{:stratum 0} create-temp-worktree
-  "Create a temporary directory initialized as a real git repository.
-   Required for git-dirty-files to work in the new environment model."
-  []
-  (let [temp-dir (io/file (System/getProperty "java.io.tmpdir")
-                          (str "release-test-" (random-uuid)))]
-    (.mkdirs temp-dir)
-    ;; Initialize a real git repository so git status --porcelain works
-    (shell/sh "git" "init" :dir (.getPath temp-dir))
-    (.getPath temp-dir)))
-
-(defn ^{:stratum 0} cleanup-temp-worktree
-  [dir-path]
-  (when dir-path
-    (try
-      (fs/delete-tree dir-path)
-      (catch Exception _e nil))))
-
-;------------------------------------------------------------------------------ Mock Data
-(def ^{:stratum 0} mock-code-artifact
-  {:code/id (random-uuid)
-   :code/files [{:path "src/feature.clj"
-                 :content "(ns feature)\n(defn new-feature [] :implemented)"
-                 :action :create}
-                {:path "test/feature_test.clj"
-                 :content "(ns feature-test)\n(deftest t (is true))"
-                 :action :create}]
-   :code/language "clojure"})
-
-(def ^{:stratum 0} mock-implement-result
-  "New-model implement phase result: carries environment reference and summary,
-   NOT serialized :code/files. Code changes live in the worktree."
-  {:status         :success
-   :environment-id "test-environment-id"
-   :summary        "Implemented feature: Add feature (2 files)"
-   :metrics        {:tokens 1500 :duration-ms 3200}})
 
 ;; Defaults Tests
 (deftest ^{:stratum 0} default-config-test
@@ -137,58 +84,10 @@
       (is (= :releaser (:agent defaults)))
       (is (= [:release-ready] (:gates defaults))))))
 
-;; Diagnostic-emission regression tests
-;;
-;; These tests pin the observability behavior added 2026-05-04. The
-;; production fix for the dogfood release-phase silent fail is two-part:
-;;   1. Ensure the release-executor receives a non-nil logger even when
-;;      the workflow ctx is missing :execution/logger.
-;;   2. Emit log/error entries around the failure paths in enter-release
-;;      so the next dogfood run yields the actual cause instead of a
-;;      generic :anomalies.phase/agent-failed.
-;; A future refactor that drops either guarantee should fail here, not
-;; only surface during the next dogfood post-mortem.
-(defn- ^{:stratum 0} capturing-logger
-  "Build a logger whose entries are appended to `entries-atom`. Used by
-   the diagnostic-emission regression tests to assert log/error fires
-   on the failure paths of enter-release."
-  [entries-atom]
-  (log/create-logger
-    {:min-level :debug
-     :output    (fn [entry] (swap! entries-atom conj entry))}))
-
-(defn- ^{:stratum 0} entry-events
-  "Pull the :log/event keyword off every captured log entry — what the
-   tests assert against."
-  [entries-atom]
-  (into #{} (keep :log/event) @entries-atom))
-
-;; Boundary-commit rehydration regression
-;;
-;; Stage-3 dogfood (2026-05-07): plan/implement/verify/review all green,
-;; files committed on the task branch by the implement-phase boundary,
-;; but release threw `:release/zero-files` because `git-dirty-files`
-;; saw a clean worktree. The fix mirrors review.clj/rehydrate-from-paths
-;; — read content for the `:code/file-paths` recorded on the implement
-;; artifact instead of relying on the worktree's dirty status.
-(defn- ^{:stratum 0} sh-must-succeed!
-  "Run `git` with `args`; throw if exit != 0. Test-helper guard so
-   we don't silently fall back through git-dirty-files when the
-   boundary-commit simulation actually didn't commit."
-  [worktree args]
-  (let [result (apply shell/sh (concat args [:dir worktree]))]
-    (when-not (zero? (:exit result))
-      (throw (ex-info "git command failed inside test fixture"
-                      {:args args
-                       :exit (:exit result)
-                       :err  (:err result)
-                       :out  (:out result)})))
-    result))
-
 (deftest ^{:stratum 0} release-files-result-returns-zero-files-anomaly-test
   (testing "zero-files is available as anomaly data"
     (let [impl-result {:environment-id "task-1"}
-          result (#'release/release-files-result [] [] impl-result "/tmp/task-1")]
+          result (#'release-worktree/release-files-result [] [] impl-result "/tmp/task-1")]
       (is (anomaly/anomaly? result))
       (is (= :invalid-input (:anomaly/type result)))
       (is (= :anomalies.phase/enter-failed (:anomaly/subtype result)))
@@ -280,85 +179,42 @@
       (is (= :release/zero-files
              (get-in result [:phase :error :data :type]))))))
 
-;------------------------------------------------------------------------------ Layer 1
+(deftest ^{:stratum 0} leave-release-fails-without-prepared-work-test
+  (testing "a successful result with no prepared branch fails instead of completing"
+    (let [interceptor (phase/get-phase-interceptor {:phase :release})
+          left ((:leave interceptor)
+                {:phase {:started-at (System/currentTimeMillis)
+                         :result {:status :success :output {:release/status :prepared}}
+                         :budget {:iterations 2}
+                         :iterations 2}
+                 :phase-config {:phase :release}
+                 :execution/metrics {:tokens 0 :duration-ms 0}})]
+      (is (= :failed (get-in left [:phase :status])))
+      (is (= :release/not-prepared
+             (get-in left [:phase :result :error :data :type]))))))
 
-(defn ^{:stratum 1} with-test-worktree
-  [f]
-  (let [worktree (create-temp-worktree)]
-    (try
-      (f worktree)
-      (finally
-        (cleanup-temp-worktree worktree)))))
+(deftest ^{:stratum 0} release-readiness-test
+  (let [ready? (comp :ready? release-state/release-readiness)
+        both   [:implement :verify :review :release]]
+    (testing "verify passed and review approved"
+      (is (true? (ready? (readiness-ctx both {:verify verify-passed
+                                               :review (review-decided :approved)})))))
+    (testing "review requested changes"
+      (is (false? (ready? (readiness-ctx both {:verify verify-passed
+                                                :review (review-decided :changes-requested)})))))
+    (testing "verify failed"
+      (is (false? (ready? (readiness-ctx both {:verify {:status :failed}
+                                                :review (review-decided :approved)})))))
+    (testing "a configured phase with no recorded result"
+      (is (false? (ready? (readiness-ctx both {:review (review-decided :approved)})))))
+    (testing "only verify configured, and it passed"
+      (is (true? (ready? (readiness-ctx [:implement :verify :release]
+                                        {:verify verify-passed})))))
+    (testing "neither configured: no evidence"
+      (is (false? (ready? (readiness-ctx [:implement :release] {}))))
+      (is (false? (ready? {}))))))
 
-(defn ^{:stratum 1} write-mock-files-to-worktree!
-  "Write mock code artifact files to the test worktree.
-   Simulates what the implement phase does in production: writing code
-   directly to the execution environment's working directory."
-  [worktree]
-  (doseq [{:keys [path content]} (:code/files mock-code-artifact)]
-    (let [file (io/file worktree path)]
-      (io/make-parents file)
-      (spit file content))))
-
-(defn ^{:stratum 1} create-empty-context
-  "Create a test context with NO files written to the worktree.
-   Used to test zero-files detection (no git dirty files in environment)."
-  [worktree]
-  {:execution/id (random-uuid)
-   :execution/input {:description "Test release"
-                     :title "Add feature"
-                     :intent "testing"}
-   :execution/metrics {:tokens 0 :duration-ms 0}
-   :execution/phase-results {:implement {:result mock-implement-result}}
-   :worktree-path worktree})
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} create-base-context
-  "Create a test context with mock files already written to the test worktree.
-   In the new environment model, code changes are in the worktree (not phase
-   results). Most tests use this context."
-  [worktree]
-  ;; Write mock files to the worktree, simulating what the implement phase does
-  (write-mock-files-to-worktree! worktree)
-  {:execution/id (random-uuid)
-   :execution/input {:description "Test release"
-                     :title "Add feature"
-                     :intent "testing"}
-   :execution/metrics {:tokens 0 :duration-ms 0}
-   :execution/phase-results {:implement {:result mock-implement-result}}
-   :worktree-path worktree})
-
-(defn- ^{:stratum 2} write-and-commit-mock-files!
-  "Write the mock files into the worktree, commit them on a real
-   git history, and assert the worktree is clean afterwards.
-
-   Simulates the post-implement-boundary state where the agent's
-   files have landed on the task branch and `git status --porcelain`
-   reports nothing. Asserting cleanliness here means the regression
-   test cannot accidentally pass via the legacy `git-dirty-files`
-   path — it forces the rehydrate-from-paths code under test.
-
-   Defeats global GPG / signing configuration (1Password, GPG agents)
-   with `error: <agent> returned an error`. With commit.gpgsign=false
-   locally on this repo AND --no-gpg-sign --no-verify on the commit
-   itself, the fixture runs hermetically regardless of the dev
-   machine's signing setup. (Same fix also applied via PR #858.)"
-  [worktree]
-  (write-mock-files-to-worktree! worktree)
-  (sh-must-succeed! worktree ["git" "config" "user.email" "test@example.com"])
-  (sh-must-succeed! worktree ["git" "config" "user.name" "Test"])
-  (sh-must-succeed! worktree ["git" "config" "commit.gpgsign" "false"])
-  (sh-must-succeed! worktree ["git" "config" "tag.gpgsign" "false"])
-  (sh-must-succeed! worktree ["git" "add" "."])
-  (sh-must-succeed! worktree ["git" "commit" "--no-gpg-sign" "--no-verify"
-                              "-m" "implement-phase-boundary commit"])
-  (let [{:keys [out]} (sh-must-succeed! worktree ["git" "status" "--porcelain"])]
-    (when-not (str/blank? out)
-      (throw (ex-info "fixture left worktree dirty after commit"
-                      {:porcelain out})))))
-
-(deftest ^{:stratum 2} release-handles-zero-files-artifact-test
+(deftest ^{:stratum 0} release-handles-zero-files-artifact-test
   (testing "release phase fails fast when no files changed in the environment"
     (with-test-worktree
       (fn [worktree]
@@ -370,7 +226,7 @@
                               ((:enter interceptor) ctx-with-config))
             "Release should fail fast when environment has no changed files"))))))
 
-(deftest ^{:stratum 2} release-ignores-non-substantive-paths-test
+(deftest ^{:stratum 0} release-ignores-non-substantive-paths-test
   (testing "iter-23 regression: a worktree dirty ONLY with .miniforge-session-id
             must not be treated as releasable work"
     (with-test-worktree
@@ -385,8 +241,8 @@
                                 ((:enter interceptor) ctx-with-config))
               "Session-marker-only diffs must filter to empty — no empty-diff PR"))))))
 
-;------------------------------------------------------------------------------ Regression: already-satisfied / nil implement status
-(deftest ^{:stratum 2} release-skips-when-plan-already-satisfied-test
+;; Regression: already-satisfied / nil implement status
+(deftest ^{:stratum 0} release-skips-when-plan-already-satisfied-test
   (testing "release phase skips without NPE when plan returned already-satisfied (0 DAG tasks)"
     ;; When the planner detects specs are already satisfied, the DAG runs with
     ;; 0 tasks. The implement result has nil :status. The release phase must
@@ -405,7 +261,7 @@
         (is (= :completed (get-in result [:phase :status]))
             "Release should complete (skip) when implement status is nil and no dirty files"))))))
 
-(deftest ^{:stratum 2} release-skips-when-implement-already-implemented-test
+(deftest ^{:stratum 0} release-skips-when-implement-already-implemented-test
   (testing "release phase skips when implement returned :already-implemented"
     (with-test-worktree
       (fn [worktree]
@@ -420,14 +276,12 @@
         (is (= :completed (get-in result [:phase :status]))
             "Release should complete (skip) when implement status is :already-implemented"))))))
 
-;------------------------------------------------------------------------------ Layer 3
-
-;------------------------------------------------------------------------------ File Writing Tests
-(deftest ^{:stratum 3} release-writes-files-to-temp-directory-test
+;; File Writing Tests
+(deftest ^{:stratum 0} release-writes-files-to-temp-directory-test
   (testing "release phase writes files to temporary worktree"
     (with-test-worktree
       (fn [worktree]
-      (with-redefs [release-executor/execute-release-phase
+      (with-redefs [release-executor/prepare-release
                     (fn [workflow-state exec-context _opts]
                       ;; Write files directly to temp worktree (skip git staging)
                       (let [worktree (:worktree-path exec-context)
@@ -456,11 +310,11 @@
           (is (.exists (io/file worktree "test/feature_test.clj"))
               "Test file should exist on disk")))))))
 
-(deftest ^{:stratum 3} release-returns-correct-files-written-count-test
+(deftest ^{:stratum 0} release-returns-correct-files-written-count-test
   (testing "release phase returns correct :files-written count"
     (with-test-worktree
       (fn [worktree]
-      (with-redefs [release-executor/execute-release-phase
+      (with-redefs [release-executor/prepare-release
                     (fn [workflow-state exec-context _opts]
                       (let [worktree (:worktree-path exec-context)
                             code-artifacts (map :artifact/content (:workflow/artifacts workflow-state))
@@ -482,12 +336,12 @@
           (is (= 2 files-written)
               "Should report 2 files written (src + test)")))))))
 
-(defn- ^{:stratum 3} captured-review-artifact
+(defn- ^{:stratum 0} captured-review-artifact
   "Run the release enter interceptor with the given review output and return the
    single :review artifact handed to the release executor (or nil)."
   [worktree review-output]
   (let [seen (atom nil)]
-    (with-redefs [release-executor/execute-release-phase
+    (with-redefs [release-executor/prepare-release
                   (fn [workflow-state _exec-context _opts]
                     (reset! seen workflow-state)
                     {:success? true :artifacts [] :metrics {:files-written 0}})]
@@ -497,13 +351,13 @@
         ((:enter interceptor) (assoc ctx :phase-config {:phase :release}))
         (first (filter #(= :review (:artifact/type %)) (:workflow/artifacts @seen)))))))
 
-(deftest ^{:stratum 3} release-adds-no-review-artifact-on-clean-review-test
+(deftest ^{:stratum 0} release-adds-no-review-artifact-on-clean-review-test
   (testing "a clean review (no unresolved warnings) adds no :review artifact —
             the happy-path PR body is unchanged"
     (with-test-worktree
       (fn [worktree]
         (let [seen (atom nil)]
-          (with-redefs [release-executor/execute-release-phase
+          (with-redefs [release-executor/prepare-release
                         (fn [workflow-state _exec-context _opts]
                           (reset! seen workflow-state)
                           {:success? true :artifacts [] :metrics {:files-written 0}})]
@@ -513,11 +367,11 @@
               (is (empty? (filter #(= :review (:artifact/type %))
                                   (:workflow/artifacts @seen)))))))))))
 
-(deftest ^{:stratum 3} release-fails-when-write-fails-test
+(deftest ^{:stratum 0} release-fails-when-write-fails-test
   (testing "release phase fails when file write operation fails"
     (with-test-worktree
       (fn [worktree]
-      (with-redefs [release-executor/execute-release-phase
+      (with-redefs [release-executor/prepare-release
                     (fn [_workflow-state _exec-context _opts]
                       {:success? false
                        :errors [{:type :file-write-failed
@@ -535,8 +389,8 @@
           (is (seq (get-in result [:phase :result :error :data :errors]))
               "Executor :errors must surface in :phase :result :error :data so the next dogfood run can diagnose without staring at the snapshot")))))))
 
-(deftest ^{:stratum 3} release-surfaces-thrown-exception-in-result-test
-  (testing "release phase preserves the exception class+message+ex-data when execute-release-phase throws"
+(deftest ^{:stratum 0} release-surfaces-thrown-exception-in-result-test
+  (testing "release phase preserves the exception class+message+ex-data when prepare-release throws"
     ;; Pre-2026-05-04 the (catch Exception e (response/failure e)) wrapped the
     ;; exception but emitted no log line, so the dogfood saw a 0ms phase fail
     ;; with no actionable detail. The diagnostic-logging change keeps the same
@@ -544,7 +398,7 @@
     ;; failure carries enough data on it for a post-mortem.
     (with-test-worktree
       (fn [worktree]
-        (with-redefs [release-executor/execute-release-phase
+        (with-redefs [release-executor/prepare-release
                       (fn [_ws _ec _opts]
                         (throw (ex-info "release-executor blew up"
                                         {:reason :gh-cli-missing
@@ -559,7 +413,7 @@
             (is (= :gh-cli-missing (get-in error [:data :reason]))
                 "ex-data must be preserved on the wrapped failure")))))))
 
-(deftest ^{:stratum 3} release-threads-behavior-addendum-onto-executor-context-test
+(deftest ^{:stratum 0} release-threads-behavior-addendum-onto-executor-context-test
   (testing "build-executor-context computes :task/behavior-addendum and threads it to the release executor"
     ;; Pins the wiring that lets the releaser agent see the
     ;; phase-filtered policy pack. Mirrors PR #945 (reviewer):
@@ -573,7 +427,7 @@
           (with-redefs [phase/load-and-filter-behaviors
                         (fn [phase-kw _ctx]
                           (when (= :release phase-kw) stub-addendum))
-                        release-executor/execute-release-phase
+                        release-executor/prepare-release
                         (fn [_ws ec _opts]
                           (reset! captured-context ec)
                           {:success? true
@@ -590,13 +444,31 @@
               (is (= stub-addendum (:task/behavior-addendum @captured-context))
                   ":task/behavior-addendum from phase/load-and-filter-behaviors must reach the executor context"))))))))
 
-(deftest ^{:stratum 3} release-omits-behavior-addendum-when-filter-returns-nil-test
+(deftest ^{:stratum 0} release-filters-rules-by-the-files-it-releases-test
+  (testing "release hands load-and-filter-behaviors the paths of the files it
+            releases, so glob-scoped rules reach the releaser"
+    (with-test-worktree
+      (fn [worktree]
+        (let [filter-context (atom nil)]
+          (with-redefs [phase/load-and-filter-behaviors
+                        (fn [phase-kw context]
+                          (when (= :release phase-kw) (reset! filter-context context))
+                          nil)
+                        release-executor/prepare-release
+                        (fn [_ws _ec _opts]
+                          {:success? true :artifacts [] :metrics {:files-written 0}})]
+            ((:enter (phase/get-phase-interceptor {:phase :release}))
+             (assoc (create-base-context worktree) :phase-config {:phase :release}))
+            (is (= (set (map :path (:code/files mock-code-artifact)))
+                   (set (get-in @filter-context [:artifact :artifact/paths]))))))))))
+
+(deftest ^{:stratum 0} release-omits-behavior-addendum-when-filter-returns-nil-test
   (testing "no addendum key on executor context when phase/load-and-filter-behaviors returns nil"
     (with-test-worktree
       (fn [worktree]
         (let [captured-context (atom nil)]
           (with-redefs [phase/load-and-filter-behaviors (fn [_phase _ctx] nil)
-                        release-executor/execute-release-phase
+                        release-executor/prepare-release
                         (fn [_ws ec _opts]
                           (reset! captured-context ec)
                           {:success? true
@@ -612,7 +484,7 @@
               (is (not (contains? @captured-context :task/behavior-addendum))
                   "no addendum key when filter yields nothing — avoids nil-valued context entries"))))))))
 
-(deftest ^{:stratum 3} release-passes-non-nil-logger-to-executor-when-ctx-logger-absent-test
+(deftest ^{:stratum 0} release-passes-non-nil-logger-to-executor-when-ctx-logger-absent-test
   (testing "build-executor-context falls back to the phase-local logger when :execution/logger is absent"
     ;; Pre-fix the release-executor ran with logger=nil whenever the
     ;; workflow ctx did not include :execution/logger, which silenced
@@ -622,7 +494,7 @@
     (with-test-worktree
       (fn [worktree]
         (let [captured-context (atom nil)]
-          (with-redefs [release-executor/execute-release-phase
+          (with-redefs [release-executor/prepare-release
                         (fn [_ws ec _opts]
                           (reset! captured-context ec)
                           {:success? true
@@ -640,13 +512,13 @@
               (is (some? (:logger @captured-context))
                   ":logger must be non-nil even though the workflow ctx had no :execution/logger"))))))))
 
-(deftest ^{:stratum 3} release-logs-executor-failure-test
-  (testing ":release/executor-failed log/error fires when execute-release-phase returns {:success? false}"
+(deftest ^{:stratum 0} release-logs-executor-failure-test
+  (testing ":release/executor-failed log/error fires when prepare-release returns {:success? false}"
     (with-test-worktree
       (fn [worktree]
         (let [entries (atom [])
               logger  (capturing-logger entries)]
-          (with-redefs [release-executor/execute-release-phase
+          (with-redefs [release-executor/prepare-release
                         (fn [_ws _ec _opts]
                           {:success? false
                            :errors [{:type :gh-auth-failed
@@ -666,13 +538,13 @@
               (is (contains? (entry-events entries) :release/executor-failed)
                   "log/error :release/executor-failed must fire on the :success? false branch — guards the next dogfood post-mortem"))))))))
 
-(deftest ^{:stratum 3} release-logs-thrown-exception-test
-  (testing ":release/executor-threw log/error fires when execute-release-phase throws"
+(deftest ^{:stratum 0} release-logs-thrown-exception-test
+  (testing ":release/executor-threw log/error fires when prepare-release throws"
     (with-test-worktree
       (fn [worktree]
         (let [entries (atom [])
               logger  (capturing-logger entries)]
-          (with-redefs [release-executor/execute-release-phase
+          (with-redefs [release-executor/prepare-release
                         (fn [_ws _ec _opts]
                           (throw (ex-info "release-executor blew up"
                                           {:reason :gh-cli-missing})))]
@@ -684,12 +556,12 @@
               (is (contains? (entry-events entries) :release/executor-threw)
                   "log/error :release/executor-threw must fire in the catch block — without it, the dogfood loses the actual exception"))))))))
 
-(deftest ^{:stratum 3} release-verifies-files-exist-after-writing-test
+(deftest ^{:stratum 0} release-verifies-files-exist-after-writing-test
   (testing "release phase verifies files exist on disk after writing"
     (with-test-worktree
       (fn [worktree]
       (let [verification-performed (atom false)]
-        (with-redefs [release-executor/execute-release-phase
+        (with-redefs [release-executor/prepare-release
                       (fn [workflow-state exec-context _opts]
                         (let [worktree (:worktree-path exec-context)
                               code-artifacts (map :artifact/content (:workflow/artifacts workflow-state))
@@ -721,7 +593,7 @@
             (is (= :success (get-in result [:phase :result :status]))
                 "Release should succeed when verification passes"))))))))
 
-(defn- ^{:stratum 3} create-clean-context-with-recorded-paths
+(defn- ^{:stratum 0} create-clean-context-with-recorded-paths
   "Test context that mirrors the dogfood-failure shape:
    - worktree clean at HEAD (implement boundary already committed)
    - implement phase artifact carries :code/file-paths so release can
@@ -742,12 +614,14 @@
                              :code/file-count   (count paths)}}}
      :worktree-path worktree}))
 
-(deftest ^{:stratum 3} release-includes-pr-info-test
-  (testing "release phase includes PR info in result"
+(deftest ^{:stratum 0} release-includes-pr-info-test
+  (testing "leave-release publishes the prepared branch and records the PR"
     (with-test-worktree
       (fn [worktree]
-      (with-redefs [release-executor/execute-release-phase
-                    (fn [_workflow-state _exec-context _opts]
+      (with-redefs [release-executor/prepare-release
+                    (constantly {:success? true :artifacts [] :prepared {} :metrics {}})
+                    release-executor/publish-release
+                    (fn [_prepared _exec-context]
                       {:success? true
                        :artifacts [{:artifact/id (random-uuid)
                                     :artifact/type :release
@@ -760,7 +634,7 @@
         (let [ctx (create-base-context worktree)
               ctx-with-config (assoc ctx :phase-config {:phase :release})
               interceptor (phase/get-phase-interceptor {:phase :release})
-              result ((:enter interceptor) ctx-with-config)]
+              result ((:leave interceptor) ((:enter interceptor) ctx-with-config))]
           (is (some? (get-in result [:workflow/pr-info]))
               "PR info should be available at top level")
           (let [pr-info (get-in result [:workflow/pr-info])]
@@ -771,12 +645,53 @@
             (is (= "feature/test-123" (:branch pr-info))
                 "Branch name should be captured"))))))))
 
-(deftest ^{:stratum 3} release-propagates-streaming-callback-test
+(deftest ^{:stratum 0} leave-release-keeps-the-prepared-output-when-publish-fails-test
+  (testing "a failed push or PR fails the phase and keeps readiness and consultation"
+    (with-test-worktree
+      (fn [worktree]
+        (with-redefs [release-executor/prepare-release
+                      (constantly {:success? true :artifacts [] :prepared {} :metrics {}})
+                      release-executor/publish-release
+                      (constantly {:success? false :artifacts []
+                                   :errors [{:type :push-failed :message "rejected"}]
+                                   :metrics {}})]
+          (let [interceptor (phase/get-phase-interceptor {:phase :release})
+                ctx  (assoc (create-base-context worktree) :phase-config {:phase :release})
+                left ((:leave interceptor) ((:enter interceptor) ctx))
+                result (get-in left [:phase :result])]
+            (is (= :failed (get-in left [:phase :status])))
+            (is (false? (:success result)))
+            (is (= [{:type :push-failed :message "rejected"}]
+                   (get-in result [:error :data :errors])))
+            (is (map? (get-in result [:output :release/readiness])))
+            (is (contains? (:output result) :codex/consultation))
+            (is (nil? (:workflow/pr-info left)))))))))
+
+(deftest ^{:stratum 0} release-enter-prepares-without-publishing-test
+  (testing "enter-release branches and commits but pushes nothing and opens no PR"
+    (with-test-worktree
+      (fn [worktree]
+        (let [published (atom 0)
+              prepared  {:branch "feature/test-123" :commit-sha "def456"}]
+          (with-redefs [release-executor/prepare-release
+                        (constantly {:success? true :artifacts [] :prepared prepared :metrics {}})
+                        release-executor/publish-release (fn [& _] (swap! published inc))]
+            (let [interceptor (phase/get-phase-interceptor {:phase :release})
+                  entered ((:enter interceptor) (assoc (create-base-context worktree)
+                                                       :phase-config {:phase :release}))
+                  output  (get-in entered [:phase :result :output])]
+              (is (zero? @published) "publish-release must not run in :enter")
+              (is (nil? (:workflow/pr-info entered)))
+              (is (= prepared (:release/prepared output)))
+              (is (false? (get-in output [:release/readiness :ready?]))
+                  "a context with no verify or review evidence is not ready"))))))))
+
+(deftest ^{:stratum 0} release-propagates-streaming-callback-test
   (testing "release phase passes event-stream-backed on-chunk callback to the executor"
     (with-test-worktree
       (fn [worktree]
       (let [stream (es/create-event-stream {:sinks []})]
-        (with-redefs [release-executor/execute-release-phase
+        (with-redefs [release-executor/prepare-release
                       (fn [_workflow-state exec-context _opts]
                         (is (fn? (:on-chunk exec-context))
                             "Release executor should receive an on-chunk callback")
@@ -797,17 +712,22 @@
             (is (= :release (:agent/id (first chunk-events)))))))))))
 
 ;; Interceptor Leave Tests
-(deftest ^{:stratum 3} leave-release-records-metrics-test
+(deftest ^{:stratum 0} leave-release-records-metrics-test
   (testing "leave-release records duration and completion"
     (with-test-worktree
       (fn [worktree]
-      (with-redefs [release-executor/execute-release-phase
+      (with-redefs [release-executor/prepare-release
                     (fn [_workflow-state _exec-context _opts]
                       {:success? true
                        :artifacts [{:artifact/id (random-uuid)
                                     :artifact/type :release
                                     :artifact/content {:files-written 2}}]
-                       :metrics {:files-written 2 :tokens 300 :duration-ms 800}})]
+                       :prepared {}
+                       :metrics {:files-written 2 :tokens 300 :duration-ms 800}})
+                    release-executor/publish-release
+                    (constantly {:success? true :metrics {}
+                                 :artifacts [{:artifact/content {:pr-number 1
+                                                                 :pr-url "https://github.com/o/r/pull/1"}}]})]
         (let [ctx (create-base-context worktree)
               ctx-with-config (assoc ctx :phase-config {:phase :release})
               interceptor (phase/get-phase-interceptor {:phase :release})
@@ -822,9 +742,9 @@
           (is (= :release (first (get-in final-result [:execution :phases-completed])))
               "Release should be added to phases-completed")))))))
 
-;------------------------------------------------------------------------------ Layer 4
+;------------------------------------------------------------------------------ Layer 1
 
-(deftest ^{:stratum 4} release-carries-structured-warning-issues-test
+(deftest ^{:stratum 1} release-carries-structured-warning-issues-test
   (testing "prefers the structured :review/issues (severity :warning/:nit, with
             file/line) and excludes :blocking issues"
     (with-test-worktree
@@ -842,7 +762,7 @@
           (is (every? map? recorded) "structured issues, not legacy strings")
           (is (= #{:warning :nit} (set (map :severity recorded)))))))))
 
-(deftest ^{:stratum 4} release-falls-back-to-legacy-string-warnings-test
+(deftest ^{:stratum 1} release-falls-back-to-legacy-string-warnings-test
   (testing "when no structured :review/issues exist, falls back to the
             :review/warnings description strings (gate-produced warnings)"
     (with-test-worktree
@@ -854,7 +774,7 @@
               recorded (get-in art [:artifact/content :review/warnings])]
           (is (= ["prefer a named constant"] recorded)))))))
 
-(deftest ^{:stratum 4} release-rehydrates-from-implement-artifact-paths-test
+(deftest ^{:stratum 1} release-rehydrates-from-implement-artifact-paths-test
   (testing "release reads files via :code/file-paths when worktree is clean post-boundary-commit"
     ;; Stage-3 dogfood-2026-05-07 regression guard: the dogfood failed
     ;; here because git-dirty-files returns empty after the implement
@@ -866,7 +786,7 @@
               ;; it — checking just :phase :result :status would also
               ;; pass on a (broken) dirty-file fallback.
               captured-files (atom nil)]
-          (with-redefs [release-executor/execute-release-phase
+          (with-redefs [release-executor/prepare-release
                         (fn [workflow-state _exec-context _opts]
                           (let [files (->> (:workflow/artifacts workflow-state)
                                            (mapcat (comp :code/files :artifact/content))
@@ -904,7 +824,7 @@
       (finally
         (phase/reset-phase-loader!)))))
 
-;------------------------------------------------------------------------------ Rich Comment
+;; Rich Comment
 (comment
   (clojure.test/run-tests 'ai.miniforge.phase-software-factory.release-test)
   :leave-this-here)

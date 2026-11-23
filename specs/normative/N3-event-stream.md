@@ -6,8 +6,8 @@
 
 # N3 — Event Stream & Observability Contract
 
-**Version:** 0.12.0-draft
-**Date:** 2026-10-20
+**Version:** 0.14.0-draft
+**Date:** 2026-11-15
 **Status:** Draft
 **Conformance:** MUST
 
@@ -2370,6 +2370,9 @@ originating `control-action/requested` (§3.15).
  :phase/name keyword
  :checkpoint/path string
  :checkpoint/size-bytes long
+ :checkpoint/location                 ; OPTIONAL paired storage identity, payload 1.1.0
+ {:checkpoint/root string
+  :checkpoint/run-directory string}
 
  :message "Checkpoint written for phase {phase/name}"}
 ```
@@ -2394,9 +2397,29 @@ originating `control-action/requested` (§3.15).
  :machine/state keyword
  :snapshot/path string
  :snapshot/size-bytes long
+ :checkpoint/location                 ; OPTIONAL paired storage identity, payload 1.1.0
+ {:checkpoint/root string
+  :checkpoint/run-directory string}
 
  :message "Machine snapshot written at state {machine/state}"}
 ```
+
+For both successful-write event types, `:checkpoint/location` MAY be absent.
+When present, it MUST contain both nonempty paths: the validated canonical
+checkpoint root and the physical canonical run directory captured for that write.
+The producer MUST use payload version `1.1.0` when supplying this record.
+`:workflow/id` MUST remain the logical Workflow UUID; neither the physical
+directory's basename nor an inferred parent of the published file replaces it.
+The run directory and file MAY lie outside the root through trusted aliases.
+
+Consumers MUST retain support for payload `1.0.0`, including records without
+location metadata and the deployed optional top-level `:checkpoint/root` string.
+That legacy field MUST NOT be reinterpreted as a run directory. When the paired
+record is present, consumers MUST use its physical run directory rather than
+derive it from a file path or root plus UUID. An unreadable or invalid locator
+MUST NOT authorize pruning retained events; uncertainty MUST preserve the hold.
+Scope and durable retention class remain unchanged (§6). The product-owner
+approval recorded in the specification index is this amendment's decision source.
 
 #### workflow/machine-snapshot-write-failed
 
@@ -2473,7 +2496,7 @@ entity scope and sequence, but only the orchestrator authorizes transitions.
 
 Both lifecycle types use payload version `2.0.0` under §7.5 and retention class
 `:audit`. Request admission and transitions MUST be durably acknowledged before
-dependent execution proceeds. A publication failure MUST follow §9.1; it MUST
+dependent execution proceeds, except for §9.1.1 containment. A publication failure MUST follow §9.1; it MUST
 NOT be converted into successful admission, authorization, or completion.
 
 ## 4. Event Emission Requirements
@@ -3210,6 +3233,22 @@ proving it. The specific hazard is `capability/denied` and
 operation but drops the event has enforced the policy and lost the evidence.
 This is indistinguishable from never having been asked.
 
+#### 9.1.1 Authorized Full-Stop Containment During Audit Outage
+
+Only N8 §3.5 full-stop containment MAY proceed without durable audit acknowledgment.
+The host MUST first verify N4 run-scoped authorization and required Critical-risk/human approval.
+Unavailable or rejected authorization MUST NOT become permission through this exception.
+The exception permits only local fencing, authority quarantine, and containment/termination of proven run-owned
+isolation under N11 §4.4.
+It MUST NOT permit workload execution, recovery, compensation, provisioning, or unrelated mutation.
+The host MUST report the audit failure and retain the original request, authorization, attempted actions, and observed
+outcomes for audit retry.
+Unavailable persistence MUST NOT be represented as acknowledged admission,
+completion, a durable fence, or restart-safe stop.
+The failed intervention MUST remain failed even if containment succeeds; N8 §3.5 restart prerequisites remain unchanged.
+Audit retry MUST preserve identity and actual outcomes without inventing acknowledgments, ordering, or successful
+lifecycle transitions.
+
 ### 9.2 Fail-Open Classes
 
 Emission of an `:ephemeral` or `:operational` class event MAY fail without
@@ -3376,6 +3415,7 @@ withdrawn, not deleted.
 | N3.EF.3 | MUST | Count dropped `:ephemeral` / `:operational` events and reflect them in SLIs (§9.2). |
 | N3.EF.4 | MUST NOT | Consume a sequence number for a failed emission (§9.3). |
 | N3.EF.5 | MUST NOT | Let listener backpressure drop an event from storage or fail the triggering operation (§9.4). |
+| N3.EF.6 | MUST | Restrict audit-outage execution to authorized full-stop containment, retaining failure and audit obligations (§9.1.1). |
 
 ### 10.5 Test Obligations
 
@@ -3414,6 +3454,9 @@ A conformance suite MUST cover, at minimum:
     and entity snapshots use distinct schemas (N3.EM.2–N3.EM.3).
 13. **Train delivery** — removal and empty-after transitions notify former members;
     retries preserve per-PR IDs and successive changes preserve order (N3.EM.9).
+14. **Containment outage** — authorized containment proceeds during audit failure; unauthorized containment and all
+  workload effects remain denied (N3.EF.6).
+    The intervention reports failure, retains actual outcomes, and cannot authorize restart without N8 §3.5 prerequisites.
 
 ---
 
@@ -3660,6 +3703,11 @@ N3 amendment per §6.1, not silent acceptance.
 
 **Version History:**
 
+- 0.14.0-draft (2026-11-15): Operator approved containment-only audit-outage handling (§9.1.1), without weakening
+  authorization, failure reporting, or restart prerequisites.
+- 0.13.0-draft (2026-10-31): Product owner approved optional paired
+  `:checkpoint/location` on checkpoint/snapshot write receipts, payload 1.1.0,
+  preserving 1.0.0 compatibility, logical Workflow identity and retention safety.
 - 0.12.0-draft (2026-10-20): Product owner approved registration of
   `workflow/phase-heartbeat` with Workflow scope, ephemeral retention (24-hour
   minimum), and separate liveness/progress. Payload 2.0.0 introduces explicit

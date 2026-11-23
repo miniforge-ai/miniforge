@@ -52,12 +52,12 @@
       (nil? plan)
       {:passed? false
        :errors [{:type :no-plan
-                 :message "No plan found in artifact"}]}
+                 :message (msg/t :plan/no-plan)}]}
 
       (empty? steps)
       {:passed? false
        :errors [{:type :empty-plan
-                 :message "Plan has no steps"}]}
+                 :message (msg/t :plan/no-steps)}]}
 
       :else
       {:passed? true
@@ -92,16 +92,25 @@
        :errors quality-issues})))
 
 (defn ^{:stratum 0} check-release-ready
-  "Check release readiness."
+  "Check release readiness.
+
+   Reads `:release/readiness` from the release phase output, where the
+   release phase records it from the verify and review outcomes. Passes
+   only on `:ready? true`; an absent, false or non-boolean value fails. A
+   skipped release (nothing to publish) passes. The gate runner passes the
+   phase `:output` as the artifact."
   [artifact _ctx]
-  (let [ready? (or (get-in artifact [:metadata :release-ready])
-                   (get-in artifact [:release :ready])
-                   true)]  ; Default to ready
-    (if ready?
+  (let [readiness (:release/readiness artifact)
+        {:keys [ready? checks]} readiness]
+    (if (or (true? ready?) (true? (:skipped artifact)))
       {:passed? true}
       {:passed? false
-       :errors [{:type :not-release-ready
-                 :message "Artifact not ready for release"}]})))
+       :errors [{:type    :not-release-ready
+                 :message (if (map? readiness)
+                            (msg/t :release/not-ready
+                                   {:checks (pr-str (remove :passed? checks))})
+                            (msg/t :release/no-readiness))
+                 :checks  (vec checks)}]})))
 
 ;; Policy Pack Gate (classifies by enforcement action, via policy-pack)
 (defn ^{:stratum 0} check-policy-pack
@@ -176,7 +185,7 @@
   {:success? false
    :artifact artifact
    :errors errors
-   :message "Policy violation repair requires LLM agent"})
+   :message (msg/t :policy/repair-requires-llm)})
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -190,35 +199,35 @@
 (defmethod ^{:stratum 1} registry/get-gate :plan-complete
   [_]
   {:name :plan-complete
-   :description "Validates plan artifact is complete"
+   :description (msg/t :plan/description)
    :check check-plan-complete
    :repair nil})
 
 (defmethod ^{:stratum 1} registry/get-gate :review-approved
   [_]
   {:name :review-approved
-   :description "Validates review is approved"
+   :description (msg/t :review/description)
    :check check-review-approved
    :repair nil})
 
 (defmethod ^{:stratum 1} registry/get-gate :quality-check
   [_]
   {:name :quality-check
-   :description "General quality validation"
+   :description (msg/t :quality/description)
    :check check-quality
    :repair nil})
 
 (defmethod ^{:stratum 1} registry/get-gate :release-ready
   [_]
   {:name :release-ready
-   :description "Validates artifact is ready for release"
+   :description (msg/t :release/description)
    :check check-release-ready
    :repair nil})
 
 (defmethod ^{:stratum 1} registry/get-gate :policy-pack
   [_]
   {:name :policy-pack
-   :description "Validates code against loaded policy packs by enforcement action"
+   :description (msg/t :policy-gate/description)
    :check check-policy-pack
    :repair repair-policy-pack})
 

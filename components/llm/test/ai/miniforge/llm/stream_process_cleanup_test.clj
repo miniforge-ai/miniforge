@@ -24,8 +24,12 @@
    neither pid is alive afterwards."
   (:require
    [clojure.test :refer [deftest is testing]]
+   [clojure.string :as str]
+   [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.llm.progress-monitor :as pm]
-   [ai.miniforge.llm.protocols.impl.llm-client :as impl]))
+   [ai.miniforge.llm.protocols.impl.llm-client :as impl]
+   [ai.miniforge.llm.protocols.impl.llm-client.stream-exec :as stream-exec]
+   [ai.miniforge.llm.protocols.impl.llm-client.subprocess :as subprocess]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -94,6 +98,28 @@
    left holding stdout keeps it open until this limit)."
   5000)
 
+(defn- ^{:stratum 0} token-sleep-cmd
+  "A shell that starts a 10-minute child whose command line carries
+   TOKEN (sleep accepts fractional seconds, so the token is the duration),
+   then waits. The shell's own command line carries the token too, so
+   both can be found without either printing a pid."
+  [token]
+  ["sh" "-c" (str "sleep " token " & wait")])
+
+(defn- ^{:stratum 0} unique-sleep-token
+  "A 10-minute sleep duration unique to one test run."
+  []
+  (str "600." (System/nanoTime)))
+
+(defn- ^{:stratum 0} token-pids
+  "Pids of live processes whose command line contains TOKEN."
+  [token]
+  (->> (iterator-seq (.iterator (java.lang.ProcessHandle/allProcesses)))
+       (filter (fn [^java.lang.ProcessHandle handle]
+                 (and (.isAlive handle)
+                      (str/includes? (.orElse (.commandLine (.info handle)) "") token))))
+       (mapv (fn [^java.lang.ProcessHandle handle] (.pid handle)))))
+
 (defn- ^{:stratum 0} alive?
   "True when `pid` is a running process. A killed process nobody has
    reaped yet (a zombie: its shell died first and the container's PID 1
@@ -153,6 +179,34 @@
   [cmd on-line opts]
   (let [outcome (promise)
         thread (Thread. ^Runnable #(deliver outcome (stream-outcome cmd on-line opts)))]
+    (.setDaemon thread true)
+    (.start thread)
+    {:thread thread
+     :outcome outcome}))
+
+(defn- ^{:stratum 1} token-survivors
+  "Pids of processes carrying TOKEN still alive when none are left or
+   `death-timeout-ms` has passed, whichever is first."
+  [token]
+  (let [deadline (+ (System/currentTimeMillis) death-timeout-ms)]
+    (loop []
+      (let [alive (token-pids token)]
+        (if (or (empty? alive) (> (System/currentTimeMillis) deadline))
+          alive
+          (do (Thread/sleep poll-interval-ms)
+              (recur)))))))
+
+(defn- ^{:stratum 1} start-cancellable-stream-thread
+  "Like `start-stream-thread`, with the LLM cancel check bound to
+   `cancelled` (an atom) inside the thread, as the workflow binds it
+   around a phase step."
+  [cancelled cmd on-line opts]
+  (let [outcome (promise)
+        thread (Thread. ^Runnable
+                        #(deliver outcome
+                                  (llm/call-with-cancel-signal
+                                   (fn [] @cancelled)
+                                   (fn [] (stream-outcome cmd on-line opts)))))]
     (.setDaemon thread true)
     (.start thread)
     {:thread thread
@@ -225,7 +279,7 @@
   (testing "a process that closes stdout but does not exit is killed when the join wait runs out"
     (let [pids (atom {})]
       (try
-        (with-redefs-fn {#'impl/process-join-timeout-ms (constantly short-join-timeout-ms)}
+        (with-redefs-fn {#'stream-exec/process-join-timeout-ms (constantly short-join-timeout-ms)}
           (fn []
             (let [{:keys [outcome]} (start-stream-thread
                                      stdout-closing-shell-cmd
@@ -244,3 +298,99 @@
 (comment
   (clojure.test/run-tests 'ai.miniforge.llm.stream-process-cleanup-test)
   :leave-this-here)
+
+(deftest ^{:stratum 2} cancel-kills-process-tree-test
+  (testing "cancelling the run returns the call with a :cancelled timeout and
+            kills the CLI and its children, without interrupting the caller"
+    (let [pids      (atom {})
+          reported  (promise)
+          cancelled (atom false)
+          {:keys [outcome]} (start-cancellable-stream-thread
+                             cancelled
+                             spawning-shell-cmd
+                             (partial record-pid! pids reported)
+                             {:progress-monitor (pm/create-progress-monitor {})})]
+      (try
+        (is (true? (deref reported pid-report-timeout-ms false))
+            "the shell printed both pids")
+        (reset! cancelled true)
+        (let [{:keys [result thrown]} (deref outcome return-timeout-ms nil)]
+          (is (nil? thrown) "the call returns instead of throwing")
+          (is (= :cancelled (get-in result [:timeout :type]))))
+        (is (= [] (survivors (vals @pids)))
+            "no process from the tree is left running")
+        (finally
+          (kill-pids! (vals @pids)))))))
+
+(deftest ^{:stratum 2} call-after-cancel-ends-at-once-test
+  (testing "a call made after the run was cancelled returns a :cancelled
+            timeout at once and leaves nothing running"
+    (let [token (unique-sleep-token)
+          {:keys [outcome]} (start-cancellable-stream-thread
+                             (atom true)
+                             (token-sleep-cmd token)
+                             (fn [_] nil)
+                             {:progress-monitor (pm/create-progress-monitor {})})]
+      (try
+        (let [{:keys [result]} (deref outcome return-timeout-ms nil)]
+          (is (= :cancelled (get-in result [:timeout :type]))))
+        (is (= [] (token-survivors token))
+            "neither the shell nor its child is left running")
+        (finally
+          (kill-pids! (token-pids token)))))))
+
+(deftest ^{:stratum 2} cancel-after-stdout-closes-kills-process-tree-test
+  (testing "a cancel while waiting for a CLI that closed stdout but did not
+            exit ends the wait, returns :cancelled and kills the tree"
+    (let [pids      (atom {})
+          reported  (promise)
+          waiting   (promise)
+          cancelled (atom false)
+          wait-fn   subprocess/wait-for-stream-process]
+      ;; The cancel lands only once the stream has ended and the client is
+      ;; in the post-EOF wait, so the stream loop cannot be what sees it.
+      (with-redefs [subprocess/wait-for-stream-process (fn [process timeout-ms]
+                                                         (deliver waiting true)
+                                                         (wait-fn process timeout-ms))]
+        (let [{:keys [outcome]} (start-cancellable-stream-thread
+                                 cancelled
+                                 stdout-closing-shell-cmd
+                                 (partial record-pid! pids reported)
+                                 {:progress-monitor (pm/create-progress-monitor {})})]
+          (try
+            (is (true? (deref reported pid-report-timeout-ms false))
+                "the shell printed both pids before closing stdout")
+            (is (true? (deref waiting pid-report-timeout-ms false))
+                "the client reached the post-EOF wait")
+            (reset! cancelled true)
+            (let [{:keys [result]} (deref outcome return-timeout-ms nil)]
+              (is (= :cancelled (get-in result [:timeout :type]))
+                  "the post-EOF wait sees the cancel instead of running out"))
+            (is (= [] (survivors (vals @pids)))
+                "no process from the tree is left running")
+            (finally
+              (kill-pids! (vals @pids)))))))))
+
+(deftest ^{:stratum 2} non-streaming-call-sees-the-cancel-test
+  (testing "a non-streaming CLI call (the capture exec-fn) made under a
+            cancelled run is killed with its tree instead of running out
+            its ten-minute wait"
+    (let [token   (unique-sleep-token)
+          outcome (promise)
+          thread  (Thread. ^Runnable
+                           #(deliver outcome
+                                     (llm/call-with-cancel-signal
+                                      (constantly true)
+                                      (fn [] (impl/default-exec-fn (token-sleep-cmd token))))))]
+      (.setDaemon thread true)
+      (.start thread)
+      (try
+        (let [result (deref outcome return-timeout-ms nil)]
+          (is (some? result) "the call returns instead of waiting out its timeout")
+          (is (= -1 (:exit result)))
+          (is (= :cancelled (get-in result [:timeout :type]))
+              "the cancellation survives the wait that reaps the killed process"))
+        (is (= [] (token-survivors token))
+            "neither the shell nor its child is left running")
+        (finally
+          (kill-pids! (token-pids token)))))))

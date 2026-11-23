@@ -24,14 +24,16 @@
    (workflow-success/-failure, dag-execution-result/-error/-paused),
    level-traversal / parallelism analysis over a plan's task graph, and
    converting a plan's tasks into validated DAG tasks (dependency
-   normalization, phantom-dep dropping, stratum auto-wiring)."
+   normalization, phantom-dep dropping, stratum auto-wiring), and the
+   plan-shape logs the orchestrator emits before a run."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.logging.interface :as log]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;--- Layer 0: Result Constructors
+;; Result Constructors
 (def ^{:stratum 0} zero-metrics
   "Canonical zeroed metrics for DAG / inner-workflow results. Used as
    the default when no per-task metrics flow through. Single source
@@ -44,9 +46,10 @@
    :tasks-completed completed
    :tasks-failed failed
    :artifacts (vec artifacts)
-   :metrics {:tokens (:total-tokens metrics-agg 0)
-             :cost-usd (:total-cost metrics-agg 0.0)
-             :duration-ms (:total-duration metrics-agg 0)}})
+   :metrics (cond-> {:tokens (:total-tokens metrics-agg 0)
+                     :cost-usd (:total-cost metrics-agg 0.0)
+                     :duration-ms (:total-duration metrics-agg 0)}
+              (:cost-unavailable? metrics-agg) (assoc :cost-unavailable? true))})
 
 (defn ^{:stratum 0} dag-execution-error [completed failed error]
   {:success? false
@@ -73,7 +76,7 @@
      :auto-resume? auto-resume?
      :metrics {}}))
 
-;--- Layer 0: Level Traversal
+;; Level Traversal
 (defn ^{:stratum 0} normalize-task-id
   "Preserve task IDs in their domain-native form.
    UUID strings are parsed to UUIDs so mixed string/UUID inputs still align."
@@ -124,7 +127,7 @@
                  (inc level-count)
                  (max max-width width)))))))
 
-;--- Layer 0: Plan to DAG Conversion
+;; Plan to DAG Conversion
 (defn ^{:stratum 0} validate-deps
   "Filter deps to only those referencing actual task IDs. Warns on phantoms."
   [task-id raw-deps valid-task-ids logger]
@@ -153,7 +156,7 @@
                   task)))
             dag-tasks))))
 
-;--- Layer 0: Branch Resolution
+;; Branch Resolution
 (defn ^{:stratum 0} default-spec-branch
   "Branch the orchestrator should treat as the spec's parent — the one root
    tasks acquire off and dep-resolution falls back to.
@@ -165,6 +168,42 @@
   (or (get-in context [:execution/opts :branch])
       (get-in context [:execution/branch])
       "main"))
+
+;; Plan-shape logging (moved from dag-orchestrator)
+(defn ^{:stratum 0} warn-potential-monolith
+  "Log a warning when a plan may be under-decomposed — single task but
+   multiple components or many files."
+  [plan logger]
+  (let [tasks (:plan/tasks plan [])
+        components (->> tasks (keep :task/component) distinct)
+        all-files (->> tasks (mapcat :task/exclusive-files) distinct)]
+    (when (and (<= (count tasks) 1)
+               (or (> (count components) 1)
+                   (> (count all-files) 5)))
+      (log/info logger :dag-orchestrator :plan/potential-monolith
+                {:data {:task-count (count tasks)
+                        :component-count (count components)
+                        :file-count (count all-files)}}))))
+
+(defn- ^{:stratum 0} task-defs->forest-shape
+  "Adapt post-wiring task-defs (`:task/deps` set) to the shape
+   `validate-dag-forest` expects (`:task/dependencies` vec).
+
+   In v1 this fed the plan-time gate; in v2 the gate is dropped and
+   the result is used only for informational logging (so the operator
+   sees `:dag/multi-parent-detected` for fan-in plans, but the
+   orchestrator runs them anyway via `merge-parent-branches!`).
+
+   Sorts deps before vectorizing so logged payloads are deterministic
+   across runs — sets have no iteration order."
+  [task-defs]
+  (mapv (fn [t]
+          {:task/id (:task/id t)
+           ;; sort-by str so heterogeneous task-id types (UUID/keyword/
+           ;; string) still produce a total order — `sort` would throw
+           ;; on a mixed set.
+           :task/dependencies (vec (sort-by str (:task/deps t #{})))})
+        task-defs))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -242,6 +281,17 @@
          :levels levels
          :estimated-speedup (if (pos? levels) (float (/ task-count levels)) 1.0)}))))
 
+(defn ^{:stratum 1} log-multi-parent-detected!
+  "Emit an informational log (NOT an anomaly) when the plan has
+   multi-parent tasks. v2 runs them via the merge path; the log
+   surfaces plan shape on the dashboard so operators can see fan-in
+   patterns without the orchestrator rejecting work."
+  [logger plan task-defs]
+  (when-let [non-forest (dag/validate-dag-forest (task-defs->forest-shape task-defs))]
+    (log/info logger :dag-orchestrator :dag/multi-parent-detected
+              {:data {:plan-id (:plan/id plan)
+                      :multi-parent-tasks (:multi-parent-tasks non-forest)}})))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} plan->dag-tasks [plan context]
@@ -253,7 +303,7 @@
                         tasks)]
     (wire-stratum-deps dag-tasks)))
 
-;--- Layer 2: Plan Analysis
+;; Plan Analysis
 (defn ^{:stratum 2} parallelizable-plan? [plan]
   (let [tasks (:plan/tasks plan [])]
     (when (> (count tasks) 1)

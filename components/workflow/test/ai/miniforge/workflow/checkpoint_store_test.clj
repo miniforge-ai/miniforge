@@ -186,7 +186,9 @@
                                                                  :timestamp (java.time.Instant/parse "2026-08-29T00:00:00Z")}]}]})
               allowed (assoc-in base [:execution/phase-results :implement]
                                 {:status :completed
-                                 :phase/decision-envelope {:envelope/decision :allow}})
+                                 :phase/decision-envelope {:envelope/decision :allow}
+                                 :phase/gate-warnings [{:gate :codex-consultation
+                                                        :warnings [{:type :codex-pin-not-fetched}]}]})
               _ (checkpoint-store/persist-execution-state! denied)
               _ (checkpoint-store/persist-execution-state! allowed)
               run-dir (str checkpoint-root "/" (:execution/id base))
@@ -194,13 +196,17 @@
                            str/split-lines
                            (mapv edn/read-string))
               phase-file (edn/read-string
-                          (slurp (str run-dir "/phases/implement.edn")))]
+                          (slurp (:implement (checkpoint-test-support/recorded-paths
+                                              checkpoint-root (:execution/id base)))))]
           (is (= 2 (count history)) "both iterations recorded")
           (is (= [:deny :allow] (mapv :decision history)))
           (is (= :stale-references (-> history first :phase/gate-failures first :gate)))
           (is (= "2026-08-29T00:00:00Z"
                  (-> history first :phase/gate-failures first :errors first :timestamp))
               "Instants inside gate errors are normalized to strings so the history stays EDN-readable")
+          (is (= [nil :codex-consultation]
+                 (mapv #(-> % :phase/gate-warnings first :gate) history))
+              "a passing iteration's gate warnings reach the history too")
           (is (= :allow (get-in phase-file [:phase/result :phase/decision-envelope :envelope/decision]))
               "the phase checkpoint holds only the last iteration — the reason the history exists"))))))
 
@@ -218,6 +224,20 @@
             snapshot (:machine-snapshot (checkpoint-store/load-checkpoint-data
                                          (:execution/id ctx) {:checkpoint/root checkpoint-root}))]
         (is (= refs (:execution/task-base-refs snapshot)))))))
+
+(deftest ^{:stratum 0} unpersisted-phases-survive-a-checkpoint-test
+  ;; Work a failed boundary persist left in a retained worktree is named by
+  ;; the next boundary commit; dropped at checkpoint, a resumed run would
+  ;; commit implement's work under a verify trailer alone.
+  (checkpoint-test-support/call-with-temp-checkpoint-root
+    (fn [checkpoint-root]
+      (let [workflow {:workflow/id :test :workflow/version "1.0.0" :workflow/pipeline [{:phase :done}]}
+            ctx      (assoc (ctx/create-context workflow {:task "Test"} {:checkpoint/root checkpoint-root})
+                            :execution/unpersisted-phases #{:implement})
+            _        (checkpoint-store/persist-execution-state! ctx)
+            snapshot (:machine-snapshot (checkpoint-store/load-checkpoint-data
+                                         (:execution/id ctx) {:checkpoint/root checkpoint-root}))]
+        (is (= #{:implement} (:execution/unpersisted-phases snapshot)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

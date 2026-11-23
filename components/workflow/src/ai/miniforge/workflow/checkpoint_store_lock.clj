@@ -23,6 +23,7 @@
    upgrade."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.workflow.boundary.checkpoint-directory :as directory]
    [ai.miniforge.workflow.messages :as messages]
    [babashka.fs :as fs]
    [slingshot.slingshot :refer [try+]])
@@ -121,12 +122,14 @@
    Returns `{:channel :lock}`, or an `:unavailable` anomaly: busy past
    the deadline, a symlinked slot file or directory, or an I/O error
    (making the directory, opening or locking the file) at once."
-  [path deadline workflow-run-id]
+  [checkpoint-root path deadline workflow-run-id]
   (try+
+    (directory/prepare! checkpoint-root)
     (if (or (fs/sym-link? (fs/parent path)) (fs/sym-link? path))
       (symlinked workflow-run-id path)
-      (do (fs/create-dirs (fs/parent path))
-          (let [channel (FileChannel/open path (into-array OpenOption [StandardOpenOption/CREATE
+      (let [protected (directory/prepare! (fs/parent path))
+            target (fs/path protected (fs/file-name path))
+            channel (FileChannel/open target (into-array OpenOption [StandardOpenOption/CREATE
                                                                        StandardOpenOption/WRITE
                                                                        LinkOption/NOFOLLOW_LINKS]))]
             (try+
@@ -135,7 +138,7 @@
                 (do (.close channel) (busy workflow-run-id path)))
               (catch Exception e
                 (.close channel)
-                (throw e))))))
+                (lock-failure workflow-run-id path e)))))
     (catch Exception e
       (lock-failure workflow-run-id path e))))
 
@@ -178,7 +181,7 @@
     (if-not (.tryLock in-process (max 0 (- deadline (System/nanoTime))) TimeUnit/NANOSECONDS)
       (busy workflow-run-id path)
       (try
-        (let [slot (acquire-file-lock! path deadline workflow-run-id)]
+        (let [slot (acquire-file-lock! checkpoint-root path deadline workflow-run-id)]
           (if (anomaly/anomaly? slot)
             slot
             (try

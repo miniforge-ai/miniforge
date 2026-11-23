@@ -26,6 +26,7 @@
    Read-only by design: the codex is generated from data-as-source
    elsewhere (SPEC §8.1); this component never writes it."
   (:require [ai.miniforge.codex.core :as core]
+            [ai.miniforge.codex.harvest :as harvest]
             [ai.miniforge.codex.messages :as msg]
             [ai.miniforge.codex.node :as node]
             [ai.miniforge.codex.render :as render]))
@@ -84,6 +85,15 @@
                      (render/render-response resp)
                      "\n")
        :pegs (:pegs resp)})))
+
+(defn ^{:stratum 0} harvest-decisions
+  "Dated harvest decisions from the codex's HARVEST-*.md logs (SPEC §8.4):
+   {:decisions [{:decided LocalDate :outcome :admitted|:refused
+   :misses [miss-id ..]}]}, or {:codex/anomaly ...} as data. A log section
+   decides misses only when it carries `decided::`, `outcome::` and
+   `misses::` (comma-separated :miss/id UUIDs)."
+  [codex-dir]
+  (harvest/harvest-decisions codex-dir))
 
 (defn ^{:stratum 0} unconfigured-anomaly
   "The anomaly returned when no codex location is configured at all.

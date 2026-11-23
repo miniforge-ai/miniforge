@@ -32,7 +32,10 @@
    [ai.miniforge.tool-registry.interface :as tool-registry]
    [clojure.java.io :as io]
    [clojure.string :as str]
-   [clojure.test :refer [deftest is testing]]))
+   [clojure.test :refer [deftest is testing use-fixtures]]
+   [ai.miniforge.schema.interface :as schema]))
+
+(use-fixtures :once (schema/instrument-fixture 'ai.miniforge.gate.interface))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -50,6 +53,15 @@
       (is (response/success? result))
       (is (gate/passed? (assoc result :gate :format)))
       (is (= [] (get-in result [:output :formattable-files]))))))
+
+(deftest ^{:stratum 0} passing-format-gate-allows-the-phase-envelope
+  (testing "the phase envelope reads check-format's result as passed (#2376):
+            the CLI printed `Gate :format passed`, then denied the phase"
+    (let [checks (gate/check-gates [:format] {:code/files []} {})
+          envelope (gate/gates->envelope checks false)]
+      (is (:passed? checks))
+      (is (= :allow (:envelope/decision envelope)))
+      (is (empty? (:envelope/reasons envelope))))))
 
 (deftest ^{:stratum 0} check-format-reports-formattable-files
   (testing "Formattable files are listed in the result output"

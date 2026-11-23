@@ -1,0 +1,13 @@
+;; Title: Miniforge.ai
+;; Author: Christopher Lester (christopher@miniforge.ai)
+;; Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+
+{:deliberation-harness/messages
+ {:report/heading       "# Deliberation development experiment"
+  :report/manifest      "Manifest: `{digest}`"
+  :report/disclaimer    "**G0: not evaluated.** Short synthetic tasks, development controls and observed-cost guards; not a calibrated N15 experiment. Mock runs establish plumbing only."
+  :report/table-header  "| Condition | Task | Tier | Successes / runs | Mean known normalized USD | Unsettled usage |"
+  :report/table-rule    "|---|---|---|---:|---:|---:|"
+  :report/row           "| {condition} | {task} | {tier} | {successes} / {runs} | {mean-usd} | {unsettled} |"
+  :report/delta-heading "Shared-minus-blind success deltas (descriptive; no significance claim):"
+  :report/delta         "- {task}/{tier}/{replicate}: {delta}"}}

@@ -68,10 +68,12 @@
     (is (tx/permitted? :synthesizer :accept-decision))
     (is (not (tx/permitted? :skeptic :accept-decision)))
     (is (not (tx/permitted? :proposer :close-goal))))
-  (testing "only the interpreter seeds goals and spec constraints"
-    (is (tx/permitted? :interpreter :add-constraint))
+  (testing "only the interpreter seeds goals"
     (is (tx/permitted? :interpreter :add-goal))
-    (is (not (tx/permitted? :proposer :add-constraint))))
+    (is (not (tx/permitted? :proposer :add-goal))))
+  (testing "every role may add a constraint; semantic admission restricts :hard ones"
+    (is (tx/permitted? :interpreter :add-constraint))
+    (is (tx/permitted? :proposer :add-constraint)))
   (testing "only the meta-watchdog retires questions"
     (is (tx/permitted? :meta-watchdog :retire-question))
     (is (not (tx/permitted? :synthesizer :retire-question)))))

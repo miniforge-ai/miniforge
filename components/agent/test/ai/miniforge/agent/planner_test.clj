@@ -315,7 +315,17 @@
                (:codex-answers result))
             "the primary session's answers survive a torn retry log")
         (is (= :unreadable (:codex-answer-log result))
-            "LOST retry observations must not read as a clean record")))))
+            "LOST retry observations must not read as a clean record")))
+    (testing "§7.4.2: retry context_reads append after the primary's"
+      (let [read-a {:path ".miniforge/codex-pin.md" :source :cache :timestamp "t1"}
+            read-b {:path "src/x.clj" :source :filesystem :timestamp "t2"}
+            result (run-retry {:context-reads [read-a]} {:context-reads [read-b]})]
+        (is (= [read-a read-b] (:context-reads result))
+            "a pin read in either session counts as read")))
+    (testing "neither session surfaced a reads log: no :context-reads key"
+      (let [result (run-retry {} {})]
+        (is (not (contains? result :context-reads))
+            "absent stays absent, so :pin-read? reads nil (unknown)")))))
 
 (deftest ^{:stratum 0} planner-system-prompt-includes-behavior-addendum-test
   ;; Pins the wiring that lets the planner agent see the phase-filtered
@@ -666,6 +676,10 @@
   {:path "components/agent/src/ai/miniforge/agent/big.clj"
    :content (apply str (repeat chars \x))})
 
+;; Mirrors codex-pin/pin-outcome's :entry (phase-software-factory).
+(defn- ^{:stratum 0} codex-pin-file [content]
+  {:path ".miniforge/codex-consider.md" :content content :keep-inline? true})
+
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; Validation tests
@@ -915,6 +929,29 @@
       (is (pos? (:effective-window r)) "effective window is never zeroed")
       (is (false? (:shed? r)) "a trivial prompt still fits")
       (is (false? (:over-after-shed? r)) "not forced over-budget")))
+
+  (testing "on the shed path a :keep-inline? file (the codex pin) keeps its
+            body while the other files drop to the manifest"
+    (let [pin (codex-pin-file "PIN-BODY-WORRIES")
+          r (assemble-within-budget "do the thing" [pin (big-file 300000)]
+                                    "system" "codellama-34b" 0)]
+      (is (true? (:shed? r)))
+      (is (false? (:over-after-shed? r)))
+      (is (= 2 (:file-count r)))
+      (is (str/includes? (:user-prompt r) "PIN-BODY-WORRIES"))
+      (is (str/includes? (:user-prompt r) "big.clj"))
+      (is (not (str/includes? (:user-prompt r) (apply str (repeat 5000 \x)))))))
+
+  (testing "a kept body that alone overflows the window drops to the manifest
+            rather than failing the plan"
+    (let [body (apply str (repeat 300000 \z))
+          pin  (codex-pin-file body)
+          r    (assemble-within-budget "do the thing" [pin (big-file 100)]
+                                    "system" "codellama-34b" 0)]
+      (is (true? (:shed? r)))
+      (is (false? (:over-after-shed? r)))
+      (is (str/includes? (:user-prompt r) "codex-consider.md"))
+      (is (not (str/includes? (:user-prompt r) (apply str (repeat 5000 \z)))))))
 
   (testing "irreducible overflow (huge spec, no files) → over-after-shed?, no shed"
     (let [r (assemble-within-budget (apply str (repeat 300000 \y)) []

@@ -27,6 +27,7 @@
    [ai.miniforge.cli.workflow-runner.chain :as chain]
    [ai.miniforge.cli.workflow-runner.display :as display]
    [ai.miniforge.cli.workflow-runner.execution :as execution]
+   [ai.miniforge.cli.workflow-runner.execution-mode :as execution-mode]
    [ai.miniforge.cli.workflow-runner.lifecycle :as lifecycle]
    [ai.miniforge.cli.workflow-runner.context :as context]
    [ai.miniforge.cli.workflow-runner.control :as control]
@@ -38,7 +39,7 @@
    [ai.miniforge.cli.workflow-runner.spec-kanban :as spec-kanban]
    [ai.miniforge.cli.workflow-runner.sandbox :as sandbox]
    [ai.miniforge.cli.workflow-runner.dashboard :as dashboard]
-   [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.workflow.interface :as workflow]
    [slingshot.slingshot :refer [try+ throw+]]
    [ai.miniforge.dag-executor.interface :as gc-queue]
    [ai.miniforge.cli.worktree :as worktree]
@@ -106,7 +107,10 @@
         stdout *out*]
     (binding [*out* (if json? *err* *out*)]
       (try
-        (let [{:keys [load-workflow run-pipeline]} (setup/resolve-workflow-interface)
+        (let [;; Named workflows always run in a host worktree; refused
+              ;; when the config requires governed execution.
+              _ (execution-mode/allowed-mode! {:execution-mode :local})
+              {:keys [load-workflow run-pipeline]} (setup/resolve-workflow-interface)
               ;; Create an event stream if none is provided. A --dashboard-url
               ;; run keeps it too: gates record each phase decision on it, and
               ;; without one every gated phase fails closed.
@@ -132,9 +136,7 @@
                 [result final]
                 (try
                   (let [result (execution/execute-workflow-pipeline run-pipeline workflow workflow-input callbacks-with-url artifact-store stream)]
-                    (lifecycle/mark-manifest-terminal!
-                     manifest-handle
-                     (if (phase/succeeded? result) :completed :failed))
+                    (lifecycle/mark-manifest-terminal! manifest-handle (workflow/run-outcome result))
                     ;; BD-2a shutdown ordering: fence late publishers for this
                     ;; workflow, then drain sinks before returning. quiesce!
                     ;; rejects any post-terminal `publish!` for this workflow
@@ -194,10 +196,14 @@
   ;; Piggyback deferred GC on each spec-driven workflow start.
   (run-gc-pass-best-effort!)
   (try+
-    (let [{:keys [load-workflow run-pipeline]} (setup/resolve-workflow-interface)
+    (let [;; Explicit --execution-mode, else the config's; refused before
+          ;; any setup when the config requires governed execution.
+          mode (execution-mode/allowed-mode! opts)
+          {:keys [load-workflow run-pipeline]} (setup/resolve-workflow-interface)
           ;; Create initial LLM client for workflow selection
           backend-override (:backend opts)
           selection-llm-client (context/create-llm-client nil spec quiet backend-override)
+          _ (context/refuse-network-access-when-governed! mode selection-llm-client)
           workflow-type (setup/select-workflow-type spec selection-llm-client quiet)
           workflow-version (get spec :spec/workflow-version "latest")
           workflow (setup/load-or-create-workflow load-workflow workflow-type workflow-version)
@@ -207,7 +213,7 @@
           repo-url (sandbox/infer-repo-url spec enriched-spec)
           ;; In governed mode, always clone main — the capsule creates a fresh
           ;; working copy, not a checkout of the host worktree's branch.
-          branch   (if (= :governed (:execution-mode opts))
+          branch   (if (= :governed mode)
                      (or (:spec/branch spec) "main")
                      (sandbox/infer-branch spec enriched-spec))
           workflow-input (context/spec->workflow-input enriched-spec)
@@ -223,6 +229,7 @@
           control-state (es/create-control-state)
           ;; Create workflow-specific LLM client for execution
           llm-client (context/create-llm-client workflow spec quiet backend-override)
+          _ (context/refuse-network-access-when-governed! mode llm-client)
           callbacks (setup/create-phase-callbacks quiet)
           base-context (let [ctx (context/create-workflow-context
                              {:callbacks callbacks
@@ -241,11 +248,18 @@
                         ;; Assoc repo-url, branch, and (optionally) execution-mode
                         ;; so runner.clj can clone into a container or create a
                         ;; worktree. runtime-config carries MINIFORGE_RUNTIME to
-                        ;; the governed capsule's runtime selection.
+                        ;; the governed capsule's runtime selection. repo-path is
+                        ;; the spec's repository (:source-root): without it the
+                        ;; runner cuts the task worktree from the process's
+                        ;; working directory, which can be another repository.
+                        ;; --worktree does not override it: that path is where
+                        ;; the backend preflight runs, and where the run works
+                        ;; only when no task worktree can be acquired.
                         (cond-> (assoc ctx
                                        :repo-url repo-url
                                        :branch branch
-                                       :execution-mode (get opts :execution-mode :local)
+                                       :repo-path (:source-root ctx)
+                                       :execution-mode mode
                                        :runtime-config (runtime-env/selection-config))
 ))
           sandbox? (or (:sandbox opts) (:spec/sandbox spec))
@@ -274,10 +288,13 @@
                                            :workflow-id workflow-id
                                            :sandbox-cleanup sandbox-cleanup
                                            :opts opts})
-              outcome-status (if (phase/succeeded? result) :completed :failed)]
+              status (workflow/run-outcome result)]
           (spec-kanban/finish-spec! provenance result)
-          ;; Trigger meta-loop learning cycle in background
-          (trigger-meta-loop-after-workflow! workflow-id outcome-status nil)
+          ;; Trigger meta-loop learning cycle in background. A cancel is
+          ;; neither outcome, and counting it as a failure would skew the
+          ;; learning (N3: consumers that count failures do not count it).
+          (when-not (= :cancelled status)
+            (trigger-meta-loop-after-workflow! workflow-id status nil))
           result)
         (finally
           (progress-cleanup)

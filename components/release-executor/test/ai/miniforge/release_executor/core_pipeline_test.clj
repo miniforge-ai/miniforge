@@ -393,7 +393,8 @@
 (deftest ^{:stratum 0} step-create-pr-uses-rich-pr-body-test
   (testing "PR creation uses :release/pr-body instead of the short description"
     (let [seen-payload (atom nil)]
-      (with-redefs [sandbox/create-pr!
+      (with-redefs [sandbox/find-pr! (constantly {:success? true :pr nil})
+                    sandbox/create-pr!
                     (fn [_exec _env-id payload _opts]
                       (reset! seen-payload payload)
                       {:success? true

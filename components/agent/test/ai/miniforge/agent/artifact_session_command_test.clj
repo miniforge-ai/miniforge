@@ -20,6 +20,7 @@
    the directory miniforge runs in and the binaries on PATH."
   (:require
    [ai.miniforge.agent.artifact-session :as session]
+   [ai.miniforge.agent.artifact-session.cli-config :as cli-config]
    [babashka.fs :as fs]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest testing is]])
@@ -72,7 +73,7 @@
   (let [original (System/getProperty "user.dir")]
     (try
       (System/setProperty "user.dir" (str dir))
-      (with-redefs [session/command-on-path? on-path]
+      (with-redefs [cli-config/command-on-path? on-path]
         {:server (session/server-command "/tmp/artifacts" nil)
          :hook   (session/resolve-miniforge-command)})
       (finally

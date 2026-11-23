@@ -4,6 +4,23 @@
   :streaming-error.system/no-output
   "Process failed with no output"
 
+  :stream.system/run-cancelled
+  "Run cancelled; agent process stopped"
+
+  ;; System-locale diagnostics for a CLI run that exited 0.
+  :cli-output.system/empty-success-output
+  "CLI backend exited successfully but produced no output"
+
+  :cli-output.system/claude-rate-limited
+  "Claude CLI rate limited: {notice}"
+
+  ;; A Codex stream's failed turn or error event, appended to the output.
+  :cli-output.system/codex-stream-error
+  "\nError: {message}"
+
+  :cli-output.system/codex-error-unknown
+  "unknown"
+
   ;; System-locale test fixtures for rate-limit classifier regressions.
   :rate-limit-test.system/claude-limit-la
   "You've hit your limit - resets 7pm (America/Los_Angeles)"
@@ -41,6 +58,9 @@
 
   :backend.system/request-failed
   "LLM backend request failed"
+
+  :client/network-access-invalid
+  ":network-access? takes true or false, and true only on the codex backend; got {value} on {backend}"
 
   :http-provider.system/parse-failed
   "Failed to parse response: {reason}"

@@ -19,13 +19,14 @@
   "Read the file sink's per-workflow directories from another process:
    one transit-JSON file per event under `{events-dir}/live/<id>/`, moved
    to `archived/<id>/` by an archive. Event files are the names
-   `sinks/event-file-ms` parses, ordered by that time, then
+   `naming/event-file-ms` parses, ordered by that time, then
    :event/sequence-number; :event/id and :workflow/id come back as UUIDs,
    as a live event carries them. Also what a reader tracks of a run: a
    watermark and the names read above it (`track`)."
   (:require
    [ai.miniforge.event-stream.reader :as reader]
    [ai.miniforge.event-stream.sinks :as sinks]
+   [ai.miniforge.event-stream.sinks.naming :as naming]
    [clojure.java.io :as io]
    [clojure.string :as str]
    [slingshot.slingshot :refer [try+]])
@@ -45,7 +46,7 @@
 (defn ^{:stratum 0} file-ms
   "The epoch ms an event file's name records; nil for any other file."
   [^File f]
-  (sinks/event-file-ms (.getName f)))
+  (naming/event-file-ms (.getName f)))
 
 (defn ^{:stratum 0} read-event
   "Decode one event file; nil when unreadable or not an event. Event,
