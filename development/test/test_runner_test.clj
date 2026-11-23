@@ -31,6 +31,10 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(def ^{:stratum 0 :private true} integration-classpath-roots
+  "Keep project scenarios and their shared storage fixtures out of production builds."
+  ["test" "integration" "../../components/file-durability/test"])
+
 (def ^{:stratum 0} previously-unrun
   "Project tests the hand-written list never named."
   ["ai.miniforge.current-event-publication-integration-test"
@@ -163,15 +167,15 @@
     (testing "support namespaces are not run as tests"
       (is (not (contains? discovered "ai.miniforge.test-harness"))))))
 
-(deftest ^{:stratum 1} project-test-code-is-not-on-paths-test
+(deftest ^{:stratum 1} test-project-tests-stay-off-build-classpaths
   (let [{:keys [paths aliases]} (project-deps "miniforge")]
     (testing "no test directory is a classpath root of the project's builds"
       (is (empty? (filter #{"test" "integration" "e2e"} paths))))
     (testing "integration tests stay out of :test, which Polylith runs under poly test :all"
       (is (empty? (filter #{"test" "integration" "e2e"}
                           (get-in aliases [:test :extra-paths])))))
-    (testing "the :integration alias carries the test directories"
-      (is (= ["test" "integration"]
+    (testing "the :integration alias carries project tests and shared storage fixtures"
+      (is (= integration-classpath-roots
              (get-in aliases [:integration :extra-paths]))))
     (testing "the :e2e alias carries test/, whose support namespaces e2e requires"
       (is (= ["test" "e2e"]

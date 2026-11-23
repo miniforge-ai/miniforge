@@ -2,8 +2,9 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.file-durability.interface
-  "Trusted-process filesystem primitives. Inputs are caller-owned java.io.Files.
-   Return the input file on success or an anomaly; callers must propagate failures.
+  "API surface class 1: trusted-process filesystem primitives using caller-owned Files.
+   Writes return the input File; directory operations return resolved Paths or profiles.
+   Failures return anomalies and must propagate; native defaults are not protection proof.
    Stores own path authorization, publication atomicity, and record identity.
    Complete writes force file contents; publication needs a subsequent confirm!."
   (:require [ai.miniforge.file-durability.boundary :as boundary]
@@ -12,6 +13,39 @@
             [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} prepare-protected-directory!
+  "Return a resolved Path or anomaly. New POSIX directories are 0700; refuse
+   unsafe owners or writable ancestry without chmod. Native providers retain
+   their defaults; this does not establish their isolation or ACL protection."
+  [directory]
+  (if (m/validate spec/DirectoryFile directory)
+    (core/prepare-protected-directory! directory)
+    (boundary/invalid-input :prepare-directory)))
+
+(defn ^{:stratum 0} resolve-protected-directory
+  "Resolve an existing directory under the same protection policy, without creation."
+  [directory]
+  (if (m/validate spec/DirectoryFile directory)
+    (core/resolve-protected-directory directory)
+    (boundary/invalid-input :resolve-directory)))
+
+(defn ^{:stratum 0} filesystem-profile
+  "Return :posix, :native-defaults, or anomaly; native defaults are not protection proof."
+  [file]
+  (if (m/validate spec/DirectoryFile file)
+    (core/filesystem-profile file)
+    (boundary/invalid-input :filesystem-profile)))
+
+(defn ^{:stratum 0} verify-publication!
+  "Probe a protected, existing POSIX root for forced create-only and atomic replacement.
+   On macOS, refuse ACLs granting additional permissions on the resolved path.
+   Returns :publication-verified or an anomaly. Does not establish backend
+   persistence or interoperability with another process."
+  [root]
+  (if (m/validate spec/DirectoryFile root)
+    (core/verify-publication! root)
+    (boundary/invalid-input :verify-publication)))
 
 (defn ^{:stratum 0} write-new-text!
   "Create and force a new UTF-8 file without replacing existing files or links."

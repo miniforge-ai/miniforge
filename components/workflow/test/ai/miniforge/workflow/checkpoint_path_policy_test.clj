@@ -3,7 +3,6 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.workflow.checkpoint-path-policy-test
   (:require [ai.miniforge.workflow.boundary.checkpoint-directory :as directory]
-            [ai.miniforge.workflow.boundary.checkpoint-permissions :as permissions]
             [ai.miniforge.workflow.checkpoint-test-support :as fixture]
             [babashka.fs :as fs]
             [clojure.test :refer [deftest is]])
@@ -20,6 +19,8 @@
 (def ^{:stratum 0} ^:private sticky-world-writable-mode 01777)
 
 (defn- ^{:stratum 0} mode [path] (fs/posix->str (fs/posix-file-permissions path)))
+
+(defn- ^{:stratum 0} native-permissions [& _] (throw (UnsupportedOperationException.)))
 
 (defn- ^{:stratum 0} foreign-link-attributes [read! link path attributes options]
   (cond-> (read! path attributes options)
@@ -41,12 +42,6 @@
     (is (thrown? IOException (directory/existing! alias)))
     (is (empty? (fs/list-dir target)))))
 
-(defn- ^{:stratum 0} verify-native-alias [root]
-  (let [target (fs/create-dir (fs/path root "target"))
-        alias (fs/create-sym-link (fs/path root "alias") target)]
-    (with-redefs [permissions/posix? (constantly false)]
-      (is (= (fs/path (fs/real-path target) "nested") (directory/prepare! (fs/path alias "nested")))))))
-
 (defn- ^{:stratum 0} verify-created-parent-traversal [root]
   (let [requested (fs/path root "unused" ".." "checkpoint")
         prepared (directory/prepare! requested)
@@ -56,6 +51,12 @@
     (is (fs/directory? prepared))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} verify-native-alias [root]
+  (let [target (fs/create-dir (fs/path root "target"))
+        alias (fs/create-sym-link (fs/path root "alias") target)]
+    (with-redefs [fs/posix-file-permissions native-permissions]
+      (is (= (fs/path (fs/real-path target) "nested") (directory/prepare! (fs/path alias "nested")))))))
 
 (defn- ^{:stratum 1} verify-new-directories [root]
   (let [nested (fs/path root "new" "nested")
@@ -94,12 +95,12 @@
 
 (deftest ^{:stratum 1} writable-original-ancestry-cannot-hide-behind-an-alias (fixture/call-with-posix-checkpoint-root verify-writable-original-path))
 
-(deftest ^{:stratum 1} native-providers-also-return-resolved-directories (fixture/call-with-posix-checkpoint-root verify-native-alias))
-
 (deftest ^{:stratum 1} parent-traversal-returns-a-path-independent-of-unused-directories
   (fixture/call-with-posix-checkpoint-root verify-created-parent-traversal))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} native-providers-also-return-resolved-directories (fixture/call-with-posix-checkpoint-root verify-native-alias))
 
 (deftest ^{:stratum 2} missing-directories-are-created-private (fixture/call-with-posix-checkpoint-root verify-new-directories))
 

@@ -110,7 +110,7 @@
 
 (defn ^{:stratum 2} verify-failure-message [results failures errors]
   (cond
-    (:timed-out? results) (str (:output results))
+    (some results [:timed-out? :output-limit? :output-unsettled?]) (str (:output results))
     (:parse-error? results) (parse-error-message results)
     :else (failure-count-message results failures errors)))
 

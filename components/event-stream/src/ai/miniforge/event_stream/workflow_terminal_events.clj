@@ -31,6 +31,12 @@
                            (select-keys opts [:workflow/failure-phase])))
     (legacy/workflow-failed stream workflow-id error opts)))
 
+(defn ^{:stratum 1} workflow-cancelled [stream workflow-id cancellation duration-ms]
+  (let [payload (fields/cancelled cancellation duration-ms)]
+    (if (anomaly/anomaly? payload)
+      payload
+      (terminal-draft stream workflow-id :workflow/cancelled payload))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} workflow-completed [stream workflow-id status & [duration-ms opts]]
