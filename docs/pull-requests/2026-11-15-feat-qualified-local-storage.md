@@ -29,7 +29,7 @@ The approved boundary needs implementation and evidence, not an approval bypass.
 
 Foundation layer in file-durability; publication and ACL probes are in
 merged PRs #2532 and #2533; read-only backend observations are separated into
-PR #2552. This branch remains unpublished until that prerequisite merges.
+merged PR #2552. This branch is based on main with those prerequisites included.
 The internal API (surface class 1) requires a supported profile, an existing
 canonical protected root, and the other runtime's absolute launcher and classpath.
 There is no fallback based on POSIX permissions alone.
@@ -38,7 +38,9 @@ The initial Linux profile accepts an unambiguous writable single-device XFS moun
 recognized AHCI or PCIe-NVMe driver ancestry, exact no-virtualization evidence from
 the installed native detector, and no known unsafe flags or separate journal/realtime
 devices. Missing or unknown evidence refuses. Ext4 remains deferred until positive
-journal-topology evidence exists. macOS requires writable APFS, enabled volume
+journal-topology evidence exists. Mount observation must match the kernel device
+identity and visible parent chain; hidden and stacked mounts refuse.
+macOS requires writable APFS, enabled volume
 ownership, verified non-granting ACLs, and internal Apple Fabric backing.
 Unknown or unsupported topology refuses. The host must configure storage
 retained across restarts; workloads must not control the volume or its ownership.
@@ -70,6 +72,8 @@ peer admission produce one, one and two assertion failures respectively, with no
 runtime errors, in both JVM and native Babashka. Twelve exact qualification examples
 pass in each. The tooling regression pins product-relative and absolute peer
 classpath entries, including a path containing spaces.
+The real peer-process lock scenario lives in project integration tests, outside
+the fast component packet.
 
 ## Deployment plan
 
