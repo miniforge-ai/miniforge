@@ -55,12 +55,15 @@
             (msg/t :result/duplicate {:id id})))))
 
 (defn- ^{:stratum 0} plain-data?
-  "True when `x`'s canonical EDN, the text its content hash digests, reads
-   back equal, so the hash repeats and names only `x`. A fn or other object
-   fails, and so do two keys the canonical order merges (`1` and `1.0`)."
+  "True when `x`'s canonical EDN, the text its content hash digests,
+   survives UTF-8 and reads back equal, so the hash repeats and names only
+   `x`. A fn or other object fails, and so do two keys the canonical order
+   merges (`1` and `1.0`) and a lone surrogate, which UTF-8 makes `?`."
   [x]
   (try+
-   (= x (edn/read-string (content-hash/canonical-edn x)))
+   (let [text (content-hash/canonical-edn x)]
+     (and (= text (String. (.getBytes ^String text "UTF-8") "UTF-8"))
+          (= x (edn/read-string text))))
    (catch Exception _
      false)))
 

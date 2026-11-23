@@ -170,7 +170,7 @@
                   :or   {out-dir  "target/qualification"
                          root     "."
                          build-fn build/build-identity}}]
-  (binding [*print-length* nil *print-level* nil *print-meta* false
+  (binding [*print-length* nil *print-level* nil *print-meta* false *print-readably* true
             *print-namespace-maps* false *print-dup* false]
     (if-not (m/validate schema/Gate gate)
       {:invalid-gate (pr-str (me/humanize (m/explain schema/Gate gate)))}

@@ -85,6 +85,11 @@ data.
     assume-unchanged or skip-worktree, whose changes `git status` hides,
     makes the build not clean. `:build-fn` is documented: a caller passing
     one vouches for the build it returns.
+17. The canonical EDN must also survive UTF-8, so a lone surrogate (which
+    UTF-8 writes as `?`) cannot share a hash with `?`. `*print-readably*`
+    joins the reset printer settings, and the EDN report is written with
+    `pr-str` instead of pprint, whose base, radix and namespace settings
+    would follow the caller and cannot be reset under Babashka.
 
 From the schema PR's review: the verdict is `vocabulary/report-verdict`, so
 passing rows on a dirty tree, without a commit or without hashes give
@@ -102,7 +107,7 @@ passing rows on a dirty tree, without a commit or without hashes give
    every criterion unrun; an unreported criterion is incomplete; hashes repeat
    across runs; an invalid gate exits 2; an unwritable report exits 1 even
    when every criterion passed; the summary names the verdict and each row.
-3. Locally: 38 tests, 144 assertions, 0 failures. Over the PR budget, with
+3. Locally: 38 tests, 147 assertions, 0 failures. Over the PR budget, with
    the override and its reason in the PR description. Also covered: a pass on
    an unpinned build is incomplete and the summary says why; a short commit
    names the file.

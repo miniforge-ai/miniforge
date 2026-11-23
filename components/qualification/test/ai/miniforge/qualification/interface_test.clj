@@ -22,6 +22,7 @@
             [ai.miniforge.qualification.interface :as qualification]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [clojure.pprint :as pprint]
             [slingshot.slingshot :refer [throw+]])
   (:import [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]))
@@ -139,13 +140,14 @@
         (is (= 1 (qualification/exit-code result)))))))
 
 (deftest ^{:stratum 2} test-unusable-output-is-unrun
-  (testing "given malformed output, a fn or keys the hash would merge (1, 1.0) in the fixtures, a fn in observed state, or an undeclared criterion → invalid output, every criterion unrun"
+  (testing "given malformed output, a fn or keys the hash would merge (1, 1.0) in the fixtures, a fn or a lone surrogate in observed state, or an undeclared criterion → invalid output, every criterion unrun"
     (doseq [scenario [(fn [] {:scenario/results all-pass})
                       (fn [] {:scenario/fixtures {:connector identity}
                               :scenario/config {}
                               :scenario/results all-pass})
                       (fn [] {:scenario/fixtures {1 :a 1.0 :b} :scenario/config {} :scenario/results all-pass})
                       (scenario-returning (assoc-in all-pass [1 :criterion/observed] {:sink identity}))
+                      (scenario-returning (assoc-in all-pass [1 :criterion/observed] {:name "\uD800"}))
                       (scenario-returning (conj all-pass {:criterion/id :c/other
                                                           :criterion/status :status/pass}))]]
       (let [{:keys [report]} (run-in-temp scenario)]
@@ -160,9 +162,12 @@
       (is (= 1 (qualification/exit-code result))))))
 
 (deftest ^{:stratum 2} test-hashes-repeat-across-runs
-  (testing "given the same fixtures and config twice, once under a caller's *print-length* → the same hashes, and the EDN report reads back whole"
-    (let [a (:report (run-in-temp (scenario-returning all-pass)))
-          {b :report paths :paths} (binding [*print-length* 0] (run-in-temp (scenario-returning all-pass)))]
+  (testing "given the same output twice, once under a caller's printer settings → the same hashes, and the EDN report reads back whole"
+    (let [scenario (scenario-returning (assoc-in all-pass [1 :criterion/observed] {:sink 'fixture/sink :name "a b"}))
+          a        (:report (run-in-temp scenario))
+          {b :report paths :paths} (binding [*print-length* 0 *print-readably* false
+                                             pprint/*print-radix* true pprint/*print-suppress-namespaces* true]
+                                     (run-in-temp scenario))]
       (is (= (:report/fixture-hash a) (:report/fixture-hash b)))
       (is (= (:report/config-hash a) (:report/config-hash b)))
       (is (= b (edn/read-string (slurp (:edn paths))))))))

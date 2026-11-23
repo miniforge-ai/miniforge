@@ -22,7 +22,6 @@
    [ai.miniforge.qualification.messages :as msg]
    [cheshire.core :as json]
    [clojure.java.io :as io]
-   [clojure.pprint :as pprint]
    [clojure.string :as str]
    [slingshot.slingshot :refer [try+ throw+]])
   (:import [java.nio.file Files LinkOption OpenOption StandardOpenOption]))
@@ -55,8 +54,12 @@
         target (.normalize (.toAbsolutePath (.toPath (io/file path))))]
     (and (not= base target) (.startsWith target base))))
 
-(defn- ^{:stratum 0} edn-text [report]
-  (with-out-str (pprint/pprint report)))
+(defn- ^{:stratum 0} edn-text
+  "The report as one line of EDN, under the printer settings `run-gate!`
+   resets. `pr-str`, not pprint: pprint's base, radix and namespace
+   settings would follow the caller, and Babashka has no vars to reset."
+  [report]
+  (str (pr-str report) "\n"))
 
 (defn- ^{:stratum 0} json-key
   "A map key as JSON text: a keyword keeps its namespace, `:report/gate-id`
