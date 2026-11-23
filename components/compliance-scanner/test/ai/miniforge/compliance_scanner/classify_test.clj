@@ -17,8 +17,11 @@
 ;; limitations under the License.
 (ns ai.miniforge.compliance-scanner.classify-test
   "Tests for the classify phase — pack-driven classification."
-  (:require [clojure.test :refer [deftest is testing]]
-            [ai.miniforge.compliance-scanner.classify :as classify]))
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
+            [ai.miniforge.compliance-scanner.classify :as classify]
+            [ai.miniforge.compliance-scanner.scan-diff-plan :as diff-plan]
+            [ai.miniforge.compliance-scanner.scan-pack-config :as spc]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -71,10 +74,106 @@
                :auto-fixable-default false}
           [r] (classify/classify-violations [v])]
       (is (false? (:auto-fixable? r)))
-      (is (clojure.string/includes? (:rationale r) "No Unsafe Rust"))
-      (is (not (clojure.string/includes? (:rationale r) "SemVer"))))))
+      (is (str/includes? (:rationale r) "No Unsafe Rust"))
+      (is (not (str/includes? (:rationale r) "SemVer"))))))
+
+;; ---------------------------------------------------------------------------
+;; enrich -> classify, as the scan phase actually wires it
+(deftest ^{:stratum 0} enriched-manual-strategy-reaches-classify
+  (testing "a pack rule declaring :manual is not auto-fixable after enrichment"
+    (let [remediation {:strategy             :manual
+                       :template             "<!-- header -->"
+                       :auto-fixable-default true}
+          enriched    (spc/enrich-violation
+                       {:rule/id :std/header-copyright :rule/category "810"
+                        :rule/title "Copyright Header (Markdown)"
+                        :file "docs/a.md" :line 1}
+                       remediation)
+          [r]         (classify/classify-violations [enriched])]
+      (is (= :manual (:remediation-strategy enriched))
+          "enrich-violation must carry the declared strategy")
+      (is (false? (:auto-fixable? r))))))
+
+(deftest ^{:stratum 0} enriched-semantic-strategy-reaches-classify
+  (testing "a pack rule declaring :semantic is not auto-fixable after enrichment"
+    (let [enriched (spc/enrich-violation
+                    {:rule/id :std/some-rule :rule/category "999"
+                     :rule/title "Semantic Rule" :file "docs/a.md" :line 1}
+                    {:strategy :semantic :auto-fixable-default true})
+          [r]      (classify/classify-violations [enriched])]
+      (is (= :semantic (:remediation-strategy enriched)))
+      (is (false? (:auto-fixable? r))))))
+
+;; ---------------------------------------------------------------------------
+;; :diff-analysis / :plan-output paths, exercised through the real bulk entry
+;; points. These constructors do not go through `pack-rule->detection-config`,
+;; so they needed enrichment of their own: without it a declared :manual
+;; strategy was invisible, and classify's :auto-fixable-default true default
+;; overwrote the `false` the constructors pass.
+(deftest ^{:stratum 0} diff-rule-manual-strategy-reaches-classify
+  (testing "a diff-analysis rule declaring :manual is not auto-fixable"
+    (let [rule  {:rule/id          :std/diff-manual
+                 :rule/category    "700"
+                 :rule/title       "Diff Manual Rule"
+                 :rule/detection   {:type :diff-analysis :pattern "FORBIDDEN"}
+                 :rule/remediation {:strategy :manual :auto-fixable-default true}}
+          viols (diff-plan/scan-diff-rules [rule] "+ FORBIDDEN token\n")
+          [r]   (classify/classify-violations viols)]
+      (is (= 1 (count viols)) "the diff rule must actually match, or this proves nothing")
+      (is (= :manual (:remediation-strategy (first viols)))
+          "diff violations must carry the declared strategy")
+      (is (false? (:auto-fixable? r))))))
+
+(deftest ^{:stratum 0} diff-rule-without-remediation-stays-needs-review
+  (testing "a diff rule declaring no remediation is not flipped auto-fixable"
+    (let [rule  {:rule/id        :std/diff-bare
+                 :rule/category  "700"
+                 :rule/title     "Diff Bare Rule"
+                 :rule/detection {:type :diff-analysis :pattern "FORBIDDEN"}}
+          viols (diff-plan/scan-diff-rules [rule] "+ FORBIDDEN token\n")
+          [r]   (classify/classify-violations viols)]
+      (is (= 1 (count viols)))
+      (is (false? (:auto-fixable? (first viols)))
+          "the constructor marks diff violations not auto-fixable")
+      (is (false? (:auto-fixable? r))
+          "classify must not overwrite that with its true default"))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+;; ---------------------------------------------------------------------------
+;; Non-mechanical remediation strategies override :auto-fixable-default
+;;
+;; Regression guard: the strategy check was unreachable from the pack path
+;; because `enrich-violation` never carried `:remediation-strategy`, so a rule
+;; declaring `strategy: semantic` was classified auto-fixable on its
+;; `autoFixable` default alone.
+(deftest ^{:stratum 1} classify-manual-strategy-is-never-auto-fixable
+  (testing ":manual strategy blocks auto-fix even when autoFixable defaults true"
+    (let [v   (assoc base-810 :remediation-strategy :manual)
+          [r] (classify/classify-violations [v])]
+      (is (true? (:auto-fixable-default v))
+          "fixture must declare autoFixable true, or the test proves nothing")
+      (is (false? (:auto-fixable? r)))
+      (is (re-find #"manual remediation strategy" (:rationale r))))))
+
+(deftest ^{:stratum 1} classify-semantic-strategy-is-never-auto-fixable
+  (testing ":semantic strategy blocks auto-fix even when autoFixable defaults true"
+    (let [v   (assoc base-810 :remediation-strategy :semantic)
+          [r] (classify/classify-violations [v])]
+      (is (false? (:auto-fixable? r)))
+      (is (re-find #"semantic" (:rationale r))))))
+
+(deftest ^{:stratum 1} classify-mechanical-strategy-stays-auto-fixable
+  (testing ":mechanical strategy does not block auto-fix"
+    (let [v   (assoc base-810 :remediation-strategy :mechanical)
+          [r] (classify/classify-violations [v])]
+      (is (true? (:auto-fixable? r))))))
+
+(deftest ^{:stratum 1} classify-nested-remediation-strategy-is-honoured
+  (testing "strategy read from the nested [:remediation :strategy] form too"
+    (let [v   (assoc base-810 :remediation {:strategy :manual})
+          [r] (classify/classify-violations [v])]
+      (is (false? (:auto-fixable? r))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Dewey 210 classification
