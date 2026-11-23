@@ -79,7 +79,8 @@ New tests, one per twin (`isolation_test_support_test.clj`, `isolation_support_t
 The tests lay their `GIT_*` variables over `PATH` and `HOME` alone. A call that passes them to git
 unscrubbed can reach the decoy and nothing else, even when the test JVM itself runs under a hook.
 
-`tasks/test_runner.clj` adds the project-level test to the `bb test:integration` list.
+`bb test:integration` discovers every `*_test.clj` under the project's test roots, so the project-level
+test runs there, on pull requests and on `main`, with no registration line.
 
 ## Testing Plan
 
@@ -95,8 +96,8 @@ unscrubbed can reach the decoy and nothing else, even when the test JVM itself r
    passing, scratch launch config byte-identical.
 4. Workflow brick namespaces that register the fixture, run directly: 116 tests, 0 failures.
 5. Project namespaces that register the twin (`dag-orchestrator-test`, `runner-integration-test`,
-   `opsv-lifecycle-integration-test`) plus the new test, run through the project `deps.edn`:
-   62 tests, 0 failures.
+   `opsv-lifecycle-integration-test`) plus the new test, launched the way `bb test:integration`
+   launches them (`clojure -M:test:integration` in `projects/miniforge`): 0 failures.
 
 ## Deployment Plan
 
@@ -123,19 +124,17 @@ value before. Check it against what the checkout is meant to have.
 1. The launcher strip (`bb-test-runner/sanitize-git-worktree-env`, `scripts/test-changed-bricks.bb`)
    still drops four names. Fourteen other test namespaces run `git config user.*` in temp
    directories with no scrub of their own and depend on it.
-2. The project-level twin test runs under `bb test:integration`, which CI runs on pushes to `main`.
-   The brick test is the one that runs on a pull request.
-3. `delete-tree!` follows symbolic links, and `git init` copies the developer's template directory
+2. `delete-tree!` follows symbolic links, and `git init` copies the developer's template directory
    into the host repository. A template that links its hooks directory would be followed on cleanup.
-4. The installed hook in the affected checkout is an older script, reached through an absolute
+3. The installed hook in the affected checkout is an older script, reached through an absolute
    `core.hooksPath`. The tracked `.githooks/pre-commit` rejects a commit email outside
    `@miniforge.ai` and would have stopped the first commit made with the test identity.
-5. Commits already pushed with the test identity are not re-authored.
+4. Commits already pushed with the test identity are not re-authored.
 
 ## Checklist
 
 - [x] Root cause reproduced in a scratch repository
 - [x] Both fixture twins changed identically
 - [x] Regression tests added for both twins and shown to fail without each defence
-- [x] Project-level test registered with `bb test:integration`
+- [x] Project-level test discovered and run by `bb test:integration`
 - [ ] Shared config of the affected checkout repaired (owner's decision)

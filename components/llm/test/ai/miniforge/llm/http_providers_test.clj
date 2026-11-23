@@ -26,7 +26,9 @@
    [cheshire.core :as json]
    [org.httpkit.client :as http]
    [ai.miniforge.llm.interface :as llm]
-   [ai.miniforge.llm.protocols.impl.llm-client :as impl]))
+   [ai.miniforge.llm.protocols.impl.llm-client :as impl]
+   [ai.miniforge.llm.protocols.impl.llm-client.http-backend :as http-backend]
+   [ai.miniforge.llm.protocols.impl.llm-client.settings :as settings]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -54,7 +56,7 @@
    {:url :headers :body}}."
   [response f]
   (let [captured (atom nil)]
-    (with-redefs [impl/http-post-request
+    (with-redefs [http-backend/http-post-request
                   (fn [url headers body]
                     (reset! captured {:url url :headers headers :body body})
                     response)]
@@ -63,6 +65,26 @@
 (defn- ^{:stratum 0} backend-config
   [backend]
   (get impl/backends backend))
+
+(def ^{:stratum 0} ^:private finish-reason-cases
+  "One row per provider spelling: the backend, a 200 body carrying that
+   provider's finish reason beside an answer, and the canonical
+   `:stop-reason` the result must carry."
+  [[:anthropic-api {:content [{:type "text" :text "a"}] :stop_reason "end_turn"} "end_turn"]
+   [:anthropic-api {:content [{:type "text" :text "a"}] :stop_reason "max_tokens"} "max_tokens"]
+   [:anthropic-api {:content [{:type "text" :text "a"}] :stop_reason "refusal"} "refusal"]
+   [:openai-api {:choices [{:message {:content "a"} :finish_reason "stop"}]} "end_turn"]
+   [:openai-api {:choices [{:message {:content "a"} :finish_reason "length"}]} "max_tokens"]
+   [:openai-compat {:choices [{:message {:content "a"} :finish_reason "length"}]} "max_tokens"]
+   [:openrouter {:choices [{:message {:content "a"} :finish_reason "length"}]} "max_tokens"]
+   [:openrouter {:choices [{:message {:content "a"} :finish_reason "content_filter"}]}
+    "content_filter"]
+   [:gemini-api {:candidates [{:content {:parts [{:text "a"}]} :finishReason "STOP"}]} "end_turn"]
+   [:gemini-api {:candidates [{:content {:parts [{:text "a"}]} :finishReason "MAX_TOKENS"}]}
+    "max_tokens"]
+   [:gemini-api {:candidates [{:content {:parts [{:text "a"}]} :finishReason "SAFETY"}]} "SAFETY"]
+   [:ollama {:message {:content "a"} :done_reason "stop"} "end_turn"]
+   [:ollama {:message {:content "a"} :done_reason "length"} "max_tokens"]])
 
 ;; Transport
 (deftest ^{:stratum 0} http-post-request-idle-timeout-test
@@ -268,6 +290,14 @@
                                               {:prompt "q" :model "m"}
                                               {:api-key test-api-key}))))
 
+(defn- ^{:stratum 1} complete-against
+  "Run one request on `backend` against a canned 200 `body`."
+  [backend body]
+  (:result (capture-http (http-200 body)
+                         #(impl/http-complete (backend-config backend)
+                                              {:prompt "q" :model "m"}
+                                              {:api-key test-api-key}))))
+
 (deftest ^{:stratum 1} missing-model-test
   (testing "an API provider without a model fails closed before any request"
     (let [result (impl/http-complete (backend-config :anthropic-api)
@@ -292,6 +322,38 @@
       (is (:success result))
       (is (= {} (:usage result)))
       (is (= 0 (:tokens result))))))
+
+(deftest ^{:stratum 1} stop-reason-reaches-the-client-test
+  (testing "complete and complete-stream both return the :stop-reason"
+    (let [body {:choices [{:message {:content "cut"} :finish_reason "length"}]}
+          client #(llm/create-client {:backend :openrouter
+                                      :model "vendor/model"
+                                      :api-key test-api-key})
+          completed (:result (capture-http (http-200 body)
+                                           #(llm/complete (client) {:prompt "q"})))
+          streamed (:result (capture-http (http-200 body)
+                                          #(llm/complete-stream (client)
+                                                                {:prompt "q"}
+                                                                (fn [_chunk] nil))))]
+      (is (= "max_tokens" (:stop-reason completed)))
+      (is (= "max_tokens" (:stop-reason streamed))))))
+
+(deftest ^{:stratum 1} gemini-thinking-tokens-count-as-output-test
+  (testing "thinking tokens, which Gemini reports beside the answer's and
+            bills as output, are in :output-tokens and in the estimate"
+    (let [{:keys [result]}
+          (capture-http (http-200 {:candidates [{:content {:parts [{:text "answer"}]}}]
+                                   :usageMetadata {:promptTokenCount 10
+                                                   :candidatesTokenCount 5
+                                                   :thoughtsTokenCount 20}})
+                        #(impl/http-complete (backend-config :gemini-api)
+                                             {:prompt "q" :model "gemini-2.5-pro"}
+                                             {:api-key test-api-key}))]
+      (is (:success result))
+      (is (= {:input-tokens 10 :output-tokens 25 :reasoning-output-tokens 20} (:usage result)))
+      (is (= 35 (:tokens result)))
+      (is (= (llm/estimate-cost {:input-tokens 10 :output-tokens 25} "gemini-2.5-pro")
+             (:cost-usd result))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -384,12 +446,67 @@
       (is (= "empty_success_output" (get-in result [:error :type])))
       (is (= 0.00125 (:cost-usd result))))))
 
+(deftest ^{:stratum 2} unbilled-response-cost-is-estimated-for-a-priced-model-test
+  (testing "a provider that bills nothing on the response gets the
+            cost-table estimate for a priced model"
+    (let [{:keys [result]}
+          (capture-http (anthropic-200 "answer")
+                        #(impl/http-complete (backend-config :anthropic-api)
+                                             {:prompt "q" :model "claude-sonnet-4-6"}
+                                             {:api-key test-api-key}))]
+      (is (:success result))
+      (is (pos? (:cost-usd result)))
+      (is (= (llm/estimate-cost (:usage result) "claude-sonnet-4-6") (:cost-usd result)))))
+  (testing "an unpriced model's cost stays absent, not 0.0"
+    (let [{:keys [result]}
+          (capture-http (anthropic-200 "answer")
+                        #(impl/http-complete (backend-config :anthropic-api)
+                                             {:prompt "q" :model "claude-unpriced-test-model"}
+                                             {:api-key test-api-key}))]
+      (is (:success result))
+      (is (not (contains? result :cost-usd)))))
+  (testing "an Anthropic response that read the prompt cache keeps the cache
+            count and gets no estimate: the cache tokens are counted beside
+            input and the table does not price them"
+    (let [{:keys [result]}
+          (capture-http (http-200 {:content [{:type "text" :text "answer"}]
+                                   :usage {:input_tokens 11
+                                           :output_tokens 7
+                                           :cache_read_input_tokens 5000}})
+                        #(impl/http-complete (backend-config :anthropic-api)
+                                             {:prompt "q" :model "claude-sonnet-4-6"}
+                                             {:api-key test-api-key}))]
+      (is (:success result))
+      (is (= {:input-tokens 11 :output-tokens 7 :cache-read-input-tokens 5000} (:usage result)))
+      (is (not (contains? result :cost-usd)))))
+  (testing "a response with no token counts gets no estimate, not 0.0"
+    (let [{:keys [result]}
+          (capture-http (http-200 {:content [{:type "text" :text "answer"}]})
+                        #(impl/http-complete (backend-config :anthropic-api)
+                                             {:prompt "q" :model "claude-sonnet-4-6"}
+                                             {:api-key test-api-key}))]
+      (is (:success result))
+      (is (not (contains? result :cost-usd)))))
+  (testing "an empty answer keeps the tokens it consumed and their estimated cost"
+    (let [{:keys [result]}
+          (capture-http (http-200 {:content []
+                                   :stop_reason "max_tokens"
+                                   :usage {:input_tokens 11 :output_tokens 7}})
+                        #(impl/http-complete (backend-config :anthropic-api)
+                                             {:prompt "q" :model "claude-sonnet-4-6"}
+                                             {:api-key test-api-key}))]
+      (is (not (:success result)))
+      (is (= "empty_success_output" (get-in result [:error :type])))
+      (is (= 18 (:tokens result)))
+      (is (= (llm/estimate-cost {:input-tokens 11 :output-tokens 7} "claude-sonnet-4-6")
+             (:cost-usd result))))))
+
 (deftest ^{:stratum 2} openrouter-missing-key-fails-closed-test
   (testing "no config key and no OPENROUTER_API_KEY fails before any request"
     (let [{:keys [result captured]}
           (capture-http (openrouter-200 "never sent")
                         (fn []
-                          (with-redefs [impl/getenv-value (constantly nil)]
+                          (with-redefs [settings/getenv-value (constantly nil)]
                             (llm/complete (llm/create-client {:backend :openrouter
                                                               :model "vendor/model"})
                                           {:prompt "q"}))))]
@@ -429,7 +546,7 @@
     (let [{:keys [result captured]}
           (capture-http (openai-200 "local answer")
                         (fn []
-                          (with-redefs [impl/getenv-value (constantly nil)]
+                          (with-redefs [settings/getenv-value (constantly nil)]
                             (llm/complete (llm/create-client {:backend :openai-compat
                                                               :model "qwen3-30b-a3b"})
                                           {:prompt "hi"}))))]
@@ -487,7 +604,7 @@
     (let [{:keys [result captured]}
           (capture-http (openai-200 "keyless ok")
                         (fn []
-                          (with-redefs [impl/getenv-value (constantly nil)]
+                          (with-redefs [settings/getenv-value (constantly nil)]
                             (llm/complete (llm/create-client {:backend :openai-compat
                                                               :model "m"})
                                           {:prompt "hi"}))))]
@@ -502,7 +619,7 @@
           {:keys [captured]}
           (capture-http (openai-200 "keyed ok")
                         (fn []
-                          (with-redefs [impl/getenv-value
+                          (with-redefs [settings/getenv-value
                                         (fn [k] (when (= k env-var) test-api-key))]
                             (llm/complete (llm/create-client {:backend :openai-compat
                                                               :model "m"})
@@ -559,6 +676,43 @@
                                      {:prompt "q"}
                                      {})]
       (is (= "unsupported_backend" (get-in result [:error :type]))))))
+
+;; Finish reason → :stop-reason
+(deftest ^{:stratum 2} finish-reason-becomes-stop-reason-test
+  (testing "every HTTP provider's finish reason reaches the result as the
+            canonical :stop-reason, so an answer cut at the output cap can
+            be told from a complete one"
+    (doseq [[backend body expected] finish-reason-cases]
+      (let [result (complete-against backend body)]
+        (is (:success result) (pr-str backend body))
+        (is (= expected (:stop-reason result)) (pr-str backend body)))))
+  (testing "a response that names no finish reason carries no :stop-reason key"
+    (doseq [[backend body] [[:anthropic-api {:content [{:type "text" :text "a"}]}]
+                            [:openai-api {:choices [{:message {:content "a"}}]}]
+                            [:openai-api {:choices [{:message {:content "a"}
+                                                     :finish_reason nil}]}]
+                            [:gemini-api {:candidates [{:content {:parts [{:text "a"}]}}]}]
+                            [:ollama {:message {:content "a"}}]]]
+      (let [result (complete-against backend body)]
+        (is (:success result) (pr-str backend body))
+        (is (not (contains? result :stop-reason)) (pr-str backend body))))))
+
+(deftest ^{:stratum 2} empty-answer-keeps-the-stop-reason-test
+  (testing "a 200 with no text and a finish reason is still an error; the
+            reason is on the result and the billed cost stays — a read whose
+            whole output budget went to reasoning arrives this way"
+    (let [result (complete-against
+                  :openrouter
+                  {:choices [{:message {:content nil} :finish_reason "length"}]
+                   :usage {:prompt_tokens 1000 :completion_tokens 64 :cost 0.002}})]
+      (is (not (:success result)))
+      (is (= "empty_success_output" (get-in result [:error :type])))
+      (is (= "max_tokens" (:stop-reason result)))
+      (is (= 0.002 (:cost-usd result)))))
+  (testing "with no finish reason the failure carries no :stop-reason key"
+    (let [result (complete-against :openrouter {:choices [{:message {:content ""}}]})]
+      (is (= "empty_success_output" (get-in result [:error :type])))
+      (is (not (contains? result :stop-reason))))))
 
 ;; Client integration: config threading through complete / complete-stream
 (deftest ^{:stratum 2} client-round-trip-test

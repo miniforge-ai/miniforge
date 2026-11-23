@@ -72,7 +72,7 @@
         (let [workdir (or (:workdir opts) (str worktree-dir))
               ;; TaskExecutor/execute! takes "string or vector"; sandbox.clj
               ;; uses both forms. Join vectors the way the real worktree
-              ;; executor does (dag_executor/protocols/impl/worktree.clj's
+              ;; executor does (dag_executor/protocols/impl/worktree/executor.clj's
               ;; execute-command) — passing the vector straight to `sh -c`
               ;; would run its .toString, i.e. `sh: [git: command not found`.
               cmd-str (if (string? command) command (str/join " " command))

@@ -1,0 +1,104 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+(ns ai.miniforge.gate.messages-test
+  "Every gate message key the gate sources can render has a catalog entry:
+   keys in a translator call (inline selections included) and keys reached
+   through opsv's gate-copy table. A missing key renders its bare name
+   instead of failing, so only this test notices."
+  (:require [ai.miniforge.gate.opsv.core]
+            [clojure.edn :as edn]
+            [clojure.java.io :as io]
+            [clojure.test :refer [deftest is testing]]))
+
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} catalog
+  [resource section]
+  (-> (io/resource resource) slurp edn/read-string (get section)))
+
+(def ^{:stratum 0} ^:private min-translator-key-uses
+  "Floor on collected translator-call keys: the gate sources hold more
+   than this, so a scan that silently found nothing cannot pass."
+  60)
+
+(def ^{:stratum 0} ^:private opsv-copy-key-count
+  "Six opsv gates x three copy fields (:description :failure :remediation)."
+  18)
+
+(defn- ^{:stratum 0} gate-sources
+  []
+  (let [root (-> (io/resource "ai/miniforge/gate/registry.clj") io/file .getParentFile)]
+    (->> (file-seq root)
+         (filter #(.endsWith (.getName ^java.io.File %) ".clj")))))
+
+(def ^{:stratum 0} ^:private permissive-resolver
+  ;; Sources are read, not loaded: ::alias keywords need no ns aliases.
+  (reify clojure.lang.LispReader$Resolver
+    (currentNS [_] 'user)
+    (resolveClass [_ s] s)
+    (resolveAlias [_ s] s)
+    (resolveVar [_ s] s)))
+
+(defn- ^{:stratum 0} read-forms
+  [^java.io.File f]
+  (with-open [r (java.io.PushbackReader. (io/reader f))]
+    (binding [*read-eval* false
+              *reader-resolver* permissive-resolver]
+      (into [] (take-while #(not= ::eof %))
+            (repeatedly #(read {:eof ::eof :read-cond :allow} r))))))
+
+(def ^{:stratum 0} ^:private translators
+  {'messages/t :user 'msg/t :user
+   'messages/system-t :system 'msg/system-t :system})
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} call-keys
+  ;; Qualified only: unqualified keywords in a first arg are lookup paths ([gate-id :description]).
+  []
+  (for [f (gate-sources)
+        form (read-forms f)
+        node (tree-seq coll? seq form)
+        :when (and (seq? node) (contains? translators (first node)))
+        k (filter qualified-keyword? (tree-seq coll? seq (second node)))]
+    {:file (.getName ^java.io.File f) :catalog (translators (first node)) :key k}))
+
+(defn- ^{:stratum 1} opsv-table-keys
+  []
+  (for [[gate copy] @#'ai.miniforge.gate.opsv.core/gate-copy
+        field [:description :failure :remediation]]
+    {:file (str "opsv/core.clj gate-copy " gate) :catalog :user :key (get copy field)}))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} every-renderable-key-has-a-catalog-entry
+  (let [catalogs {:user   (catalog "config/gate/messages/en-US.edn" :gate/messages)
+                  :system (catalog "config/gate/messages/system.edn" :gate/system)}
+        calls    (call-keys)
+        table    (opsv-table-keys)]
+    (testing "the collectors see the sources (an empty scan would pass vacuously)"
+      (is (< min-translator-key-uses (count calls)))
+      (is (= opsv-copy-key-count (count table))))
+    (testing "keys selected inline in a call are collected"
+      (is (some #(= :tests-pass/failed-one (:key %)) calls)
+          "(t (if (= 1 n) :tests-pass/failed-one :tests-pass/failed))"))
+    (testing "each key resolves in the catalog its translator reads"
+      (doseq [{:keys [file catalog key]} (concat calls table)]
+        (is (string? (get-in catalogs [catalog key]))
+            (str file " renders " key " from the " (name catalog)
+                 " catalog, which has no entry"))))))

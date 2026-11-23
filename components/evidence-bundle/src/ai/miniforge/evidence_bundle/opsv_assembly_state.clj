@@ -30,6 +30,11 @@
 (defn- ^{:stratum 0} merge-field [record key values]
   (update record key into values))
 
+(defn- ^{:stratum 0} retain-sequences [record material]
+  (if-let [sequences (:opsv/event-sequences material)]
+    (assoc record :opsv/event-sequences (merge sequences (:opsv/event-sequences record)))
+    record))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} normalized-material [material]
@@ -42,7 +47,8 @@
 (defn ^{:stratum 2} accumulate [state bundle-id material]
   (let [record (get state bundle-id)]
     (if (= :assembling (:opsv.assembly/status record))
-      (assoc state bundle-id (reduce-kv merge-field record (normalized-material material)))
+      (assoc state bundle-id (-> (reduce-kv merge-field record (normalized-material material))
+                                (retain-sequences material)))
       state)))
 
 (comment

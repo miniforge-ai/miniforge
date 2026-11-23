@@ -18,15 +18,13 @@
 (ns ai.miniforge.self-healing.workaround-detector-test
   (:require
    [clojure.test :refer [deftest is testing use-fixtures]]
-   [clojure.java.io :as io]
-   [ai.miniforge.self-healing.workaround-detector :as detector]))
+   [ai.miniforge.self-healing.home-test-support :as home]
+   [ai.miniforge.self-healing.workaround-detector :as detector]
+   [ai.miniforge.self-healing.workaround-registry :as registry]))
+
+(use-fixtures :each home/with-temp-home)
 
 ;------------------------------------------------------------------------------ Layer 0
-
-;;------------------------------------------------------------------------------ Test fixtures
-(def ^{:stratum 0} test-approval-file
-  "Test file path for approval tracking"
-  (str (System/getProperty "java.io.tmpdir") "/test_workaround_approvals.edn"))
 
 ;;------------------------------------------------------------------------------ Tests
 (deftest ^{:stratum 0} test-match-error-to-workaround
@@ -152,7 +150,9 @@
         (is (true? (:workaround-found? result)))
         (is (true? (:applied? result)))
         (is (true? (:success? result)))
-        (is (some? (:pattern result)))))))
+        (is (some? (:pattern result)))
+        (is (= [:mock-pattern] (map :error-pattern-id (registry/get-all-workarounds)))
+            "the registry entry lands in this test's fresh registry")))))
 
 (deftest ^{:stratum 0} test-unknown-workaround-type
   (testing "Unknown workaround type"
@@ -164,25 +164,3 @@
       (is (true? (:applied? result)))
       (is (false? (:success? result)))
       (is (re-find #"Unknown workaround type" (:message result))))))
-
-;------------------------------------------------------------------------------ Layer 1
-
-(defn ^{:stratum 1} cleanup-test-files
-  "Delete test approval file"
-  []
-  (when (.exists (io/file test-approval-file))
-    (.delete (io/file test-approval-file))))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} with-test-approval-file
-  "Fixture to use test approval file and clean up after"
-  [f]
-  (with-redefs [detector/approval-file-path (constantly test-approval-file)]
-    (cleanup-test-files)
-    (try
-      (f)
-      (finally
-        (cleanup-test-files)))))
-
-(use-fixtures :each with-test-approval-file)

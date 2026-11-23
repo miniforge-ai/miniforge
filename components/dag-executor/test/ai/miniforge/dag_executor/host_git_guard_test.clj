@@ -27,6 +27,7 @@
    [ai.miniforge.dag-executor.host-git-fixtures :as fixtures]
    [ai.miniforge.dag-executor.host-git-guard :as sut]
    [ai.miniforge.dag-executor.result :as result]
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]])
   (:import
    [java.io File]))
@@ -39,6 +40,17 @@
 (def ^{:stratum 0} ^:private redirected-origin-url fixtures/redirected-origin-url)
 
 (def ^{:stratum 0} ^:private tracked-ref fixtures/tracked-ref)
+
+(def ^{:stratum 0} ^:private synthetic-token
+  "Shaped like a GitHub installation token so a leak is recognizable, and
+   marked synthetic so it is never mistaken for a real one."
+  "ghs_SYNTHETICNOTAREALTOKEN")
+
+(defn- ^{:stratum 0} inline-credential-helper
+  "A two-line credential helper that assigns `token` at the start of its
+   second line, the shape a line-based config parse turns into a key."
+  [token]
+  (str "!f() {\npassword=" token "; echo \"password=$password\"; }; f"))
 
 (defn- ^{:stratum 0} snapshot!
   "Take a snapshot of `dir`, unwrapped. A snapshot that failed comes back
@@ -54,33 +66,78 @@
         (is (result/err? (sut/snapshot not-a-repo)))
         (finally (fixtures/delete-tree! not-a-repo))))))
 
+(deftest ^{:stratum 0} command-config-pattern-selects-keys-that-run-programs-test
+  (let [pattern  (re-pattern sut/command-config-pattern)
+        watched? #(boolean (re-matches pattern %))]
+    (testing "given a key that runs a program or loads config → watched"
+      (doseq [k ["core.hookspath" "core.fsmonitor" "core.sshcommand" "core.askpass"
+                 "core.pager" "core.editor" "sequence.editor" "pager.log" "alias.st"
+                 "include.path" "includeif.gitdir:/work/.path"
+                 "credential.helper" "credential.https://example.invalid.helper"
+                 "filter.lfs.clean" "filter.lfs.smudge" "filter.lfs.process"
+                 "diff.external" "diff.pdf.textconv" "diff.pdf.command" "merge.ours.driver"
+                 "difftool.vim.cmd" "mergetool.vim.path"
+                 "gpg.program" "gpg.ssh.program" "gpg.ssh.defaultkeycommand"
+                 "remote.origin.uploadpack" "remote.origin.receivepack" "remote.origin.vcs"
+                 "gc.recentobjectshook" "uploadpack.packobjectshook"
+                 "man.viewer" "man.custom.cmd" "man.custom.path" "browser.firefox.cmd"
+                 "web.browser" "help.browser" "instaweb.httpd" "guitool.lint.cmd"
+                 "trailer.sign.command" "trailer.sign.cmd" "imap.tunnel"
+                 "sendemail.tocmd" "sendemail.work.cccmd" "sendemail.smtpserver"
+                 "tar.tar.xz.command"]]
+        (is (watched? k) k)))
+    (testing "given a neighbouring key that runs nothing → not watched"
+      (doseq [k ["core.autocrlf" "core.bare" "user.name" "remote.origin.url"
+                 "remote.origin.fetch" "filter.lfs.required" "diff.renames"
+                 "credential.usehttppath" "gpg.format" "include.pathx"
+                 "submodule.standards/miniforge.update" "man.custom.manual"
+                 "trailer.sign.key" "sendemail.smtppass" "gc.auto" "tar.umask"]]
+        (is (not (watched? k)) k)))))
+
+(deftest ^{:stratum 0} config-entry-keeps-the-key-stable-test
+  (testing "given CRLF between key and value → the key keeps its name"
+    (is (= ["core.hookspath" "/x"] (#'sut/config-entry "core.hookspath\r\n/x"))))
+  (testing "given a valueless entry → the key with a nil value, not dropped"
+    (is (= ["pager.log" nil] (#'sut/config-entry "pager.log"))))
+  (testing "given an empty value → kept as the empty string"
+    (is (= ["remote.origin.url" ""] (#'sut/config-entry "remote.origin.url\n")))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; Pure-comparison tests
-(deftest ^{:stratum 1} changed-redirect-config-reports-every-kind-of-edit-test
+(deftest ^{:stratum 1} changed-config-reports-every-kind-of-edit-test
   (testing "given identical config → nothing changed"
-    (is (= [] (sut/changed-redirect-config {"remote.origin.url" [host-origin-url]}
-                                           {"remote.origin.url" [host-origin-url]}))))
+    (is (= [] (sut/changed-config {"remote.origin.url" [host-origin-url]}
+                                  {"remote.origin.url" [host-origin-url]}))))
   (testing "given a redirected url → the key with both values"
     (is (= [{:config-key "remote.origin.url"
              :before     [host-origin-url]
              :after      [redirected-origin-url]}]
-           (sut/changed-redirect-config {"remote.origin.url" [host-origin-url]}
-                                        {"remote.origin.url" [redirected-origin-url]}))))
+           (sut/changed-config {"remote.origin.url" [host-origin-url]}
+                               {"remote.origin.url" [redirected-origin-url]}))))
   (testing "given a remote added mid-run → reported, with an empty before"
     (is (= [{:config-key "remote.mirror.url" :before [] :after [redirected-origin-url]}]
-           (sut/changed-redirect-config {} {"remote.mirror.url" [redirected-origin-url]}))))
+           (sut/changed-config {} {"remote.mirror.url" [redirected-origin-url]}))))
   (testing "given a remote removed mid-run → reported, with an empty after"
     (is (= [{:config-key "remote.origin.url" :before [host-origin-url] :after []}]
-           (sut/changed-redirect-config {"remote.origin.url" [host-origin-url]} {}))))
+           (sut/changed-config {"remote.origin.url" [host-origin-url]} {}))))
   (testing "given a multi-valued key whose FIRST value was rewritten → reported"
     (is (= [{:config-key "remote.origin.url"
              :before     [host-origin-url "https://example.invalid/second.git"]
              :after      [redirected-origin-url "https://example.invalid/second.git"]}]
-           (sut/changed-redirect-config
+           (sut/changed-config
             {"remote.origin.url" [host-origin-url "https://example.invalid/second.git"]}
             {"remote.origin.url" [redirected-origin-url "https://example.invalid/second.git"]}))
         "git remote get-url resolves to the first value, so collapsing to the last would miss this")))
+
+(deftest ^{:stratum 1} fingerprint-tells-values-apart-without-holding-them-test
+  (testing "given the same value twice → the same fingerprint"
+    (is (= (sut/fingerprint synthetic-token) (sut/fingerprint synthetic-token))))
+  (testing "given different values, empty included → different fingerprints"
+    (let [values [synthetic-token "osxkeychain" ""]]
+      (is (= (count values) (count (into #{} (map sut/fingerprint) values))))))
+  (testing "given a token → the fingerprint does not contain it"
+    (is (not (str/includes? (sut/fingerprint synthetic-token) synthetic-token)))))
 
 (deftest ^{:stratum 1} moved-remote-refs-ignores-refs-only-one-side-has-test
   (testing "given a ref at a new sha → reported with both shas"
@@ -98,6 +155,7 @@
       (try
         (let [snap (snapshot! host)]
           (is (= [host-origin-url] (get-in snap [:redirects "remote.origin.url"])))
+          (is (map? (:command-config snap)))
           (is (= (fixtures/sha-at host "HEAD~1") (get-in snap [:remote-refs tracked-ref]))))
         (finally (fixtures/delete-tree! host))))))
 
@@ -206,7 +264,7 @@
   (testing "given a token-bearing https url → the token never reaches a snapshot"
     (is (= "https://***@github.com/o/r.git"
            (sut/redact-credentials
-            "https://x-access-token:ghs_SYNTHETICNOTAREALTOKEN@github.com/o/r.git"))))
+            (str "https://x-access-token:" synthetic-token "@github.com/o/r.git")))))
   (testing "given an scp-style ssh remote → left alone, git@ is a username not a secret"
     (is (= "git@github.com:o/r.git" (sut/redact-credentials "git@github.com:o/r.git"))))
   (testing "given a plain url → unchanged"
@@ -232,3 +290,55 @@
           (fixtures/git! host "worktree" "remove" "--force" linked)
           (fixtures/delete-tree! parent)
           (fixtures/delete-tree! host))))))
+
+(deftest ^{:stratum 1} hooks-path-set-inside-a-linked-worktree-is-drift-test
+  (testing "given core.hooksPath set inside a task worktree → drift, though no remote moved"
+    (let [host   (fixtures/init-host-repo! (fixtures/temp-dir!))
+          parent (fixtures/temp-dir!)
+          linked (str (File. parent "task-worktree"))]
+      (try
+        (fixtures/git! host "worktree" "add" "--quiet" "--detach" linked)
+        (let [before (snapshot! host)
+              _      (fixtures/git! linked "config" "core.hooksPath" (str (File. parent "hooks")))
+              report (sut/drift before (snapshot! host))]
+          (is (false? (:clean? report))
+              "the host's next commit, the operator's own included, would run hooks from that path")
+          (is (= ["core.hookspath"] (mapv :config-key (:command-drift report))))
+          (is (= [] (:redirect-drift report))))
+        (finally
+          (fixtures/git! host "worktree" "remove" "--force" linked)
+          (fixtures/delete-tree! parent)
+          (fixtures/delete-tree! host))))))
+
+(deftest ^{:stratum 1} a-credential-helper-never-reaches-a-snapshot-test
+  (testing "given a token in a credential key and on a helper's second line → neither is held"
+    (let [host   (fixtures/init-host-repo! (fixtures/temp-dir!))
+          helper (inline-credential-helper synthetic-token)]
+      (try
+        (fixtures/git! host "config"
+                       (str "credential.https://x-access-token:" synthetic-token
+                            "@example.invalid.helper")
+                       helper)
+        (let [snap   (snapshot! host)
+              values (get-in snap [:command-config
+                                   "credential.https://***@example.invalid.helper"])]
+          (is (some? snap))
+          (is (not (str/includes? (pr-str snap) synthetic-token))
+              "a line-based parse makes `password=<token>;` a key, and keys are not fingerprinted")
+          (is (= [(sut/fingerprint helper)] values)
+              "the two-line value is one fingerprinted value under the redacted key"))
+        (finally (fixtures/delete-tree! host))))))
+
+(deftest ^{:stratum 1} a-valueless-key-added-mid-run-is-drift-test
+  (testing "given a bare `log` under [pager] appended to the shared config → drift, not dropped"
+    (let [host (fixtures/init-host-repo! (fixtures/temp-dir!))]
+      (try
+        (let [before (snapshot! host)
+              _      (spit (File. (str host) ".git/config") "\n[pager]\n\tlog\n" :append true)
+              report (sut/drift before (snapshot! host))
+              pager  (first (filter #(= "pager.log" (:config-key %)) (:command-drift report)))]
+          (is (false? (:clean? report))
+              "git reads a valueless key as true, so the bare line turns the pager on")
+          (is (= sut/valueless-entry (last (:after pager)))
+              "the local entry is kept as its own value, after any global ones"))
+        (finally (fixtures/delete-tree! host))))))

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.task-executor.runner
   "Execute a single task through its full lifecycle.
 
@@ -34,11 +33,13 @@
             [ai.miniforge.agent-runtime.interface :as error-classifier]
             [ai.miniforge.spec-parser.interface :as spec-parser]))
 
-(def ^:private defaults
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private defaults
   (config/load-config-resource "config/task-executor/defaults.edn"
                                [:worktree-acquire-timeout-ms :token-pricing]))
 
-(defn create-task-context
+(defn ^{:stratum 0} create-task-context
   [task-id task run-context]
   (let [{:keys [workflow-id executor config logger event-stream]} run-context
         {:keys [max-iterations llm-backend github-token]} config]
@@ -54,7 +55,7 @@
      :run-atom (:run-atom run-context)
      :config config}))
 
-(defn log-event
+(defn ^{:stratum 0} log-event
   "Log an event if logger is available."
   [logger event-type task-id data]
   (when logger
@@ -62,7 +63,14 @@
               {:message (str "Task executor: " (name event-type))
                :data (assoc data :task-id task-id)})))
 
-(defn acquire-resources!
+(defn- ^{:stratum 0} task-state
+  [run-atom task-id]
+  (when run-atom
+    (get-in @run-atom [:run/tasks task-id])))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} acquire-resources!
   "Acquire worktree and environment for task execution.
 
   Returns DAG ok with {:worktree-acquired? bool, :env-record map}, or DAG error."
@@ -78,10 +86,12 @@
                "Failed to acquire worktree"
                {:task-id task-id
                 :error (:error worktree-result)})
-      ;; Acquire environment from executor
+      ;; Acquire environment from executor. :env-passthrough names the :env
+      ;; entries an untrusted capsule may keep beyond its allowlist.
       (let [env-config {:repo-url (:repo-url config)
                         :branch (:branch config "main")
                         :env (:env config {})
+                        :env-passthrough (:env-passthrough config [])
                         :resources (:resources config {})}
             env-result (dag/acquire-environment! executor task-id env-config)]
         (if (dag/err? env-result)
@@ -99,7 +109,7 @@
             (dag/ok {:worktree-acquired? true
                      :env-record (:data env-result)})))))))
 
-(defn generate-code!
+(defn ^{:stratum 1} generate-code!
   "Run inner loop to generate code artifact.
 
   Returns: {:artifact map, :tokens int}"
@@ -120,7 +130,7 @@
 
     (gen-fn task context)))
 
-(defn create-event-bridge
+(defn ^{:stratum 1} create-event-bridge
   "Create callback that bridges PR events to scheduler events.
 
   Returns: Function (fn [pr-event] -> nil) that translates and forwards events"
@@ -132,7 +142,103 @@
                   :scheduler-action (:event/action scheduler-event)})
       (dag/handle-task-event run-atom scheduler-event))))
 
-(defn run-pr-lifecycle!
+(defn ^{:stratum 1} cleanup-resources!
+  "Clean up environment and locks in finally block."
+  [task-id lock-pool executor env-record logger]
+  (when env-record
+    (log-event logger :releasing-resources task-id
+               {:env-id (:env-id env-record)})
+
+    ;; Release environment
+    (try
+      (dag/release-environment! executor (:env-id env-record))
+      (catch Exception e
+        (log-event logger :release-environment-error task-id
+                   {:error (ex-message e)})))
+
+    ;; Release worktree and all locks
+    (try
+      (dag/release-all-locks! lock-pool task-id logger)
+      (catch Exception e
+        (log-event logger :release-locks-error task-id
+                   {:error (ex-message e)})))))
+
+(defn ^{:stratum 1} validate-spec!
+  "Validate task spec before acquiring any resources.
+
+   If the task carries a :spec/source-file path, attempts to parse it.
+   A parse failure means the agent would have no structured context and
+   would waste its entire turn budget exploring the codebase.
+
+   Returns DAG ok on success. Returns DAG error on failure so the caller
+   can fail-fast before touching the environment."
+  [task-id task logger]
+  (if-let [spec-path (or (get-in task [:spec/provenance :source-file])
+                         (get task :spec/source-file)
+                         (get task :spec-path))]
+    (do
+      (log-event logger :validating-spec task-id {:spec-path spec-path})
+      (try
+        (spec-parser/parse-spec-file spec-path)
+        (log-event logger :spec-valid task-id {:spec-path spec-path})
+        (dag/ok nil)
+        (catch Exception e
+          (dag/err
+           :task-executor/spec-validation-failed
+           (str "Spec validation failed — refusing to spawn agent without valid spec. "
+                "Fix the spec at: " spec-path ". "
+                "Cause: " (ex-message e))
+           {:task-id task-id
+            :spec-path spec-path
+            :cause (ex-message e)}))))
+    (dag/ok nil)))
+
+(defn ^{:stratum 1} calculate-cost-usd
+  "Calculate estimated cost in USD based on tokens used.
+   Pricing model is configurable, sourced from :token-pricing in the
+   defaults EDN (config/task-executor/defaults.edn): the per-million input
+   and output costs and the input/output token-share split are all read from
+   there rather than hard-coded here. Edit the EDN to change the model."
+  [total-tokens]
+  (let [{:keys [input-cost-per-million output-cost-per-million
+                input-token-share output-token-share]}
+        (:token-pricing defaults)
+        input-tokens (* total-tokens input-token-share)
+        output-tokens (* total-tokens output-token-share)
+        cost (+ (/ (* input-tokens input-cost-per-million) 1000000.0)
+                (/ (* output-tokens output-cost-per-million) 1000000.0))]
+    (double cost)))
+
+(defn- ^{:stratum 1} fail-task-with-error!
+  [task-id run-atom logger start-time error]
+  (log-event logger :task-execution-failed task-id
+             {:error (:message error)
+              :duration-ms (- (System/currentTimeMillis) start-time)
+              :error-classification (:code error)})
+  (dag/mark-failed! run-atom task-id error logger)
+  {:ok? false
+   :error error
+   :error-classification {:type (:code error)}})
+
+(defn- ^{:stratum 1} fail-task-with-exception!
+  [task-id run-atom logger start-time e]
+  (let [classified (error-classifier/classify-error e (task-state run-atom task-id))]
+    (log-event logger :task-execution-failed task-id
+               {:error (ex-message e)
+                :cause (ex-cause e)
+                :duration-ms (- (System/currentTimeMillis) start-time)
+                :error-classification (:type classified)
+                :vendor (:vendor classified)})
+
+    (dag/mark-failed! run-atom task-id e logger)
+
+    {:ok? false
+     :error e
+     :error-classification classified}))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} run-pr-lifecycle!
   "Create PR controller and run full lifecycle.
 
   Returns: Final status map from run-lifecycle!"
@@ -174,74 +280,7 @@
     ;; Run blocking lifecycle
     (pr/run-lifecycle! controller code-artifact)))
 
-(defn cleanup-resources!
-  "Clean up environment and locks in finally block."
-  [task-id lock-pool executor env-record logger]
-  (when env-record
-    (log-event logger :releasing-resources task-id
-               {:env-id (:env-id env-record)})
-
-    ;; Release environment
-    (try
-      (dag/release-environment! executor (:env-id env-record))
-      (catch Exception e
-        (log-event logger :release-environment-error task-id
-                   {:error (ex-message e)})))
-
-    ;; Release worktree and all locks
-    (try
-      (dag/release-all-locks! lock-pool task-id logger)
-      (catch Exception e
-        (log-event logger :release-locks-error task-id
-                   {:error (ex-message e)})))))
-
-(defn validate-spec!
-  "Validate task spec before acquiring any resources.
-
-   If the task carries a :spec/source-file path, attempts to parse it.
-   A parse failure means the agent would have no structured context and
-   would waste its entire turn budget exploring the codebase.
-
-   Returns DAG ok on success. Returns DAG error on failure so the caller
-   can fail-fast before touching the environment."
-  [task-id task logger]
-  (if-let [spec-path (or (get-in task [:spec/provenance :source-file])
-                         (get task :spec/source-file)
-                         (get task :spec-path))]
-    (do
-      (log-event logger :validating-spec task-id {:spec-path spec-path})
-      (try
-        (spec-parser/parse-spec-file spec-path)
-        (log-event logger :spec-valid task-id {:spec-path spec-path})
-        (dag/ok nil)
-        (catch Exception e
-          (dag/err
-           :task-executor/spec-validation-failed
-           (str "Spec validation failed — refusing to spawn agent without valid spec. "
-                "Fix the spec at: " spec-path ". "
-                "Cause: " (ex-message e))
-           {:task-id task-id
-            :spec-path spec-path
-            :cause (ex-message e)}))))
-    (dag/ok nil)))
-
-(defn calculate-cost-usd
-  "Calculate estimated cost in USD based on tokens used.
-   Pricing model is configurable, sourced from :token-pricing in the
-   defaults EDN (config/task-executor/defaults.edn): the per-million input
-   and output costs and the input/output token-share split are all read from
-   there rather than hard-coded here. Edit the EDN to change the model."
-  [total-tokens]
-  (let [{:keys [input-cost-per-million output-cost-per-million
-                input-token-share output-token-share]}
-        (:token-pricing defaults)
-        input-tokens (* total-tokens input-token-share)
-        output-tokens (* total-tokens output-token-share)
-        cost (+ (/ (* input-tokens input-cost-per-million) 1000000.0)
-                (/ (* output-tokens output-cost-per-million) 1000000.0))]
-    (double cost)))
-
-(defn update-task-metrics!
+(defn ^{:stratum 2} update-task-metrics!
   "Update comprehensive task metrics in run-atom.
 
    Collects:
@@ -270,39 +309,9 @@
                  :end-time end-time}]
     (dag/update-metrics! run-atom metrics nil)))
 
-(defn- task-state
-  [run-atom task-id]
-  (when run-atom
-    (get-in @run-atom [:run/tasks task-id])))
+;------------------------------------------------------------------------------ Layer 3
 
-(defn- fail-task-with-error!
-  [task-id run-atom logger start-time error]
-  (log-event logger :task-execution-failed task-id
-             {:error (:message error)
-              :duration-ms (- (System/currentTimeMillis) start-time)
-              :error-classification (:code error)})
-  (dag/mark-failed! run-atom task-id error logger)
-  {:ok? false
-   :error error
-   :error-classification {:type (:code error)}})
-
-(defn- fail-task-with-exception!
-  [task-id run-atom logger start-time e]
-  (let [classified (error-classifier/classify-error e (task-state run-atom task-id))]
-    (log-event logger :task-execution-failed task-id
-               {:error (ex-message e)
-                :cause (ex-cause e)
-                :duration-ms (- (System/currentTimeMillis) start-time)
-                :error-classification (:type classified)
-                :vendor (:vendor classified)})
-
-    (dag/mark-failed! run-atom task-id e logger)
-
-    {:ok? false
-     :error e
-     :error-classification classified}))
-
-(defn- run-task-after-resources!
+(defn- ^{:stratum 3} run-task-after-resources!
   [task-id task task-context run-atom logger start-time env-record]
   (let [task-context-with-env (assoc task-context :env-record env-record)
         generation-result (generate-code! task-id task task-context-with-env)
@@ -316,7 +325,9 @@
     {:ok? true
      :value lifecycle-result}))
 
-(defn- continue-with-resources!
+;------------------------------------------------------------------------------ Layer 4
+
+(defn- ^{:stratum 4} continue-with-resources!
   [task-id task task-context run-atom logger start-time env-record resource-result]
   (if (dag/err? resource-result)
     (fail-task-with-error! task-id run-atom logger start-time (:error resource-result))
@@ -324,7 +335,9 @@
       (reset! env-record env)
       (run-task-after-resources! task-id task task-context run-atom logger start-time env))))
 
-(defn- continue-after-spec-validation!
+;------------------------------------------------------------------------------ Layer 5
+
+(defn- ^{:stratum 5} continue-after-spec-validation!
   [task-id task task-context run-atom lock-pool executor logger config start-time env-record spec-result]
   (if (dag/err? spec-result)
     (fail-task-with-error! task-id run-atom logger start-time (:error spec-result))
@@ -332,7 +345,9 @@
      task-id task task-context run-atom logger start-time env-record
      (acquire-resources! task-id lock-pool executor logger config))))
 
-(defn execute-task
+;------------------------------------------------------------------------------ Layer 6
+
+(defn ^{:stratum 6} execute-task
   [task-id task run-context]
   (let [{:keys [run-atom executor logger lock-pool config]} run-context
         task-context (create-task-context task-id task run-context)

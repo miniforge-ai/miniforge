@@ -15,16 +15,20 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.fsm-test
   "Tests for workflow FSM."
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.fsm.interface :as engine]
    [ai.miniforge.workflow.fsm :as fsm]
+   [ai.miniforge.workflow.state-edges :as edges]
+   [ai.miniforge.workflow.state-structure :as structure]
+   [ai.miniforge.workflow.state-validation-test-support :as validation-support]
    [ai.miniforge.workflow.runner-defaults :as defaults]))
 
-(deftest workflow-states-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} workflow-states-test
   (testing "All workflow states are defined"
     (is (contains? fsm/workflow-states :pending))
     (is (contains? fsm/workflow-states :running))
@@ -33,7 +37,7 @@
     (is (contains? fsm/workflow-states :paused))
     (is (contains? fsm/workflow-states :cancelled))))
 
-(deftest valid-transition-test
+(deftest ^{:stratum 0} valid-transition-test
   (testing "Valid transitions from pending"
     (is (fsm/valid-transition? :pending :start)))
 
@@ -53,7 +57,7 @@
     (is (not (fsm/valid-transition? :completed :start)))
     (is (not (fsm/valid-transition? :failed :resume)))))
 
-(deftest terminal-state-test
+(deftest ^{:stratum 0} terminal-state-test
   (testing "Terminal states"
     (is (fsm/terminal-state? :completed))
     (is (fsm/terminal-state? :failed))
@@ -64,7 +68,7 @@
     (is (not (fsm/terminal-state? :running)))
     (is (not (fsm/terminal-state? :paused)))))
 
-(deftest next-state-test
+(deftest ^{:stratum 0} next-state-test
   (testing "Next state for valid transitions"
     (is (= :running (fsm/next-state :pending :start)))
     (is (= :completed (fsm/next-state :running :complete)))
@@ -78,7 +82,7 @@
     (is (nil? (fsm/next-state :pending :complete)))
     (is (nil? (fsm/next-state :completed :start)))))
 
-(deftest transition-test
+(deftest ^{:stratum 0} transition-test
   (testing "Successful transitions"
     (let [result (fsm/transition :pending :start)]
       (is (:success? result))
@@ -105,7 +109,7 @@
       (is (not (:success? result)))
       (is (= :guard-failed (:error result))))))
 
-(deftest valid-state-test
+(deftest ^{:stratum 0} valid-state-test
   (testing "Valid states"
     (is (fsm/valid-state? :pending))
     (is (fsm/valid-state? :running))
@@ -115,7 +119,7 @@
     (is (not (fsm/valid-state? :invalid)))
     (is (not (fsm/valid-state? :unknown)))))
 
-(deftest get-available-events-test
+(deftest ^{:stratum 0} get-available-events-test
   (testing "Available events from pending"
     (let [events (fsm/get-available-events :pending)]
       (is (= [:start] events))))
@@ -133,7 +137,7 @@
     (is (empty? (fsm/get-available-events :failed)))
     (is (empty? (fsm/get-available-events :cancelled)))))
 
-(deftest fsm-graph-test
+(deftest ^{:stratum 0} fsm-graph-test
   (testing "FSM graph structure"
     (let [graph (fsm/fsm-graph)]
       (is (set? (:states graph)))
@@ -142,7 +146,7 @@
       (is (= fsm/workflow-states (:states graph)))
       (is (= fsm/terminal-states (:terminal-states graph))))))
 
-(deftest fsm-workflow-lifecycle-test
+(deftest ^{:stratum 0} fsm-workflow-lifecycle-test
   (testing "Complete workflow lifecycle"
     ;; Start: pending -> running
     (let [r1 (fsm/transition :pending :start)]
@@ -191,7 +195,7 @@
             (is (:success? r4))
             (is (= :completed (:state r4)))))))))
 
-(deftest compiled-execution-machine-projects-phase-state-test
+(deftest ^{:stratum 0} compiled-execution-machine-projects-phase-state-test
   (let [workflow {:workflow/id :test
                   :workflow/pipeline [{:phase :plan}
                                       {:phase :implement}
@@ -217,7 +221,7 @@
               :paused-state-id :paused-phase-0-plan}
              (fsm/machine-active-phase-entry machine running-state))))))
 
-(deftest compiled-execution-machine-follows-phase-transitions-test
+(deftest ^{:stratum 0} compiled-execution-machine-follows-phase-transitions-test
   (let [workflow {:workflow/id :test
                   :workflow/pipeline [{:phase :plan}
                                       {:phase :implement}
@@ -258,10 +262,8 @@
 ;; `:phase/fail` array (Phase 2b/3) handles every case the legacy event
 ;; was introduced for — see `review-phase-verdict-routes-fail-via-
 ;; guarded-array-test` below for the superseding assertions.
-
 ;------------------------------------------------------------------------------ Phase 2b: verdict-driven :phase/fail array
-
-(deftest review-phase-verdict-routes-fail-via-guarded-array-test
+(deftest ^{:stratum 0} review-phase-verdict-routes-fail-via-guarded-array-test
   (testing "Phase 2b: the review phase's :phase/fail dispatch reads
             :phase/verdict from the event. A terminal verdict
             (:stagnated / :needs-decomposition / :exhausted) routes
@@ -334,7 +336,7 @@
               "budget-spent guard takes the second :failed branch
                before the redirect branch fires"))))))
 
-(deftest verify-phase-verdict-routes-fail-via-guarded-array-test
+(deftest ^{:stratum 0} verify-phase-verdict-routes-fail-via-guarded-array-test
   (testing "Phase 3: verify phase now ALSO uses the guarded :phase/fail
             array. :verify/timeout and :verify/rate-limited are TRANSIENT
             infra verdicts — they retry the verify phase on a dedicated
@@ -383,7 +385,7 @@
           (is (= 1 (get after :redirect-count 0))
               "single accounting site bumps for verify→implement too"))))))
 
-(deftest release-phase-verdict-routes-fail-via-guarded-array-test
+(deftest ^{:stratum 0} release-phase-verdict-routes-fail-via-guarded-array-test
   (testing "Phase 3b: release phase joins the guarded :phase/fail array.
             `:release/zero-files` (curator's empty-diff verdict) is
             terminal — bypasses on-fail because retrying the implementer
@@ -416,7 +418,7 @@
           (is (= 1 (get after :redirect-count 0))
               "single accounting site bumps for release→implement too"))))))
 
-(deftest implement-phase-verdict-routes-fail-via-guarded-array-test
+(deftest ^{:stratum 0} implement-phase-verdict-routes-fail-via-guarded-array-test
   (testing "Phase 3c: implement joins the guarded :phase/fail array.
             :implement/empty-diff and :implement/already-implemented-invalid
             are work-terminal (retrying would hit the same wall).
@@ -486,7 +488,7 @@
           (is (= 1 (get after :redirect-count 0))
               "single accounting site for implement→on-fail too"))))))
 
-(deftest state-graph-walks-guarded-array-transitions-test
+(deftest ^{:stratum 0} state-graph-walks-guarded-array-transitions-test
   ;; Phase 2a permits transition values shaped as ordered vectors of
   ;; map entries (guarded arrays — first matching guard wins; each
   ;; branch is a reachable edge). The state-graph walker used by the
@@ -500,15 +502,14 @@
                                        {:target :s3}]}}
                   :s2 {:type :final}
                   :s3 {:type :final}}
-          graph  (#'fsm/build-state-graph states)]
+          graph  (edges/build-state-graph states)]
       (is (= #{:s2 :s3} (get graph :s1))
           "BOTH branches should be edges from :s1; pre-Phase-2a code
            returned #{} because (keep transition-target) discarded the
            vector"))))
 
 ;------------------------------------------------------------------------------ Phase 5: structural invariants
-
-(defn- production-shape-workflow
+(defn- ^{:stratum 0} production-shape-workflow
   "A workflow that includes all four work-loop guarded phases so the
    structural-invariant tests can synthesize per-state mutations
    (extra :redirect/inc-count action, removed default branch, etc.)
@@ -522,22 +523,7 @@
                        {:phase :release   :on-fail :implement}
                        {:phase :done}]})
 
-(deftest structural-invariants-clean-on-production-workflow-test
-  (testing "the production-shape workflow (every guarded phase) emits a
-            machine that passes ALL three Phase 5 structural invariants.
-            Phase 5 is locking IN the post-Phase-4 shape — the baseline
-            must validate."
-    (let [result (fsm/validate-execution-machine (production-shape-workflow))]
-      (is (:valid? result)
-          (str "production workflow must validate; errors: " (:errors result)))
-      (is (empty? (filter (comp #{:guarded-fail-missing-default
-                                  :multiple-redirect-counting-actions
-                                  :budget-guard-misordered}
-                                :error)
-                          (:errors result)))
-          "no structural-invariant errors on the production shape"))))
-
-(deftest structural-invariant-guarded-fail-missing-default-test
+(deftest ^{:stratum 0} structural-invariant-guarded-fail-missing-default-test
   (testing "if a state's guarded :phase/fail array has no default
             (no-guard) branch, the structural-invariant aggregator
             surfaces a :guarded-fail-missing-default error so the
@@ -564,7 +550,7 @@
                               ;; conditional, so a non-matching event
                               ;; would slip through.
                               ]}}}
-          errs (#'fsm/structural-invariant-errors bad-states)]
+          errs (structure/structural-invariant-errors bad-states)]
       (is (some #(= :guarded-fail-missing-default (:error %)) errs)
           "missing-default error must surface")
       (let [err (first (filter #(= :guarded-fail-missing-default (:error %)) errs))]
@@ -583,33 +569,15 @@
                                              {:phase :review :on-fail :plan}
                                              {:phase :done}]}
           original-build-raw @#'fsm/build-raw-states
-          strip-default      (fn [build]
-                               (let [states (:states build)
-                                     review-id (some #(when (= :review (-> (val %) (get-in [:on :phase/fail])
-                                                                            (as-> t (when (sequential? t) :unused))))
-                                                        (key %))
-                                                     states)
-                                     ;; Find any guarded :phase/fail state and strip default
-                                     fixed-states
-                                     (into {}
-                                           (map (fn [[sid scfg]]
-                                                  (let [t (get-in scfg [:on :phase/fail])]
-                                                    (if (sequential? t)
-                                                      [sid (assoc-in scfg [:on :phase/fail]
-                                                                     (vec (remove #(and (map? %)
-                                                                                        (not (contains? % :guard)))
-                                                                                  t)))]
-                                                      [sid scfg]))))
-                                           states)]
-                                 (assoc build :states fixed-states)))]
-      (with-redefs [fsm/build-raw-states (fn [wf] (strip-default (original-build-raw wf)))]
+          invalid-builder (partial validation-support/without-defaults original-build-raw)]
+      (with-redefs [fsm/build-raw-states invalid-builder]
         (let [result (fsm/validate-execution-machine base-workflow)]
           (is (not (:valid? result))
               "workflow with a default-less guarded array must validate as invalid")
           (is (some #(= :guarded-fail-missing-default (:error %)) (:errors result))
               "the structural error flows through :errors"))))))
 
-(deftest structural-invariant-multiple-redirect-actions-test
+(deftest ^{:stratum 0} structural-invariant-multiple-redirect-actions-test
   (testing "if a single state's guarded :phase/fail array lists
             :redirect/inc-count on more than one entry, the validator
             surfaces a :multiple-redirect-counting-actions error.
@@ -624,7 +592,7 @@
                               {:target :phase-1-implement
                                :actions [:redirect/inc-count :review/record-fingerprint]}
                               {:target :failed}]}}}
-          errs (#'fsm/structural-invariant-errors bad-states)]
+          errs (structure/structural-invariant-errors bad-states)]
       (is (some #(= :multiple-redirect-counting-actions (:error %)) errs)
           "multi-redirect error must surface")
       (let [err (first (filter #(= :multiple-redirect-counting-actions (:error %)) errs))]
@@ -633,7 +601,7 @@
         (is (= [1 2] (:entry-indices err))
             "error lists the indices of the offending entries")))))
 
-(deftest structural-invariant-budget-guard-misordered-test
+(deftest ^{:stratum 0} structural-invariant-budget-guard-misordered-test
   (testing "if the redirect branch precedes the :budget/redirects-spent?
             guard in document order, the budget check would never fire
             (clj-statecharts picks the first matching branch). Validator
@@ -647,7 +615,7 @@
                               ;; budget check AFTER, would never fire
                               {:target :failed :guard :budget/redirects-spent?}
                               {:target :failed}]}}}
-          errs (#'fsm/structural-invariant-errors bad-states)]
+          errs (structure/structural-invariant-errors bad-states)]
       (is (some #(= :budget-guard-misordered (:error %)) errs)
           "budget-misordered error must surface")
       (let [err (first (filter #(= :budget-guard-misordered (:error %)) errs))]
@@ -667,14 +635,14 @@
                               {:target :phase-1-implement
                                :actions [:redirect/inc-count]}
                               {:target :failed}]}}}
-          errs (#'fsm/structural-invariant-errors bad-states)]
+          errs (structure/structural-invariant-errors bad-states)]
       (is (some #(= :budget-guard-missing (:error %)) errs)
           ":budget-guard-missing (not :budget-guard-misordered) when no
            budget guard is present at all")
       (is (not (some #(= :budget-guard-misordered (:error %)) errs))
           "missing and misordered are distinct error keywords"))))
 
-(deftest compiled-execution-machine-reachability-test
+(deftest ^{:stratum 0} compiled-execution-machine-reachability-test
   (let [workflow {:workflow/id :test
                   :workflow/pipeline [{:phase :plan}
                                       {:phase :implement}
@@ -699,12 +667,12 @@
       (is (= #{}
              (fsm/unreachable-states machine))))
     (testing "terminal states cannot reach active workflow states"
-      (is (= #{:completed}
+      (is (= #{:completed :failed}
              (fsm/reachable-states machine :completed)))
-      (is (= (disj expected-reachable :completed)
+      (is (= (disj expected-reachable :completed :failed)
              (fsm/unreachable-states machine :completed))))))
 
-(deftest validate-execution-machine-test
+(deftest ^{:stratum 0} validate-execution-machine-test
   (testing "detects unresolved transition targets"
     (let [result (fsm/validate-execution-machine
                   {:workflow/id :bad
@@ -730,3 +698,20 @@
                 (:errors result)))
       (is (some #(= :unreachable-machine-states (:error %))
                 (:errors result))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} structural-invariants-clean-on-production-workflow-test
+  (testing "the production-shape workflow (every guarded phase) emits a
+            machine that passes ALL three Phase 5 structural invariants.
+            Phase 5 is locking IN the post-Phase-4 shape — the baseline
+            must validate."
+    (let [result (fsm/validate-execution-machine (production-shape-workflow))]
+      (is (:valid? result)
+          (str "production workflow must validate; errors: " (:errors result)))
+      (is (empty? (filter (comp #{:guarded-fail-missing-default
+                                  :multiple-redirect-counting-actions
+                                  :budget-guard-misordered}
+                                :error)
+                          (:errors result)))
+          "no structural-invariant errors on the production shape"))))

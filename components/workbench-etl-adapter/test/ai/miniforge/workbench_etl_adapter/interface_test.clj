@@ -73,7 +73,7 @@
     :redacted-count 8}
    {:pipeline "packs/data-foundry/risk-data/pipelines/fred-risk-data.edn"
     :environment "packs/data-foundry/risk-data/envs/fred-local.edn"
-    :factor-count 133
+    :factor-count 134
    :redacted-count 2}])
 
 (defn- quality-report []

@@ -15,13 +15,21 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.messages
   "Component-level message catalog for workflow.
    Delegates to the shared messages component."
   (:require [ai.miniforge.messages.interface :as messages]))
 
-(def t
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} t
   "Look up a workflow message by key, with optional param substitution."
   (messages/create-translator "config/workflow/messages/en-US.edn"
                               :workflow/messages))
+
+(def ^{:stratum 0} system
+  "Look up developer-facing workflow diagnostics."
+  (messages/create-translator "config/workflow/messages/system.edn"
+                              :workflow/system-messages))
+
+(comment ::workflow-message-catalogs)

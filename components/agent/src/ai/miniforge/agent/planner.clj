@@ -117,6 +117,14 @@
                                 :else   ""))))
               (str/join "\n")))))
 
+(defn- ^{:stratum 0} format-existing-files-shed
+  "Shed-path file list: `:keep-inline?` bodies (the codex pin) stay inlined."
+  [files]
+  (let [{kept true shed false} (group-by #(boolean (:keep-inline? %)) files)]
+    (->> [(format-existing-files kept) (format-existing-files-manifest shed)]
+         (remove nil?)
+         (str/join "\n\n"))))
+
 (defn- ^{:stratum 0} emit-prompt-size!
   "Emit an :agent/prompt-size workflow event recording the planner's
    pre-flight budget (N12 §3) so estimate-vs-window is visible/queryable —
@@ -446,8 +454,9 @@
 
 (defn- ^{:stratum 1} planner-retry-mcp-opts
   "Build the planner's submission-retry session opts from a fresh session.
-   Turn cap + progress-monitor come from planner.edn; model/disallowed-tools
-   match the main planner turn so the retry enforces the same policy pack."
+   Turn cap + progress-monitor come from planner.edn; disallowed-tools
+   match the main planner turn so the retry enforces the same policy pack.
+   The model comes from the client, as on the main turn."
   [config context session]
   (let [prompt-data     @planner-prompt-data
         budget-usd      (budget/resolve-cost-budget-usd :planner config context)
@@ -455,8 +464,7 @@
         retry-monitor   (prompts/load-progress-monitor
                          prompt-data :prompt/submission-retry-monitor)]
     (cond-> (artifact-session/session->mcp-opts session budget-usd retry-max-turns)
-      true (assoc :model (model/default-model-for-role :planner)
-                  :disallowed-tools planner-disallowed-tools
+      true (assoc :disallowed-tools planner-disallowed-tools
                   :progress-monitor retry-monitor)
       (:workdir session) (assoc :workdir (:workdir session)))))
 
@@ -530,7 +538,12 @@
                      :existing-files-section (existing-files-section existing-files files-list-fn)})))
 
 (defn- ^{:stratum 2} invoke-planner-session
-  "Session body for the planner: build mcp-opts with model hint, call LLM.
+  "Session body for the planner: build mcp-opts, call LLM.
+
+   The request names no model: `llm-client` already carries the planner's
+   model for its own backend (`model/resolve-llm-client-for-role`), or none
+   so the backend's default applies. A model computed here from the
+   configured backend would reach a client the run put on another backend.
 
    `effective-system` is the base planner prompt with the phase-filtered
    policy addendum appended by the caller (mirrors reviewer / releaser /
@@ -557,8 +570,7 @@
         ;;    before writing to it.</tool_use_error>
         ;; The implementer threads :workdir the same way.
         mcp-opts (cond-> (artifact-session/session->mcp-opts session budget-usd max-turns)
-                   true (assoc :model (model/default-model-for-role :planner)
-                               :disallowed-tools planner-disallowed-tools
+                   true (assoc :disallowed-tools planner-disallowed-tools
                                :progress-monitor (create-planner-progress-monitor))
                    (:workdir session) (assoc :workdir (:workdir session)))]
     ;; Carry the role disallow-list into the Cursor backend's permission
@@ -575,12 +587,13 @@
    did not land, via the shared agent-agnostic runner. Returns
    {:llm-response ... :submitted-plan ... :parsed-plan ...} plus the
    retry session's §7.7.2 answer channel (:codex-answers
-   :codex-answer-log) — the retry runs its own session with its own
-   answers.edn, and answers recorded there are observations the caller
-   must merge with the primary session's."
+   :codex-answer-log) and §7.4.2 :context-reads — the retry runs its own
+   session with its own answers.edn and context-reads.edn, and what it
+   recorded there are observations the caller must merge with the
+   primary session's."
   [llm-client spec-text effective-system config context on-chunk prior-content]
   (let [{:keys [llm-result artifact worktree-artifacts
-                codex-answers codex-answer-log]}
+                context-reads codex-answers codex-answer-log]}
         (submission-recovery/run-recovery-session
          {:context          context
           :llm-client       llm-client
@@ -596,17 +609,34 @@
      :normalized       normalized
      :submitted-plan   submitted-plan
      :parsed-plan      parsed-plan
+     :context-reads    context-reads
      :codex-answers    codex-answers
      :codex-answer-log codex-answer-log}))
 
 ;------------------------------------------------------------------------------ Layer 3
 
+(defn- ^{:stratum 3} assemble-with-shed
+  "One budget pass: `shed-fn` renders the shed-path file list and
+   `shed-count` is how many bodies it drops."
+  [spec-text existing-files effective-system model reserve shed-fn shed-count]
+  (context-budget/assemble-within-budget
+   {:effective-system    effective-system
+    :model               model
+    :reserve             reserve
+    :max-inline-fraction (get @planner-prompt-data
+                              :prompt/max-inline-window-fraction 1.0)
+    :build-full          (partial build-user-prompt spec-text existing-files)
+    :build-shed          (partial build-user-prompt spec-text existing-files shed-fn)
+    :shed-count          shed-count}))
+
 (defn- ^{:stratum 3} assemble-within-budget
   "Assemble the planner user-prompt within the model's context window
    (N12 §5). If the prompt reaches the configured inline cap or overflows
    the window, shed the eagerly-inlined file bodies down to a manifest
-   (paths only) — the bodies stay reachable via the context MCP cache
-   (seeded separately in invoke-planner-session), so the agent keeps a query
+   (paths only), except `:keep-inline?` bodies (the codex pin), which drop
+   only if they alone still overflow the window. Shed bodies stay reachable
+   via the context MCP cache (seeded separately in invoke-planner-session),
+   so the agent keeps a query
    surface, and the section's already-satisfied evidence-bundle instructions
    are preserved. Returns
    {:user-prompt :shed? :over-after-shed? :window :reserve :effective-window
@@ -629,16 +659,15 @@
    before window fit, so a barely-fitting prompt can't stall a turn past
    the phase timeout."
   [spec-text existing-files effective-system model reserve]
-  (context-budget/assemble-within-budget
-   {:effective-system effective-system
-    :model            model
-    :reserve          reserve
-    :max-inline-fraction (get @planner-prompt-data
-                              :prompt/max-inline-window-fraction 1.0)
-    :build-full       #(build-user-prompt spec-text existing-files)
-    :build-shed       #(build-user-prompt spec-text existing-files
-                                          format-existing-files-manifest)
-    :shed-count       (count existing-files)}))
+  (let [assemble (partial assemble-with-shed
+                         spec-text existing-files effective-system model reserve)
+        total    (count existing-files)
+        kept     (count (filter :keep-inline? existing-files))
+        r        (assemble format-existing-files-shed (- total kept))]
+    ;; A pin too big on its own must not fail a plan the plain manifest fits.
+    (if (and (pos? kept) (:over-after-shed? r))
+      (assemble format-existing-files-manifest total)
+      (assoc r :file-count total))))
 
 ;------------------------------------------------------------------------------ Layer 4
 
@@ -679,8 +708,12 @@
                   existing-files (:task/existing-files input)
                   effective-system (str @planner-system-prompt
                                         (get input :task/behavior-addendum ""))
+                  ;; Budget against the model the client sends; the agent
+                  ;; config's :model follows the configured backend, which
+                  ;; the run may have replaced.
                   budget (assemble-within-budget
-                          spec-text existing-files effective-system (:model config)
+                          spec-text existing-files effective-system
+                          (llm/client-model llm-client)
                           (get @planner-prompt-data :prompt/context-window-reserve-tokens 50000))
                   user-prompt (:user-prompt budget)]
               (emit-prompt-size! context budget)
@@ -705,7 +738,7 @@
                    :context-window (:window budget)
                    :tokens 0}))
                 (let [{:keys [llm-result artifact worktree-artifacts context-misses
-                              codex-answers codex-answer-log]}
+                              context-reads codex-answers codex-answer-log]}
                   (artifact-session/with-session context
                     #(invoke-planner-session % llm-client user-prompt
                                              effective-system config context
@@ -813,6 +846,11 @@
                ;; (last-recording-wins includes an answer revised during
                ;; the retry) and a torn log in either session wins the
                ;; marker.
+               ;; §7.4.2: a pin read in either session counts; absent from both stays absent (unknown).
+               (or (some? context-reads)
+                   (some? (:context-reads retry-result)))
+               (assoc :context-reads
+                      (vec (concat context-reads (:context-reads retry-result))))
                (or (some? codex-answers)
                    (some? (:codex-answers retry-result)))
                (assoc :codex-answers

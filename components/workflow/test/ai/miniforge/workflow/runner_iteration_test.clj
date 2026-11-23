@@ -27,6 +27,8 @@
    [ai.miniforge.workflow.monitoring :as monitoring]
    [ai.miniforge.workflow.phase-test-support :as phase-test-support]
    [ai.miniforge.workflow.runner :as runner]
+   [ai.miniforge.workflow.runner-phase-step :as phase-step]
+   [ai.miniforge.workflow.runner-outcome :as outcome]
    [slingshot.slingshot :refer [try+ throw+]]))
 
 (use-fixtures :each
@@ -39,11 +41,11 @@
   phase-test-support/runner-test-done)
 
 ;; Access private fns
-(def ^{:stratum 0} ^:private rate-limited? #'runner/rate-limited?)
+(def ^{:stratum 0} ^:private rate-limited? #'phase-step/rate-limited?)
 
-(defn- ^{:stratum 0} backoff-ms [n] (#'runner/backoff-ms n))
+(defn- ^{:stratum 0} backoff-ms [n] (#'phase-step/backoff-ms n))
 
-(def ^{:stratum 0} ^:private make-execution-error #'runner/make-execution-error)
+(def ^{:stratum 0} ^:private make-execution-error outcome/make-execution-error)
 
 (defn- ^{:stratum 0} running-control-state
   []

@@ -6,8 +6,8 @@
 
 # miniforge Specification Index
 
-**Version:** 0.24.0-draft
-**Date:** 2026-08-10
+**Version:** 0.29.2-draft
+**Date:** 2026-11-15
 **Status:** Living specification during OSS development
 
 ---
@@ -133,16 +133,17 @@ Defines:
 Defines:
 
 - Event envelope fields and fixed envelope field types (§2.1.1); scope keys —
-  workflow, PR Work Item, pack, repo, supervisory entity, deployment (§2.3)
+  workflow, PR Work Item, pack, repo, supervisory entity, deployment, chain run (§2.3)
 - Required event types (workflow, agent, status, subagent, tool, LLM, messages,
-  milestone, gate, pack lifecycle, pack run, chain edge)
+  milestone, gate, pack lifecycle, pack run, chain run, chain step, chain edge)
 - Ordering guarantees (per-scope sequence, causal ordering, replay determinism)
 - Streaming API (SSE/WebSocket) with subscription protocol
 - Throttling and performance requirements
 - Minimal fields needed to render "live" progress and drill-down
 - **Reliability metric events:** SLI computation, SLO breach, error budget, degradation mode (§3.17)
 - **Repository intelligence events:** Index quality, canary failure (§3.18)
-- **Supervisory snapshot family:** twelve `:supervisory/*` types, entity shapes owned by the N5 deltas (§3.19.1)
+- **Supervisory snapshot family:** thirteen registered types, entity shapes owned by the N5 deltas (§3.19.1)
+- **Intervention lifecycle:** durable command facts remain distinct from snapshots (§3.22)
 - **Workflow control events:** cancellation, checkpoint write, machine snapshot, resume (§3.21)
 - **Event type registry:** the flat enumeration of every emittable `:event/type`, with scope and retention class (§6)
 - **Schema evolution:** what `:event/version` versions, change classification, consumer obligations (§7)
@@ -241,6 +242,10 @@ Defines:
 
 ### Indexed normative amendments
 
+Full-stop decision source (N3 §9.1.1, N8 §3.5, N11 §4.4, N2 checkpoint delta §11,
+and their N5/N7/N10 references):
+[operator approval and implementation contingency](../docs/pull-requests/2026-11-15-docs-run-full-stop-contract.md#approval-record).
+
 | File | Base contract | Applicability |
 |------|---------------|---------------|
 | [N2-delta-phase-checkpoint-and-resume.md](normative/N2-delta-phase-checkpoint-and-resume.md) | N2 | Persisted workflow state |
@@ -264,6 +269,17 @@ Defines:
 - Verification requirements: pass/fail semantics, success criteria evaluation
 - Fleet Mode integration: per-service policy state, experiment governance
 - Risk scoring plus requested/effective actuation decisions (RECOMMEND_ONLY, PR_ONLY, APPLY_ALLOWED)
+- Predeclared candidate-aware environment comparison and retained-baseline recovery (§6.3)
+- Separate, default-off temporary staging experiment authority (§5.5, N10 §1.5)
+
+Decision source for §6.3:
+[operator approval record](../docs/pull-requests/2026-11-03-feat-opsv-candidate-environment-contract.md#approval-record).
+
+Decision source for §5.5 and N10 §1.5:
+[temporary staging authority approval](../docs/pull-requests/2026-11-04-docs-opsv-staging-experiment-authority.md#approval-record).
+
+Recovery timing clarification for §5.5 and N10 §1.5:
+[bounded plan and just-in-time exact grants approval](../docs/pull-requests/2026-11-06-docs-opsv-recovery-authority-timing.md#approval-record).
 
 ### N8 — Observability Control Interface 🆕
 
@@ -287,7 +303,7 @@ Defines:
   `:restricted` suppressed per-recipient at delivery
 - **Redaction patterns are EDN configuration**, never a function (§5.2, dewey 007)
 - **Event schemas referenced, not restated** (§10.1) — the reproduced copies carried a
-  fixed `:workflow/id` and were unusable on N3's five non-workflow scopes
+  fixed `:workflow/id` and were unusable on N3's non-workflow scopes
 - **Conformance requirement IDs** (`N8.CAP.*`, `N8.CTL.*`, `N8.PRV.*`) and test
   obligations (§12.4–§12.5)
 - **Annex A (informative):** implementation conformance status
@@ -311,9 +327,9 @@ Defines:
 - Fleet Mode disambiguation: N9 (SDLC governance) vs N7 (runtime policy synthesis)
 - CLI/TUI/API extensions: `fleet prs`, `fleet trains` commands and views
 - **Scope and event schemas deferred to N3** (§7) — §7.1 restated a PR-only scope rule that
-  N3 §2.3 generalizes to six scopes. §7.2 reproduced N3 §3.16's schemas
+  N3 §2.3 generalizes beyond PR scope. §7.2 reproduced N3 §3.16's schemas
 - **Versioning aligned with N3 §7** (§14) — the required parallel deprecation cycle is
-  withdrawn; pre-release implementations cut over
+  withdrawn; N3 §7.4–§7.5 govern cutover and historical replay
 - **Binary name reconciled** — N5 §2.1 documented `miniforge` while the shipped binary is `mf`;
   N9 was correct and N5 is amended
 - **Conformance requirement IDs** (`N9.WI.*`, `N9.EV.*`, `N9.AT.*`, `N9.AS.*`, `N9.EB.*`)
@@ -438,16 +454,24 @@ Defines:
 
 - Closed object taxonomy (goal, constraint, question, claim, hypothesis, experiment, evidence, plan, decision,
   artifact-ref, conflict, blocker) with structural statuses, not numeric confidences (§2)
-- Transaction vocabulary with commutative/mergeable/exclusive classes, validation pipeline, and the anti-livelock rule:
-  a challenge must carry evidence or a discriminating experiment (§3)
+- Transaction vocabulary with commutative/mergeable/exclusive classes, explicit `supersede`, semantic admission, and
+  the anti-livelock rule. A challenge must carry evidence, a discriminating experiment, or a concern plus resolution
+  criterion (§3)
 - Deterministic projections as an activation's only input (N12-conformant), plus the `cross_visibility: none` ablation
   switch that makes shared-state value measurable (§4)
-- Stateless activations, seven-role v1 population, operation permission matrix (§5)
+- Stateless activations; runtime-established participant identity separate from responsibility; operation
+  permission matrix (§5)
 - Structural v0 scheduler (no model-estimated salience) behind a pluggable seam; budgets (§6)
 - Termination: success/budget/quiescence/deadlock closing rules, forced synthesis, dissent-at-close (§7)
 - Capsule-bound artifacts by reference; adoption decisions, never merges (§8, N11)
 - Workspace events on the N3 envelope; closure exports as N6 artifacts (§9)
 - Conformance Stages 0–2 with promotion gated on N15 experiments; demotion to Informative on gate failure (§0.4, §11)
+- Ariadne v1.6.1 §§11 and 13 as the authority and information-flow contract; a decision never authorizes an
+  external effect (§0.5, §10.1)
+
+**Experimental implementation:** the [shared-deliberation architecture atlas](../docs/architecture/deliberation/README.md)
+records the Ariadne-aligned design, five SVG panels and the standalone synthetic lab.
+The development runner does not establish N15 gate conformance; G0 is not evaluated.
 
 ### N15 — Collective-Cognition Evaluation Harness 🆕
 
@@ -537,6 +561,41 @@ Documents superseded by normative specs. Retained for reference during migration
 
 ## Specification Governance
 
+### Approved contract decisions
+
+On 2026-11-04 the product owner approved separate temporary staging experiment
+authority in N7/N10. Execution defaults off; recommend-only alone remains read-only.
+Trial/load effects require exact attempt/target/payload grants, dedicated load-test
+scope, separately authorized cleanup, and verified original-baseline recovery.
+Final PR/permanent-apply gates remain unchanged. The approval covers contract and
+implementation work, not live experiments or cluster changes. The decision source is
+`docs/pull-requests/2026-11-04-docs-opsv-staging-experiment-authority.md`.
+
+On 2026-10-31 the product owner approved optional `:checkpoint/location` on
+checkpoint/snapshot write receipts. The record pairs the validated canonical root
+and physical run directory. Payload 1.1.0 retains 1.0.0 compatibility and unchanged
+logical Workflow UUIDs. This is the decision source for N3 §3.21; it prevents path aliases
+from confusing root discovery or releasing event retention prematurely. It does
+not assert N7 completion. The associated PR record is
+`docs/pull-requests/2026-10-31-fix-checkpoint-announcement-identity.md`.
+
+On 2026-10-17 the product owner approved formalizing `gate/decision` and
+`gate/rule-applied` in N3 and registering their typed current-journal contracts.
+This is the decision source for N3 §3.9.1: preserve runtime decision and per-rule
+evidence without changing approval policy or weakening journal validation.
+The associated PR record is
+`docs/pull-requests/2026-10-17-feat-gate-current-contracts.md`.
+
+On 2026-10-04 the product owner approved preserving deployed chain-step and
+supervisory capabilities through explicit N1/N3 reconciliation during the
+implementation-completion work. This approval is the product-decision source
+for N1 §2.32–§2.33, N2 §14.4, N3 §3.12.1/§3.19/§3.22/§7.5, and the N5
+supervisory Spec projection. The decision preserves capabilities, not malformed
+envelopes, ambiguous identity, or unregistered events. Implementation still MUST
+satisfy scope isolation, durable acknowledgment, redaction, replay, and governance.
+The associated PR record is
+`docs/pull-requests/2026-10-04-feat-chain-supervisory-contracts.md`.
+
 ### Language Rules
 
 **Indexed normative specs:**
@@ -616,6 +675,45 @@ Normative specs are enforced by:
 ---
 
 ## Version History
+
+- **0.29.2-draft** (2026-11-15) - Operator-approved full-stop containment
+  contract across N8/N11 and safe checkpoint recovery in the N2 delta, with
+  N3/N5 containment-only audit-outage handling and N7/N10 references. Implementation verification remains a separate gate;
+  no live actions are authorized.
+
+- **0.29.1-draft** (2026-11-06) - Clarified approved N7/N10 recovery timing:
+  independently approve and retain the bounded recovery plan before trial.
+  Issue exact recovery grants just in time from fresh provider preconditions
+  and proven resource identities. No live-experiment authority.
+- **0.29.0-draft** (2026-11-04) - Approved separate temporary staging experiment
+  authority: N7 0.4.0 and N10 0.5.0, with N1 0.9.1 and N8 0.5.0 recovery alignment.
+  Existing N3/N6 wire contracts and final PR/permanent-apply gates are unchanged.
+
+- **0.28.0-draft** (2026-11-02) - N14 0.3.0 and N15 0.3.0: Ariadne alignment of the
+  deliberation workspace (runtime-established participant identity, decisions that
+  never authorize effects). Changes include actionable challenges of adopted records,
+  explicit `supersede`, semantic admission, closure inside the total allowance, and
+  development comparisons distinguished from gate evidence.
+
+- **0.27.0-draft** (2026-10-31) - Approved paired checkpoint storage identity
+  in N3 0.13.0, payload 1.1.0, with retained 1.0.0 compatibility and conservative
+  retention when storage identity is uncertain.
+
+- **0.26.0-draft** (2026-10-20) - Product owner approved the N3 heartbeat
+  amendment: Workflow scope, ephemeral retention of at least 24 hours, and
+  separate scheduler liveness and substantive progress. N3 0.12.0 defines
+  payload 2.0.0, explicit unknown coverage and retained-history compatibility.
+  This is a contract decision, not a claim of runtime conformance or N7 completion.
+
+- **0.25.1-draft** (2026-10-17) - Approved N3 gate decision and rule-evidence
+  registration, typed payloads, and fail-closed audit publication. N3 0.11.0→0.11.1.
+
+- **0.25.0-draft** (2026-10-04) - Approved chain/supervisory reconciliation:
+  separate definition and invocation identities, chain-run scope, step/edge
+  observability, work-specification projection, and intervention lifecycle facts.
+  This amendment does not assert implementation completeness.
+  N9's compatibility references and train-scope summary defer to the same N3 contracts.
+  N5/N8 scope references include chain runs; N3 specifies per-PR train-change delivery.
 
 - **0.24.0-draft** (2026-08-10) - N4-delta reclassified to informative. Its unique content folded
   into N4. The document's requirements were written lowercase, with no uppercase

@@ -8,8 +8,9 @@
             [ai.miniforge.phase-opsv.interface :as opsv]
             [ai.miniforge.phase-opsv.pr-fixtures :as f]
             [ai.miniforge.phase-opsv.run-control :as control]
-            [clojure.java.io :as io]
-            [clojure.test :refer [deftest is]]))
+            [ai.miniforge.phase-opsv.run-control-fixtures :as fixtures]
+            [clojure.test :refer [deftest is]]
+            [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -27,10 +28,6 @@
 (defn- ^{:stratum 0} count-abort [calls]
   (swap! calls inc)
   true)
-
-(defn- ^{:stratum 0} await-work [entered finish]
-  (deliver entered true)
-  @finish)
 
 (defn- ^{:stratum 0} preflight-then-stop [supervisor calls options arguments]
   (let [response (f/command calls options arguments)]
@@ -52,15 +49,6 @@
     @finish
     result))
 
-(defn- ^{:stratum 0} with-run [supervisor abort! test-fn]
-  (let [{:keys [ctx runtime calls]} (f/setup)
-        handles (opsv/register-run-control! supervisor (:execution/id ctx)
-                   (:authority-directory runtime) abort!)
-        controlled (merge runtime handles)]
-    (try (test-fn (assoc-in ctx [:execution/opts :opsv/pr-execution] controlled) controlled calls)
-         (finally (doseq [file (reverse (file-seq (io/file (get-in runtime [:provider :directory]))))]
-                    (io/delete-file file))))))
-
 (defn- ^{:stratum 0} assert-grant-revoked [supervisor aborts ctx runtime calls]
   (let [output (opsv/actuate ctx)
         id (get-in output [:opsv/actuation-record :governed-effects 0 :evidence/grant-id])
@@ -79,6 +67,22 @@
         output (opsv/actuate (assoc-in ctx [:execution/opts :opsv/pr-execution :fence] fence))]
     (is (anomaly/anomaly? output))
     (is (empty? @calls))))
+
+(deftest ^{:stratum 0} admitted-work-can-settle-but-cannot-retire-early-test
+  (let [supervisor (opsv/create-run-supervisor)
+        run (opsv/register-run-control! supervisor (random-uuid) "/tmp/a" (constantly true))
+        entered (promise) finish (promise)
+        work (future (control/at-boundary! (:control run) (partial fixtures/await-work entered finish)))]
+    (try+
+      (is (= true (deref entered fixtures/wait-ms :timeout)))
+      (is (false? (:effects-settled? (opsv/stop-supervised-runs! supervisor f/now))))
+      (is (:cleanup-confirmed? (opsv/stop-supervised-runs! supervisor f/now)))
+      (is (false? (:retired? (opsv/retire-run-control! (:control run) f/now))))
+      (deliver finish :settled)
+      (is (= :settled (deref work fixtures/wait-ms :timeout)))
+      (is (:retired? (opsv/retire-run-control! (:control run) f/now)))
+      (is (anomaly/anomaly? (control/at-boundary! (:control run) (constantly :unexpected))))
+      (finally (deliver finish :settled) (future-cancel work)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -109,22 +113,6 @@
     (is (:cleanup-confirmed? (opsv/stop-supervised-runs! supervisor f/now)))
     (is (= 1 @other))))
 
-(deftest ^{:stratum 1} admitted-work-can-settle-but-cannot-retire-early-test
-  (let [supervisor (opsv/create-run-supervisor)
-        run (opsv/register-run-control! supervisor (random-uuid) "/tmp/a" (constantly true))
-        entered (promise) finish (promise)
-        work (future (control/at-boundary! (:control run) (partial await-work entered finish)))]
-    (try
-      (is (= true (deref entered 2000 :timeout)))
-      (is (false? (:effects-settled? (opsv/stop-supervised-runs! supervisor f/now))))
-      (is (:cleanup-confirmed? (opsv/stop-supervised-runs! supervisor f/now)))
-      (is (false? (:retired? (opsv/retire-run-control! (:control run) f/now))))
-      (deliver finish :settled)
-      (is (= :settled (deref work 2000 :timeout)))
-      (is (:retired? (opsv/retire-run-control! (:control run) f/now)))
-      (is (anomaly/anomaly? (control/at-boundary! (:control run) (constantly :unexpected))))
-      (finally (deliver finish :settled) (future-cancel work)))))
-
 (defn- ^{:stratum 1} assert-preflight-stop [supervisor ctx runtime calls]
   (let [command (partial preflight-then-stop supervisor calls)
         output (opsv/actuate (assoc-in ctx [:execution/opts :opsv/pr-execution :provider :run-command] command))]
@@ -146,15 +134,15 @@
         register (partial pause-registration grant/register! entered finish)]
     (with-redefs [grant/register! register]
       (let [work (future (opsv/actuate ctx))]
-        (try
-          (let [id (deref entered 5000 :timeout)
+        (try+
+          (let [id (deref entered fixtures/wait-ms :timeout)
                 stopped (opsv/stop-supervised-runs! supervisor f/now)]
             (is (uuid? id))
             (is (false? (:cleanup-confirmed? stopped)))
             (is (false? (:effects-settled? stopped)))
             (is (false? (:retired? (opsv/retire-run-control! (:control runtime) f/now))))
             (deliver finish true)
-            (is (not= :timeout (deref work 5000 :timeout)))
+            (is (not= :timeout (deref work fixtures/wait-ms :timeout)))
             (is (empty? @calls))
             (is (some? (:grant/revoked-at (grant/current (:authority-directory runtime) id))))
             (is (:retired? (opsv/retire-run-control! (:control runtime) f/now))))
@@ -185,31 +173,31 @@
 
 (deftest ^{:stratum 1} successful-pr-grant-is-revoked-by-global-stop-test
   (let [supervisor (opsv/create-run-supervisor) aborts (atom 0)]
-    (with-run supervisor (partial count-abort aborts)
+    (fixtures/with-run supervisor (partial count-abort aborts)
       (partial assert-grant-revoked supervisor aborts))))
 
 (deftest ^{:stratum 1} mismatched-runtime-control-is-refused-before-issuance-test
-  (with-run (opsv/create-run-supervisor) (constantly true) assert-mismatched-control))
+  (fixtures/with-run (opsv/create-run-supervisor) (constantly true) assert-mismatched-control))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} stop-during-preflight-prevents-provider-post-test
   (let [supervisor (opsv/create-run-supervisor)]
-    (with-run supervisor (constantly true) (partial assert-preflight-stop supervisor))))
+    (fixtures/with-run supervisor (constantly true) (partial assert-preflight-stop supervisor))))
 
 (deftest ^{:stratum 2} grant-registration-racing-stop-is-revoked-before-provider-test
   (let [supervisor (opsv/create-run-supervisor)]
-    (with-run supervisor (constantly true) (partial assert-registration-race supervisor))))
+    (fixtures/with-run supervisor (constantly true) (partial assert-registration-race supervisor))))
 
 (deftest ^{:stratum 2} pending-registration-prevents-cleanup-confirmation-and-retirement-test
   (let [supervisor (opsv/create-run-supervisor)]
-    (with-run supervisor (constantly true) (partial assert-pending-registration supervisor)))
+    (fixtures/with-run supervisor (constantly true) (partial assert-pending-registration supervisor)))
   (let [supervisor (opsv/create-run-supervisor)]
-    (with-run supervisor (constantly true) (partial assert-absent-registration supervisor))))
+    (fixtures/with-run supervisor (constantly true) (partial assert-absent-registration supervisor))))
 
 (deftest ^{:stratum 2} failed-revocation-is-retained-for-cleanup-retry-test
   (let [supervisor (opsv/create-run-supervisor)]
-    (with-run supervisor (constantly true) (partial assert-revocation-retry supervisor))))
+    (fixtures/with-run supervisor (constantly true) (partial assert-revocation-retry supervisor))))
 
 (comment
   (clojure.test/run-tests 'ai.miniforge.phase-opsv.run-control-test))

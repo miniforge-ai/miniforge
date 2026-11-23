@@ -19,20 +19,17 @@
   "Thin deploy phase interceptor over provider application flow."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.logging.interface :as log]
-            [ai.miniforge.phase-deployment.defaults :as defaults]
+            [ai.miniforge.phase-deployment.interceptor :as interceptor]
             [ai.miniforge.phase-deployment.deploy-config :as config]
             [ai.miniforge.phase-deployment.deploy-governed :as governed]
             [ai.miniforge.phase-deployment.deploy-operations :as operations]
             [ai.miniforge.phase-deployment.deploy-result :as result]
             [ai.miniforge.phase-deployment.messages :as msg]
-            [ai.miniforge.phase.interface :as phase])
+            [ai.miniforge.phase.interface :as phase]
+            [ai.miniforge.phase.interface.gate :as phase-gate])
   (:import [java.time Instant]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-(def ^{:stratum 0} default-config
-  "Deploy phase defaults loaded from EDN."
-  (defaults/phase-defaults :deploy))
 
 (defn- ^{:stratum 0} get-logger
   "Resolve logger from ctx, creating a default if absent."
@@ -51,9 +48,10 @@
                  :error (msg/t :deploy/invalid-config {:error error})})))
 
 (defn ^{:stratum 0} leave-deploy
-  "Post-deploy: record final metrics."
+  "Post-deploy: record final metrics. A deploy its gates failed is :failed."
   [ctx]
-  (if (= :completed (get-in ctx [:phase :status]))
+  (if (and (= :completed (get-in ctx [:phase :status]))
+           (not (phase-gate/gate-failed? (:phase ctx))))
     ctx
     (assoc-in ctx [:phase :status] :failed)))
 
@@ -96,12 +94,9 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defmethod ^{:stratum 2} phase/get-phase-interceptor-method :deploy
-  [_]
-  {:name :deploy
-   :enter enter-deploy
-   :leave leave-deploy
-   :error error-deploy
-   :config default-config})
+  [config]
+  (interceptor/configure config
+                         {:enter enter-deploy :leave leave-deploy :error error-deploy}))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

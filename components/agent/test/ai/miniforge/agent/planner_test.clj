@@ -23,7 +23,9 @@
    [ai.miniforge.agent.core :as core]
    [ai.miniforge.agent.planner :as planner]
    [ai.miniforge.agent.artifact-session :as artifact-session]
+   [ai.miniforge.agent.context-budget :as context-budget]
    [ai.miniforge.agent.model :as model]
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.logging.interface :as log]))
 
@@ -313,7 +315,17 @@
                (:codex-answers result))
             "the primary session's answers survive a torn retry log")
         (is (= :unreadable (:codex-answer-log result))
-            "LOST retry observations must not read as a clean record")))))
+            "LOST retry observations must not read as a clean record")))
+    (testing "§7.4.2: retry context_reads append after the primary's"
+      (let [read-a {:path ".miniforge/codex-pin.md" :source :cache :timestamp "t1"}
+            read-b {:path "src/x.clj" :source :filesystem :timestamp "t2"}
+            result (run-retry {:context-reads [read-a]} {:context-reads [read-b]})]
+        (is (= [read-a read-b] (:context-reads result))
+            "a pin read in either session counts as read")))
+    (testing "neither session surfaced a reads log: no :context-reads key"
+      (let [result (run-retry {} {})]
+        (is (not (contains? result :context-reads))
+            "absent stays absent, so :pin-read? reads nil (unknown)")))))
 
 (deftest ^{:stratum 0} planner-system-prompt-includes-behavior-addendum-test
   ;; Pins the wiring that lets the planner agent see the phase-filtered
@@ -571,6 +583,89 @@
                  (:disallowed-tools @captured))
               ":disallowed-tools opt must equal the planner's role-scoped list"))))))
 
+(deftest ^{:stratum 0} planner-request-leaves-the-model-to-the-client-test
+  (testing "a codex run's planner request carries no model of its own"
+    ;; The client is the one resolve-llm-client-for-role returns for codex:
+    ;; no model, so the codex CLI uses its own. A model the planner put in
+    ;; the request would override that.
+    (let [captured (atom nil)
+          codex-client (llm/create-client {:backend :codex})]
+      (with-redefs [config/load-merged-config
+                    (constantly (assoc-in config/default-config [:llm :backend] :codex))
+                    llm/success? (constantly true)
+                    llm/get-content (constantly "")
+                    llm/chat (fn [_client _prompt opts]
+                               (reset! captured opts)
+                               {:status :success})
+                    llm/chat-stream (fn [_client _prompt _on-chunk opts]
+                                      (reset! captured opts)
+                                      {:status :success})
+                    model/resolve-llm-client-for-role (fn [_role provided] provided)
+                    artifact-session/with-session
+                    (fn [_context body-fn]
+                      {:llm-result (body-fn {:dir "/tmp/fake-session"
+                                             :workdir "/tmp/fake-workdir"
+                                             :mcp-config-path "/tmp/fake-session/mcp-config.json"
+                                             :mcp-allowed-tools []
+                                             :supervision {}
+                                             :pre-session-snapshot {}})
+                       :artifact nil
+                       :worktree-artifacts {}
+                       :context-misses nil
+                       :pre-session-snapshot {}
+                       :session-mode :host})]
+        (try
+          (core/invoke (planner/create-planner {:llm-backend codex-client})
+                       {:llm-backend codex-client}
+                       {:description "Plan this"})
+          (catch Exception _))
+        (is (some? @captured) "the planner must have called the LLM")
+        (is (nil? (:model @captured)))))))
+
+(deftest ^{:stratum 0} planner-budgets-against-the-client-model-test
+  ;; The agent config's :model follows the configured backend (:claude
+  ;; here); the run's client is on codex and sends no model, so the prompt
+  ;; budget must not use Claude's window.
+  (doseq [[label client expected]
+          [["a codex client with no model" (llm/create-client {:backend :codex}) nil]
+           ["a client that names its model"
+            (llm/create-client {:backend :claude :model "claude-sonnet-4-6"})
+            "claude-sonnet-4-6"]]]
+    (testing label
+      (let [budget-models (atom [])
+            original      context-budget/assemble-within-budget
+            agent         (with-redefs [config/load-merged-config
+                                        (constantly (assoc-in config/default-config
+                                                              [:llm :backend] :claude))]
+                            (planner/create-planner {:llm-backend client}))]
+        (with-redefs [context-budget/assemble-within-budget
+                      (fn [opts]
+                        (swap! budget-models conj (:model opts))
+                        (original opts))
+                      llm/success? (constantly true)
+                      llm/get-content (constantly "")
+                      llm/chat (constantly {:status :success})
+                      llm/chat-stream (constantly {:status :success})
+                      model/resolve-llm-client-for-role (fn [_role provided] provided)
+                      artifact-session/with-session
+                      (fn [_context body-fn]
+                        {:llm-result (body-fn {:dir "/tmp/fake-session"
+                                               :workdir "/tmp/fake-workdir"
+                                               :mcp-config-path "/tmp/fake-session/mcp-config.json"
+                                               :mcp-allowed-tools []
+                                               :supervision {}
+                                               :pre-session-snapshot {}})
+                         :artifact nil
+                         :worktree-artifacts {}
+                         :context-misses nil
+                         :pre-session-snapshot {}
+                         :session-mode :host})]
+          (try
+            (core/invoke agent {:llm-backend client} {:description "Plan this"})
+            (catch Exception _))
+          (is (seq @budget-models) "the planner must have budgeted the prompt")
+          (is (every? #(= expected %) @budget-models)))))))
+
 ;; planner-submission-retry? — recovery trigger (incl. success-but-no-artifact)
 (def ^{:stratum 0} ^:private submission-retry? #'planner/planner-submission-retry?)
 
@@ -580,6 +675,10 @@
 (defn- ^{:stratum 0} big-file [chars]
   {:path "components/agent/src/ai/miniforge/agent/big.clj"
    :content (apply str (repeat chars \x))})
+
+;; Mirrors codex-pin/pin-outcome's :entry (phase-software-factory).
+(defn- ^{:stratum 0} codex-pin-file [content]
+  {:path ".miniforge/codex-consider.md" :content content :keep-inline? true})
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -830,6 +929,29 @@
       (is (pos? (:effective-window r)) "effective window is never zeroed")
       (is (false? (:shed? r)) "a trivial prompt still fits")
       (is (false? (:over-after-shed? r)) "not forced over-budget")))
+
+  (testing "on the shed path a :keep-inline? file (the codex pin) keeps its
+            body while the other files drop to the manifest"
+    (let [pin (codex-pin-file "PIN-BODY-WORRIES")
+          r (assemble-within-budget "do the thing" [pin (big-file 300000)]
+                                    "system" "codellama-34b" 0)]
+      (is (true? (:shed? r)))
+      (is (false? (:over-after-shed? r)))
+      (is (= 2 (:file-count r)))
+      (is (str/includes? (:user-prompt r) "PIN-BODY-WORRIES"))
+      (is (str/includes? (:user-prompt r) "big.clj"))
+      (is (not (str/includes? (:user-prompt r) (apply str (repeat 5000 \x)))))))
+
+  (testing "a kept body that alone overflows the window drops to the manifest
+            rather than failing the plan"
+    (let [body (apply str (repeat 300000 \z))
+          pin  (codex-pin-file body)
+          r    (assemble-within-budget "do the thing" [pin (big-file 100)]
+                                    "system" "codellama-34b" 0)]
+      (is (true? (:shed? r)))
+      (is (false? (:over-after-shed? r)))
+      (is (str/includes? (:user-prompt r) "codex-consider.md"))
+      (is (not (str/includes? (:user-prompt r) (apply str (repeat 5000 \z)))))))
 
   (testing "irreducible overflow (huge spec, no files) → over-after-shed?, no shed"
     (let [r (assemble-within-budget (apply str (repeat 300000 \y)) []

@@ -150,7 +150,7 @@ A capsule-conformant runtime MUST advertise the following capabilities:
 | `:env-vars`                   | Sets process environment from CLI flags                  |
 | `:working-dir`                | Sets working directory inside the container              |
 | `:user-mapping`               | Runs as a non-root UID/GID                               |
-| `:resource-limits`            | CPU and memory limits enforced by the runtime            |
+| `:resource-limits`            | CPU, memory and process-count limits, runtime-enforced   |
 | `:network-modes/none`         | `--network none` disables container networking           |
 | `:network-modes/bridge`       | Default bridged network with NAT                         |
 | `:image-digest-pinning`       | Resolves and inspects image digests post-pull            |

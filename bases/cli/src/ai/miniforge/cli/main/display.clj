@@ -28,6 +28,7 @@
    combined namespace measured 5 real layers, max 3)."
   (:require
    [clojure.string :as str]
+   [ai.miniforge.cli.color :as color]
    [ai.miniforge.cli.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -70,21 +71,26 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} style
-  "Apply terminal styling using ANSI escape codes."
+  "Apply terminal styling using ANSI escape codes, or return `text` as is
+   when color is off (NO_COLOR, or stdout not a terminal)."
   [text & {:keys [foreground bold]}]
   (let [codes (cond-> []
                 bold (conj "1")
                 foreground (conj (get ansi-colors foreground "37")))]
-    (if (seq codes)
+    (if (and (seq codes) (color/enabled?))
       (str "\033[" (str/join ";" codes) "m" text "\033[0m")
       text)))
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} print-error [msg]
-  (println (style (messages/t :classified-error/error-prefix
-                              {:message msg})
-                  :foreground :red)))
+(defn ^{:stratum 2} print-error
+  "Print `msg` as an error on stderr, so stdout carries only the command's
+   output (`-o json`, pipes)."
+  [msg]
+  (binding [*out* *err*]
+    (println (style (messages/t :classified-error/error-prefix
+                                {:message msg})
+                    :foreground :red))))
 
 (defn ^{:stratum 2} print-success [msg]
   (println (style msg :foreground :green)))

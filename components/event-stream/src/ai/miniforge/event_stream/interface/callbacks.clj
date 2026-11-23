@@ -46,6 +46,15 @@
   (when (some? content)
     (digest/digest-content content)))
 
+(defn- ^{:stratum 0} qualified-call-id
+  "The call id as published: \"<invocation>/<id>\" inside a provider
+   invocation, `id` alone outside one, nil for a nil `id`."
+  [invocation id]
+  (when id
+    (if invocation
+      (str invocation "/" id)
+      id)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} create-streaming-callback
@@ -60,6 +69,20 @@
      :tool-call-id — provider-supplied id when available
      :tool-args-preview — bounded args preview when the parser can safely
                           expose it; will be digested via digest-content
+     :tool-completed — with :tool-use: the provider reports the call only
+                       once it has finished (Codex item.completed), so no
+                       later tool-result will close it
+     :tool-error?    — with :tool-completed: true when the call failed;
+                       absent when the provider gave no outcome
+     :invocation-id — the provider's id for one CLI invocation (Codex
+                      thread id). Codex numbers its items afresh in every
+                      invocation, so the call ids that follow are
+                      published as \"<invocation-id>/<call-id>\" until an
+                      event with :invocation-ended? (Codex turn.completed or
+                      turn.failed) ends the invocation, or the next
+                      :invocation-id replaces it. :done? alone does not end
+                      it: a Codex top-level error is :done? while the exec
+                      keeps running.
      :tool-result — boolean, true when the LLM streamed a tool-result
                     block (outcome of a prior tool-use)
      :tool-result-call-id — provider id correlating this result to its
@@ -79,6 +102,8 @@
                                  :tool/name / :tool/call-id /
                                  :tool/args-digest (digest-content of
                                  tool-args-preview when present).
+   With :tool-completed set, it then emits :tool/call-completed for the
+   same call id, with no duration, so the call is not left open.
 
    NOTE: The bare :agent/status :tool-calling emission has been removed.
          :agent/tool-call-started replaces it with richer structured data.
@@ -97,10 +122,15 @@
         ;; lifetime of this callback instance.  Callbacks are short-lived
         ;; per agent turn, so the practical leak bound is O(concurrent
         ;; outstanding tool calls) — negligible in normal operation.
-        tool-start-times (atom {})]
+        tool-start-times (atom {})
+        ;; The current invocation's id, when the provider names one.
+        current-invocation (atom nil)]
     (fn [{:keys [delta done? tool-use tool-result heartbeat
                  tool-name tool-names tool-call-id tool-args-preview
-                 tool-result-call-id tool-result-content tool-result-is-error]}]
+                 tool-result-call-id tool-result-content tool-result-is-error
+                 tool-completed tool-error? invocation-id invocation-ended?]}]
+      (when invocation-id
+        (reset! current-invocation invocation-id))
       (cond
         tool-use
         (do
@@ -108,8 +138,9 @@
           ;; adjustments (NTP step, manual sysclock change) that can
           ;; make a paired currentTimeMillis delta negative or
           ;; implausibly large. Durations published downstream stay
-          ;; non-negative without a clamp guard.
-          (when tool-call-id
+          ;; non-negative without a clamp guard. A completed call has
+          ;; no span to time.
+          (when (and tool-call-id (not tool-completed))
             (swap! tool-start-times assoc tool-call-id (System/nanoTime)))
 
           (when-let [line (and print? (not quiet?)
@@ -125,7 +156,7 @@
               (events/agent-tool-call stream-atom workflow-id agent-id
                                       {:tool-name tool-name
                                        :tool-names tool-names
-                                       :tool-call-id tool-call-id
+                                       :tool-call-id (qualified-call-id @current-invocation tool-call-id)
                                        :tool-args-preview tool-args-preview}))
 
             ;; ── New paired started event — replaces :agent/status :tool-calling
@@ -143,11 +174,21 @@
                 ;; consistent digest map rather than silently dropping
                 ;; the field.
                 (cond-> {:tool/name    tool-name
-                         :tool/call-id tool-call-id}
+                         :tool/call-id (qualified-call-id @current-invocation tool-call-id)}
                   (seq tool-names) (assoc :tool/names (vec tool-names))
                   (some? tool-args-preview)
                   (assoc :tool/args-digest
-                         (digest/digest-content tool-args-preview)))))))
+                         (digest/digest-content tool-args-preview)))))
+
+            ;; ── A call reported only once finished closes at once, so
+            ;; observers do not keep it outstanding.
+            (when tool-completed
+              (stream/publish!
+                stream-atom
+                (events/tool-call-completed
+                  stream-atom workflow-id
+                  (cond-> {:tool/call-id (qualified-call-id @current-invocation tool-call-id)}
+                    (some? tool-error?) (assoc :tool/success? (not tool-error?))))))))
 
         ;; Tool-result closes the latency span opened by tool-use.
         ;; Emit :tool/call-completed with duration and digested result.
@@ -171,7 +212,7 @@
                 stream-atom workflow-id
                 ;; cond-> excludes optional keys explicitly when nil,
                 ;; decoupled from constructor nil-filtering behaviour.
-                (cond-> {:tool/call-id  correlated-id
+                (cond-> {:tool/call-id  (qualified-call-id @current-invocation correlated-id)
                          :tool/success? (not (true? tool-result-is-error))}
                   result-digest (assoc :tool/result-digest result-digest)
                   duration-ms   (assoc :tool/duration-ms duration-ms))))))
@@ -181,6 +222,8 @@
 
         :else
         (do
+          (when invocation-ended?
+            (reset! current-invocation nil))
           (when (and print? (not quiet?) (seq delta))
             (print delta)
             (flush))

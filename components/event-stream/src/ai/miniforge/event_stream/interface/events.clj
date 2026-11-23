@@ -18,30 +18,56 @@
 (ns ai.miniforge.event-stream.interface.events
   "Workflow, agent, gate, task, listener, control, chain, and control-plane event constructors."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.event-stream.chain-draft-model :as chain-model]
+   [ai.miniforge.event-stream.chain-event-draft :as chain-draft]
    [ai.miniforge.event-stream.core :as core]
    [ai.miniforge.event-stream.compound-events :as compound]
-   [ai.miniforge.event-stream.phase-events :as phase-events]))
+   [ai.miniforge.event-stream.gate-events :as gate-events]
+   [ai.miniforge.event-stream.heartbeat-events :as heartbeat-events]
+   [ai.miniforge.event-stream.phase-events :as phase-events]
+   [ai.miniforge.event-stream.recovery-events :as recovery]
+   [ai.miniforge.event-stream.workflow-entry-events :as workflow-entry]
+   [ai.miniforge.event-stream.workflow-terminal-events :as workflow-terminal]
+   [ai.miniforge.event-stream.workflow-terminal-fields :as workflow-terminal-fields]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Event constructors
+(def ^{:stratum 0} checkpoint-location recovery/checkpoint-location)
+
+(def ^{:stratum 0} checkpoint-written recovery/checkpoint-written)
+
+(def ^{:stratum 0} checkpoint-write-failed recovery/checkpoint-write-failed)
+
+(def ^{:stratum 0} machine-snapshot-written recovery/machine-snapshot-written)
+
+(def ^{:stratum 0} machine-snapshot-write-failed recovery/machine-snapshot-write-failed)
+
+(def ^{:stratum 0} workflow-resumed recovery/resumed)
+
+(def ^{:stratum 0} workflow-spec-hash-mismatch recovery/spec-hash-mismatch)
+
 (def ^{:stratum 0} workflow-started
   "Build and return a :workflow/started event envelope map. Multi-arity
    for the legacy 2/3-arg call shape; the opts arity may carry
    :routing/trigger-event-id so the automation-edge-correlator links the
-   handler workflow back to its routing trigger."
-  core/workflow-started)
+   handler workflow back to its routing trigger. Current drafts require
+   :workflow/intent in opts and do not reserve a sequence number."
+  workflow-entry/workflow-started)
 
 (def ^{:stratum 0} phase-started
   "Build and return a :workflow/phase-started event envelope map for the
-   given phase keyword; optional context is attached as :phase/context."
-  core/phase-started)
+   given phase keyword; optional context is attached as :phase/context.
+   Current drafts require a fifth options argument with :phase/expected-agent."
+  workflow-entry/phase-started)
 
 (def ^{:stratum 0} phase-completed
   "Build and return a :workflow/phase-completed event envelope map.
-   Records :phase/outcome (default :success) and, when present on the
+   Records :phase/outcome (legacy default :success) and, when present on the
    result, duration, artifacts, error, transition-request, redirect-to,
-   tokens, cost, meta, and termination-reason."
+   tokens, cost, meta, and termination-reason. Current drafts require explicit
+   outcome, duration and artifacts; construction does not reserve a position."
   phase-events/phase-completed)
 
 (def ^{:stratum 0} workspace-persisted
@@ -81,25 +107,44 @@
   core/tool-call-completed)
 
 (def ^{:stratum 0} phase-heartbeat
-  "Build and return a :workflow/phase-heartbeat event envelope map for
-   long-running phase liveness (:phase/active-since,
-   :phase/events-emitted, :phase/last-event-at,
-   :phase/gap-since-last-event-ms)."
-  core/phase-heartbeat)
+  "Build a heartbeat without publishing. Current streams require N3 §3.1.1
+   liveness and explicit progress coverage; legacy streams retain tick fields.
+   Current drafts acquire their journal sequence only on publication."
+  heartbeat-events/phase-heartbeat)
 
 (def ^{:stratum 0} workflow-completed
   "Build and return a :workflow/completed event envelope map carrying a
    status keyword and optional duration plus opts (tokens, cost,
-   pr-info, pr-infos, evidence-bundle-id)."
-  core/workflow-completed)
+   pr-info, pr-infos, evidence-bundle-id). Current drafts require :completed status,
+   duration and evidence identity, and carry no competing status field."
+  workflow-terminal/workflow-completed)
 
 (def ^{:stratum 0} workflow-failed
   "Build and return a :workflow/failed event envelope map. Normalizes
    the error (Throwable, anomaly map, or plain map) into
    :workflow/failure-reason, :workflow/error-details,
    :workflow/anomaly-code, and :workflow/retryable?; optional
-   :failure/class."
-  core/workflow-failed)
+   :failure/class. Current drafts require the class and may carry
+   :workflow/failure-phase in opts."
+  workflow-terminal/workflow-failed)
+
+(def ^{:stratum 0} valid-cancellation?
+  "True for a cancel record :workflow/cancelled accepts: a non-blank
+   requester, a source N3 names, and an action id for a :control-action
+   source."
+  workflow-terminal-fields/valid-cancellation?)
+
+(def ^{:stratum 0} workflow-cancelled
+  "Build and return a :workflow/cancelled event envelope map (N3): a run
+   an operator stopped, reported apart from :workflow/completed and
+   :workflow/failed. Takes the cancel's
+   {:cancel/requested-by :cancel/source :action/id?} and the run's
+   duration in ms. Returns an :invalid-input anomaly when the requester is
+   not a non-blank string, the source is not one N3 names (:cli :api :tui
+   :supervisor :control-action), a :control-action
+   source has no :action/id uuid, or the duration is not a non-negative
+   integer."
+  workflow-terminal/workflow-cancelled)
 
 (def ^{:stratum 0} llm-request
   "Build and return an :llm/request event envelope map for an LLM call
@@ -144,16 +189,17 @@
   core/gate-failed)
 
 (def ^{:stratum 0} phase-decision
-  "One event per gated phase transition carrying the DecisionEnvelope."
-  core/phase-decision)
+  "Carry the exact runtime DecisionEnvelope. Current streams receive a draft;
+   legacy streams retain constructor-assigned positions. Retain drafts for retries."
+  gate-events/phase-decision)
 
 (def ^{:stratum 0} gate-rule-applied
   "Build and return a :gate/rule-applied event envelope map: per-rule
    policy evidence recording rule-id evaluated in phase with status
-   (:passed, :failed, :skipped-by-phase, :not-applicable). Optional
+   (:passed, :failed, :skipped-by-phase, :not-applicable, :guidance). Optional
    extra carries :severity, :enforcement, and a NON-SENSITIVE
-   :violation summary."
-  core/gate-rule-applied)
+   :violation summary. Current streams receive sequence-free drafts."
+  gate-events/gate-rule-applied)
 
 (def ^{:stratum 0} tool-invoked
   "Build and return a :tool/invoked event envelope map for a tool an
@@ -249,6 +295,14 @@
    action id; optional result as :action/result."
   core/control-action-executed)
 
+(defn ^{:stratum 0} create-chain-event-draft
+  "Construct a validated v2 chain draft from explicit run/definition identity and
+   lifecycle fields. Optional opts supply envelope identity metadata. Retain the
+   draft for retries. No sequencing, admission, redaction, authority, or publication."
+  [stream event-type payload & [opts]]
+  (anomaly/let-ok [prepared (chain-model/prepare event-type payload)]
+    (chain-draft/create stream prepared opts)))
+
 (def ^{:stratum 0} chain-started
   "Build and return a :chain/started event envelope map (chains are not
    workflow-scoped, so :workflow/id is nil) carrying :chain/id and
@@ -257,18 +311,20 @@
 
 (def ^{:stratum 0} chain-step-started
   "Build and return a :chain/step-started event envelope map carrying
-   :chain/id, :step/id, :step/index, and :step/workflow-id."
+   :chain/id, :step/id, :step/index, and :step/workflow-id.
+   Optional final opts accept :workflow/id for child identity and legacy sequencing."
   compound/chain-step-started)
 
 (def ^{:stratum 0} chain-step-completed
   "Build and return a :chain/step-completed event envelope map carrying
-   :chain/id, :step/id, and :step/index."
+   :chain/id, :step/id, and :step/index.
+   Optional final opts accept :workflow/id for child identity and legacy sequencing."
   compound/chain-step-completed)
 
 (def ^{:stratum 0} chain-step-failed
   "Build and return a :chain/step-failed event envelope map carrying
    :chain/id, :step/id, :step/index, and :chain/error; optional
-   :failure/class."
+   :failure/class and :workflow/id in the final options map."
   compound/chain-step-failed)
 
 (def ^{:stratum 0} chain-completed

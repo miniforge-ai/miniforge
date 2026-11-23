@@ -28,8 +28,8 @@
    [ai.miniforge.cli.workflow-runner.display :as display]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.event-stream.interface.manifest :as es-manifest]
-   [ai.miniforge.phase.interface :as phase]
-   [ai.miniforge.response.interface :as response]))
+   [ai.miniforge.response.interface :as response]
+   [ai.miniforge.workflow.interface :as workflow]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -78,12 +78,23 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} publish-completion-event [event-stream workflow-id result]
-  (let [status (if (phase/succeeded? result) :success :failure)
-        duration-ms (get-in result [:execution/metrics :duration-ms])]
+(defn ^{:stratum 1} publish-completion-event
+  "Publish the run's terminal event: completed, cancelled (N3: never
+   folded into completed or failed) or failed."
+  [event-stream workflow-id result]
+  (let [outcome (workflow/run-outcome result)
+        duration-ms (get-in result [:execution/metrics :duration-ms])
+        ;; An invalid cancel record fails closed: the failed event below.
+        cancelled (when (= :cancelled outcome)
+                    (es/workflow-cancelled event-stream workflow-id
+                                           (workflow/cancellation result) duration-ms))]
     (es/publish! event-stream
-                 (if (= status :success)
-                   (es/workflow-completed event-stream workflow-id status duration-ms)
+                 (cond
+                   (= :completed outcome)
+                   (es/workflow-completed event-stream workflow-id :success duration-ms)
+                   (and cancelled (not (anomaly/any-anomaly? cancelled)))
+                   cancelled
+                   :else
                    (es/workflow-failed event-stream workflow-id
                                        {:message (failure-message result)
                                         :errors (or (seq (:execution/errors result))
@@ -97,9 +108,12 @@
    `{:dir java.io.File :heartbeat ScheduledExecutorService :marked? atom}`
    for the matching `finish-workflow-manifest!`. Returns nil when no
    event stream is configured (dashboard-only run) — no on-disk
-   manifest to maintain in that case."
+   manifest to maintain in that case — and under Babashka, where the
+   manifest operations are JVM-only (`es-manifest/supported?`): the run
+   then goes on without a manifest, like a spec run. Every later
+   lifecycle step is a no-op on nil."
   [workflow-id event-stream]
-  (when event-stream
+  (when (and event-stream es-manifest/supported?)
     (let [dir (es/workflow-dir workflow-id)]
       ((:save-manifest! *manifest-ops*) dir ((:init-active *manifest-ops*) workflow-id))
       {:dir       dir
@@ -177,7 +191,7 @@
   "Run the BD-2a shutdown sequence on `es`: quiesce publishers for
    `workflow-id`, then drain sinks. Returns the structured drain result
    for inclusion in the run result map, or `nil` when no event stream
-   exists (dashboard-url runs).
+   exists (its creation failed).
 
    On a non-OK drain in normal mode (best-effort off), throws an
    ex-info carrying the drain result so the caller's catch path renders

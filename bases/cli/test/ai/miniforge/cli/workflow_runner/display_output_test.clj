@@ -25,11 +25,16 @@
    focuses on pure formatting) or progress-integration-test.clj
    (which focuses on event lifecycle)."
   (:require
-   [clojure.test :refer [deftest testing is]]
+   [clojure.test :refer [deftest testing is use-fixtures]]
    [clojure.string :as str]
    [cheshire.core :as json]
    [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.cli.color :as color]
    [ai.miniforge.cli.workflow-runner.display :as display]))
+
+;; These tests check the colored output; tests run without a terminal,
+;; where color is off.
+(use-fixtures :each (fn [f] (with-redefs [color/enabled? (constantly true)] (f))))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -438,13 +443,33 @@
       (is (str/includes? out ":large-payload"))
       (is (str/includes? out ":nested")))))
 
-(deftest ^{:stratum 1} print-result-quiet-suppresses-machine-output-test
-  (testing "quiet mode suppresses all output branches"
-    (doseq [output [:json :edn nil]]
+(deftest ^{:stratum 1} print-result-json-encodes-a-run-context-test
+  (testing "a run's context holds an atom, a fn and an Instant; :json still prints it"
+    (let [out (capture-stdout
+               #(display/print-result {:execution/status :completed
+                                       :execution/started-at (java.time.Instant/parse "2026-10-28T00:00:00Z")
+                                       :execution/opts {:event-stream (atom {})}
+                                       :execution/logger inc}
+                                      {:output :json}))
+          doc (json/parse-string out)]
+      (is (= "completed" (get doc "execution/status")))
+      (is (= "2026-10-28T00:00:00Z" (get doc "execution/started-at")))
+      (is (string? (get-in doc ["execution/opts" "event-stream"])))
+      (is (string? (get doc "execution/logger"))))))
+
+(deftest ^{:stratum 1} print-result-quiet-suppresses-only-human-output-test
+  (testing "quiet suppresses the human-readable branches"
+    (doseq [output [:pretty nil]]
       (let [out (capture-stdout #(display/print-result {:execution/status :completed}
                                                        {:output output :quiet true}))]
         (is (str/blank? out)
-            (str "Expected no output for " output))))))
+            (str "Expected no output for " output)))))
+  (testing "quiet never suppresses :json or :edn, which the caller asked for to read"
+    (doseq [output [:json :edn]]
+      (let [out (capture-stdout #(display/print-result {:execution/status :completed}
+                                                       {:output output :quiet true}))]
+        (is (str/includes? out "completed")
+            (str "Expected the result for " output))))))
 
 ;; print-pretty-result
 (deftest ^{:stratum 1} print-pretty-result-test

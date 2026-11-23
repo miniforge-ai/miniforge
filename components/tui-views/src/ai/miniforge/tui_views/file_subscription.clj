@@ -18,13 +18,18 @@
 (ns ai.miniforge.tui-views.file-subscription
   "File-based event subscription for standalone TUI mode.
 
-   Tail-follows ~/.miniforge/events/*.edn files and dispatches parsed
-   events to the TUI dispatch-fn. Enables the TUI to monitor running
-   workflows without an in-memory event stream — cross-process via
-   the filesystem protocol used by event-stream file-sink."
+   Follows the event-stream file sink's workflow directories
+   (`~/.miniforge/events/live/<id>/`, `archived/<id>/`, one transit-JSON
+   file per event) through `es/start-layout-tail!`, and still tail-follows
+   legacy ~/.miniforge/events/*.edn files. Dispatches translated events to
+   the TUI dispatch-fn, so the TUI monitors running workflows without an
+   in-memory event stream."
   (:require
    [ai.miniforge.config.interface :as config]
+   [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.logging.interface :as log]
    [clojure.java.io :as io]
+   [ai.miniforge.tui-views.msg :as msg]
    [ai.miniforge.tui-views.persistence :as persistence]
    [ai.miniforge.tui-views.subscription :as subscription]))
 
@@ -76,6 +81,54 @@
         (when-let [msg (subscription/translate-event event)]
           (dispatch-fn msg))))))
 
+(def ^{:stratum 0} max-bootstrap-attempts
+  "Polls a run's events wait for its start event on disk before its row
+   is made from its id alone, or the run is taken for a DAG child trace."
+  10)
+
+(def ^{:stratum 0} slow-lookup-polls
+  "Polls between start lookups for a run set aside without lifecycle
+   events (`retry-bootstraps!`): this many at first, doubling up to
+   `max-slow-lookup-polls`."
+  20)
+
+(def ^{:stratum 0} max-slow-lookup-polls
+  "Longest gap, in polls, between start lookups for a set-aside run
+   (about ten minutes at the default poll interval)."
+  1200)
+
+(def ^{:stratum 0} lifecycle-types
+  "Workflow lifecycle event types. A DAG task's sub-workflow trace has
+   none by design (its parent owns the lifecycle), so a run without any
+   is not given a row of its own."
+  #{:workflow/started :workflow/resumed :workflow/completed :workflow/failed :workflow/cancelled})
+
+(defn ^{:stratum 0} start-row
+  "The row message for run `wf-id` from its :workflow/started event on
+   disk under `events-dir`; nil while that cannot be read."
+  [events-dir wf-id]
+  (some-> (es/read-layout-start-event events-dir wf-id) subscription/translate-event))
+
+(defn ^{:stratum 0} release!
+  "Dispatch run `wf-id`'s `row`, then the events waiting on it in `runs`,
+   and mark the run known."
+  [dispatch-fn runs wf-id row]
+  (dispatch-fn row)
+  (doseq [event (get-in @runs [:waiting wf-id :events])]
+    (some-> (subscription/translate-event event) dispatch-fn))
+  (swap! runs #(-> % (update :known conj wf-id) (update :waiting dissoc wf-id) (update :ignored dissoc wf-id))))
+
+(defn ^{:stratum 0} tail-logger
+  "A logger for the layout tail's warnings that appends EDN lines to
+   ~/.miniforge/logs/tui.log, so none is printed over the TUI's screen."
+  []
+  (let [f (io/file (config/miniforge-home) "logs" "tui.log")]
+    (log/create-logger
+     {:min-level :warn
+      :output    (fn [entry]
+                   (io/make-parents f)
+                   (spit f (str (pr-str entry) "\n") :append true))})))
+
 (defn ^{:stratum 0} stop-subscription!
   "Stop the file-subscription polling thread."
   [running? ^Thread thread]
@@ -95,6 +148,84 @@
     (when hydrate?
       (let [lines (read-new-lines f pos)]
         (parse-and-dispatch! lines dispatch-fn)))))
+
+(defn ^{:stratum 1} dispatch-event!
+  "Translate one event-stream event and dispatch the message, if any.
+
+   A run's row comes from its :workflow/started event. When another event
+   is the first this subscription sees of a run (it sat idle past the
+   tail's window at startup, so its start was skipped as history), the
+   row is built from the start event on disk first. Until that works, the
+   run's events wait in `runs` and `retry-bootstraps!` tries again each
+   poll; the run is known only once its row is out. A :workflow/resumed
+   is a status change of its own (the row goes back to running), in
+   order wherever it falls; for a known run the row's name is also
+   refreshed from the start event, now or, if that cannot be read, on a
+   later poll (:refresh), without holding the status change. Only a
+   run's first event looks on disk at once; later ones wait for the next
+   poll. A run set aside without lifecycle events (:ignored, see
+   `retry-bootstraps!`) drops its events until a lifecycle event comes or
+   a slow lookup finds its start."
+  [dispatch-fn events-dir runs event]
+  (locking runs
+    (let [wf-id (:workflow/id event)
+          type  (:event/type event)
+          m     (subscription/translate-event event)]
+      (cond
+        (nil? wf-id)                      (some-> m dispatch-fn)
+        (= :workflow/started type)        (release! dispatch-fn runs wf-id m)
+        (contains? (:known @runs) wf-id)  (do (some-> m dispatch-fn)
+                                              (when (= :workflow/resumed type)
+                                                (if-let [row (start-row events-dir wf-id)]
+                                                  (dispatch-fn (msg/workflow-named wf-id (:name (second row))))
+                                                  (swap! runs assoc-in [:refresh wf-id] 0))))
+        (and (contains? (:ignored @runs) wf-id)
+             (not (lifecycle-types type)))  nil
+        :else (let [first? (not (contains? (:waiting @runs) wf-id))]
+                (swap! runs #(-> % (update :ignored dissoc wf-id)
+                                 (update-in [:waiting wf-id :events] (fnil conj []) event)))
+                (when first?
+                  (some->> (start-row events-dir wf-id) (release! dispatch-fn runs wf-id))))))))
+
+(defn ^{:stratum 1} retry-bootstraps!
+  "Try the start event on disk again for each run whose events wait on
+   its row, or whose name a resume asked to refresh (see
+   `dispatch-event!`). After `max-bootstrap-attempts` polls a waiting
+   run with a lifecycle event gets a row made from its id alone, so its
+   events are not held forever. One without any is set aside (:ignored)
+   and its events dropped: it may be a DAG task's sub-workflow trace,
+   which never gets a row, or an idle top-level run whose start could not
+   be read yet. Its start is looked up again every `slow-lookup-polls`,
+   the gap doubling up to `max-slow-lookup-polls`, and its row is made
+   once the start is found. A refresh is given up after the attempts."
+  [dispatch-fn events-dir runs]
+  (locking runs
+    (let [poll (:polls (swap! runs update :polls (fnil inc 0)))]
+      (doseq [[wf-id {:keys [next-poll interval]}] (:ignored @runs)
+              :when (>= poll next-poll)]
+        (if-let [row (start-row events-dir wf-id)]
+          (release! dispatch-fn runs wf-id row)
+          (let [interval (min (* 2 interval) max-slow-lookup-polls)]
+            (swap! runs assoc-in [:ignored wf-id] {:next-poll (+ poll interval) :interval interval}))))
+      (doseq [[wf-id {:keys [tries events] :or {tries 0}}] (:waiting @runs)]
+      (if-let [row (start-row events-dir wf-id)]
+        (release! dispatch-fn runs wf-id row)
+        (cond
+          (< (inc tries) max-bootstrap-attempts)
+          (swap! runs assoc-in [:waiting wf-id :tries] (inc tries))
+          (some (comp lifecycle-types :event/type) events)
+          (release! dispatch-fn runs wf-id (msg/workflow-added wf-id nil nil))
+          :else
+          (swap! runs #(-> % (update :waiting dissoc wf-id)
+                           (assoc-in [:ignored wf-id] {:next-poll (+ poll slow-lookup-polls)
+                                                       :interval  slow-lookup-polls}))))))
+      (doseq [[wf-id tries] (:refresh @runs)]
+        (if-let [row (start-row events-dir wf-id)]
+          (do (dispatch-fn (msg/workflow-named wf-id (:name (second row))))
+              (swap! runs update :refresh dissoc wf-id))
+          (swap! runs (if (>= (inc tries) max-bootstrap-attempts)
+                        #(update % :refresh dissoc wf-id)
+                        #(assoc-in % [:refresh wf-id] (inc tries)))))))))
 
 (defn ^{:stratum 1} poll-tracked-files!
   "Read new lines from all tracked files and dispatch them."
@@ -121,13 +252,14 @@
   "Polling loop body for the file-subscription daemon thread.
    Polls tracked files every poll-ms, scans for new files every scan-ms.
    Catches exceptions per-iteration so a single failure doesn't kill the thread."
-  [running? tracked dispatch-fn dir poll-ms scan-ms]
+  [running? tracked dispatch-fn dir poll-ms scan-ms & [on-poll]]
   (let [scan-counter (atom 0)]
     (while @running?
       (try
         (Thread/sleep poll-ms)
         (when @running?
           (poll-tracked-files! tracked dispatch-fn)
+          (when on-poll (on-poll))
           (swap! scan-counter + poll-ms)
           (when (>= @scan-counter scan-ms)
             (reset! scan-counter 0)
@@ -141,15 +273,19 @@
 (defn ^{:stratum 4} subscribe-to-files!
   "Subscribe to workflow event files via tail-following.
 
-   Scans ~/.miniforge/events/ for existing .edn files, hydrates initial
-   state from all existing lines, then polls for new lines and new files
-   on a background daemon thread.
+   Follows the file sink's workflow directories with
+   `es/start-layout-tail!`: runs active at start are read in full, then
+   new events as they are written; a run first seen after its start gets
+   its row from disk (`dispatch-event!`). Also scans ~/.miniforge/events/ for
+   legacy .edn files, hydrates initial state from their lines when
+   :hydrate-existing? (default true), then polls for new lines and new
+   files. Both run on background daemon threads.
 
    Arguments:
    - dispatch-fn - (fn [msg]) to send TUI messages into the Elm loop
    - opts        - {:poll-ms 500, :scan-ms 2000} polling intervals
 
-   Returns: cleanup function (fn [] ...) to call on shutdown."
+   Returns: cleanup function (fn [] ...) that stops both."
   [dispatch-fn & [opts]]
   (let [poll-ms   (get opts :poll-ms 500)
         scan-ms   (get opts :scan-ms 2000)
@@ -157,13 +293,21 @@
         dir       (events-dir)
         tracked   (atom {})
         running?  (atom true)
+        runs      (atom {:known #{} :waiting {} :refresh {} :ignored {}})
         _         (doseq [f (scan-event-files dir)]
                     (track-file! tracked dispatch-fn f {:hydrate? hydrate-existing?}))
-        thread    (doto (Thread. #(poll-loop running? tracked dispatch-fn dir poll-ms scan-ms))
+        thread    (doto (Thread. #(poll-loop running? tracked dispatch-fn dir poll-ms scan-ms
+                                             (partial retry-bootstraps! dispatch-fn dir runs)))
                     (.setDaemon true)
                     (.setName "tui-file-subscription")
-                    (.start))]
-    (partial stop-subscription! running? thread)))
+                    (.start))
+        stop-tail (es/start-layout-tail! dir (partial dispatch-event! dispatch-fn dir runs)
+                                         {:poll-ms     poll-ms
+                                          :thread-name "tui-layout-tail"
+                                          :logger      (tail-logger)})]
+    (fn []
+      (stop-subscription! running? thread)
+      (stop-tail))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

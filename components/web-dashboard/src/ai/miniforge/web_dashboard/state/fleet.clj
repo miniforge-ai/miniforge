@@ -83,7 +83,7 @@
         ;; Live workflows from event stream
         wfs (workflows/get-workflows state)
         live-evidence (keep (fn [wf]
-                              (when (#{:completed :failed} (:status wf))
+                              (when (#{:completed :failed :cancelled} (:status wf))
                                 {:source :workflow
                                  :workflow-id (:id wf)
                                  :workflow-name (:name wf)
@@ -92,10 +92,10 @@
                                  :completed-at (:completed-at wf)
                                  :has-evidence (some? (:evidence-bundle-id wf))}))
                             wfs)
-        ;; Archived workflows (completed/failed only)
+        ;; Archived workflows (finished: completed, failed or cancelled)
         archived (archive/get-archived-workflows state)
         archived-evidence (keep (fn [wf]
-                                  (when (#{:completed :failed} (:status wf))
+                                  (when (#{:completed :failed :cancelled} (:status wf))
                                     {:source :archived
                                      :workflow-id (:id wf)
                                      :workflow-name (:name wf)

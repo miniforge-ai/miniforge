@@ -126,8 +126,8 @@ Gates are policy checks that run at phase boundaries:
 | **canonical-sdlc** | All phases | Features, refactors, bug fixes |
 | **quick-fix** | implement, verify, done | Small, well-understood fixes |
 
-The workflow is auto-selected from the spec's intent or overridden with
-`:workflow/type` in the spec.
+A spec runs canonical-sdlc unless it names another workflow with
+`:spec/workflow-type` (EDN) or `type:` (Markdown frontmatter).
 
 ## Failure and Retry
 

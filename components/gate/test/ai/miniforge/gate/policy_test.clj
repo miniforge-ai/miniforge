@@ -106,6 +106,39 @@
         (is (empty? (:warnings result)))
         (is (empty? (:approval-required result)))))))
 
+;; -------------------------------------------------------------------------- check-release-ready
+;; Regression: the gate defaulted to ready, so an absent readiness and even an
+;; explicit false passed, and the release pushed and opened a PR regardless.
+(deftest ^{:stratum 0} check-release-ready-fails-unless-readiness-is-true
+  (doseq [[label output] [["absent" {}]
+                          ["false" {:release/readiness {:ready? false}}]
+                          ["not a boolean" {:release/readiness {:ready? "yes"}}]
+                          ["legacy flag only" {:metadata {:release-ready true}}]]]
+    (testing label
+      (let [result (policy/check-release-ready output {})]
+        (is (false? (:passed? result)))
+        (is (= :not-release-ready (-> result :errors first :type)))))))
+
+(deftest ^{:stratum 0} check-release-ready-says-when-no-readiness-was-recorded
+  (is (re-find #"recorded no readiness"
+               (-> (policy/check-release-ready {:codex/consultation {}} {})
+                   :errors first :message))))
+
+(deftest ^{:stratum 0} check-release-ready-passes-when-ready-or-skipped
+  (is (true? (:passed? (policy/check-release-ready
+                        {:release/readiness {:ready? true}} {}))))
+  (is (true? (:passed? (policy/check-release-ready
+                        {:skipped true :reason :already-implemented} {})))))
+
+(deftest ^{:stratum 0} check-release-ready-reports-the-failed-checks
+  (let [checks [{:phase :verify :passed? true}
+                {:phase :review :passed? false :decision :changes-requested}]
+        error  (-> (policy/check-release-ready
+                    {:release/readiness {:ready? false :checks checks}} {})
+                   :errors first)]
+    (is (= checks (:checks error)))
+    (is (re-find #":changes-requested" (:message error)))))
+
 ;; -------------------------------------------------------------------------- check-policy-pack enforcement-action classification
 ;; Regression: the gate must classify by :rule/enforcement :action, not severity.
 ;; A :high/:low rule and every content-scan violation (which carries no

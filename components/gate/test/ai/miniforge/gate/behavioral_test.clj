@@ -79,19 +79,19 @@
 
 ;;------------------------------------------------------------------------------ check-behavioral
 (deftest ^{:stratum 2} check-behavioral-no-packs-test
-  (testing "Passes with warning when no policy packs are loaded"
+  (testing "Fails when no policy packs are loaded: a configured behavioral
+            gate with nothing to check against has not checked anything"
     (let [result (behavioral/check-behavioral sample-artifact
                                               {:policy-packs [] :phase :observe})]
-      (is (true? (:passed? result)))
-      (is (empty? (:errors result)))
-      (is (= 1 (count (:warnings result))))
-      (is (= :no-policy-packs (-> result :warnings first :type))))))
+      (is (false? (:passed? result)))
+      (is (= 1 (count (:errors result))))
+      (is (= :no-policy-packs (-> result :errors first :type))))))
 
 (deftest ^{:stratum 2} check-behavioral-no-packs-key-test
-  (testing "Passes with warning when :policy-packs key is absent"
+  (testing "Fails when the :policy-packs key is absent"
     (let [result (behavioral/check-behavioral sample-artifact {:phase :observe})]
-      (is (true? (:passed? result)))
-      (is (= :no-policy-packs (-> result :warnings first :type))))))
+      (is (false? (:passed? result)))
+      (is (= :no-policy-packs (-> result :errors first :type))))))
 
 (deftest ^{:stratum 2} check-behavioral-clean-result-test
   (testing "Passes with no errors when policy-pack reports no violations"
@@ -161,28 +161,29 @@
       (is (= 2 (count (:warnings result)))))))
 
 (deftest ^{:stratum 2} check-behavioral-exception-test
-  (testing "Returns passing result with warning when policy-pack throws"
+  (testing "Fails when the policy check throws: an unchecked artifact is not
+            a passing one"
     (let [result (behavioral/check-behavioral
                   sample-artifact
                   {:policy-packs [{:id :test-pack}]
                    :phase        :observe
                    :check-fn     (throwing-check-fn "policy-pack unavailable")})]
-      (is (true? (:passed? result)))
-      (is (= :behavioral-check-error (-> result :warnings first :type))))))
+      (is (false? (:passed? result)))
+      (is (= :behavioral-check-error (-> result :errors first :type))))))
 
 (deftest ^{:stratum 2} check-behavioral-default-check-fn-exception-test
   (testing
-   "The production default :check-fn path demotes runtime failures to warnings."
+   "The production default :check-fn path turns runtime failures into gate errors."
     (with-redefs [policy-pack/check-artifact
                   (throwing-check-fn "policy-pack unavailable")]
       (let [result (behavioral/check-behavioral
                     sample-artifact
                     {:policy-packs [{:id :test-pack}]
                      :phase        :observe})]
-        (is (true? (:passed? result)))
-        (is (= :behavioral-check-error (-> result :warnings first :type)))
+        (is (false? (:passed? result)))
+        (is (= :behavioral-check-error (-> result :errors first :type)))
         (is (re-find #"policy-pack unavailable"
-                     (-> result :warnings first :message)))))))
+                     (-> result :errors first :message)))))))
 
 (deftest ^{:stratum 2} check-behavioral-rejects-non-fn-check-fn-test
   (testing
@@ -210,11 +211,12 @@
                   {:policy-packs [{:id :test-pack}]
                    :phase        :observe
                    :check-fn     nil})]
-      ;; The default path will either succeed (if policy-pack happens to
-      ;; be on the classpath) or surface :behavioral-check-error. Either
-      ;; outcome means nil was treated as "use default", not invoked
-      ;; as a function.
-      (is (true? (:passed? result))))))
+      ;; The default path either succeeds (if policy-pack happens to be
+      ;; on the classpath) or fails with :behavioral-check-error. Either
+      ;; outcome means nil was treated as "use default", not invoked as
+      ;; a function.
+      (is (or (true? (:passed? result))
+              (= :behavioral-check-error (-> result :errors first :type)))))))
 
 ;;------------------------------------------------------------------------------ repair-behavioral
 (deftest ^{:stratum 2} repair-behavioral-always-fails-test
