@@ -34,8 +34,15 @@ There are no writes, grants, deployments or live infrastructure changes.
 ## Testing plan
 
 Use producer-shaped mount and disk-metadata fixtures. Pin rejection of unsupported
-mounts, ambiguous tables and disabled APFS ownership. Run the affected packet in
-both JVM products, Babashka source and a fresh package before publishing.
+mounts, ambiguous tables, virtual or unmapped devices, mismatched root devices,
+disabled APFS ownership and invalid UUID types. Mock only native I/O boundaries.
+The packet passes 8 tests and 46 assertions in each JVM product, Babashka source,
+and a fresh package. Disabling the filesystem allowlist, device checks or ownership
+check fails five, two and two assertions respectively on JVM and Babashka, with no
+runtime errors. Read-only local metadata checks confirm the native fixture shape;
+the optional physical-classification field is absent even on this host's backing
+partition. Strict lint and actual dependency-layer checks pass.
+The six exact namespace REPL examples also pass on JVM and native Babashka.
 
 ## Deployment plan
 
@@ -49,6 +56,6 @@ PR #2530 consumes the qualification chain. PR #2528 owns full stop.
 
 ## Checklist
 
-- [ ] Owner adversarial and applicable standards pass
-- [ ] Runtime packet and normal commit gates
+- [x] Owner adversarial and applicable standards pass
+- [x] Runtime packet and normal commit gates
 - [ ] Current-head CI, resolved review cycle and signed conflict-free merge
