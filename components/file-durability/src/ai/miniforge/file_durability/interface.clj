@@ -3,7 +3,7 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.file-durability.interface
   "API surface class 1: trusted-process filesystem primitives using caller-owned Files.
-   Writes return the input File; directory operations return resolved Paths or profiles.
+   Writes return the input File; resolution returns Paths and probes return acknowledgements or profiles.
    Failures return anomalies and must propagate; native defaults are not protection proof.
    Stores own path authorization, publication atomicity, and record identity.
    Complete writes force file contents; publication needs a subsequent confirm!."

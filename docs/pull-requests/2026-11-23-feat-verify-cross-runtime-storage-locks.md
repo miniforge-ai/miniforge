@@ -28,6 +28,8 @@ The host uses one monotonic deadline across all marker and exit waits. The peer
 starts its own bounded clock rather than assuming process clocks share an epoch.
 Expired markers cannot count as proof. Cancellation is restored before cleanup
 and remains set when the call returns.
+Bounds govern cooperative marker and exit waits; native filesystem and process
+launch calls are not preempted by those clocks.
 
 ## Testing plan
 
@@ -35,6 +37,21 @@ Use actual native processes and OS locks, including denial paths. Substitute
 only peer launch for deliberately faulty disposable peers. Check both Java 21
 products, source Babashka and a fresh package; prove negative controls and safe
 REPL examples. Include the native proof in the Darwin CI packet.
+
+Completed validation after composing merged PR #2557:
+
+- The combined native packet passes 35 tests / 134 assertions in each of both
+  Java 21 products, source Babashka and a fresh class-stripped CLI package.
+  This includes the existing pin suites; the peer packet alone is 23 / 100.
+- Six independent negative controls fail with zero errors on Java 21 and
+  Babashka: mutual exclusion (1), owned-peer termination (4), marker expiry (1),
+  runtime identity (1), shared host deadline (1), and cancellation restoration (1).
+- Fourteen exact safe examples from thirteen namespaces pass on both runtimes.
+- The task classpath regression passes 1 test / 1 assertion. The native peer
+  subset also passes the real project integration alias, without extra paths.
+
+The Java 21 executable is selected explicitly for both JVM hosts and Babashka's
+JVM peer. No live provider was invoked.
 
 ## Deployment plan
 
@@ -50,5 +67,5 @@ prerequisite PR #2557 is independent; both precede qualification in PR #2555.
 
 ## Checklist
 
-- [ ] Implementation, native proof and owner standards/adversarial review.
+- [x] Implementation, native proof and owner standards/adversarial review.
 - [ ] Current-head CI, automatic and full reviews, all threads resolved.

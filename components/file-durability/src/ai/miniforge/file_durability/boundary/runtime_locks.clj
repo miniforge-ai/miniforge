@@ -2,7 +2,7 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.file-durability.boundary.runtime-locks
-  "Protect a canonical local probe root before starting the peer handshake."
+  "Protect a canonical POSIX probe root before starting the peer handshake."
   (:require [ai.miniforge.file-durability.boundary :as boundary]
             [ai.miniforge.file-durability.boundary.directory-policy :as policy]
             [ai.miniforge.file-durability.boundary.lock-probe :as probe]
