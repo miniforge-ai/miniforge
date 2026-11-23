@@ -27,8 +27,9 @@ issue a name-only delete; the Job's admitted deadline remains in force.
 The Pod identity read has its own validated timeout, independent of the
 Job creation request and the ongoing readiness polling.
 The default readback budget is five seconds; invalid overrides disable the executor
-before any provider call. Acquisition uses the merged cancellation-fenced handoff:
-an interrupt before, during or after identity validation cannot cache a candidate.
+before any provider call. Admission checks interruption before identity I/O,
+after verification, and immediately before the local cache handoff. These are
+cooperative admission fences, not an atomic run-wide full-stop guarantee.
 The same bound stops an uncooperative local readback process, not just
 the provider request. An interrupted readback remains a refusal and
 preserves cancellation.
