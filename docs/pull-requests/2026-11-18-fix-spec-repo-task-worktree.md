@@ -78,7 +78,9 @@ including `bb dogfood`, resolves to the same root and branch as before.
    kanban and related) pass: 95 tests, 282 assertions.
 4. After the runs, no `task-*` ref was created in the developer checkout and nothing was written under
    `~/.miniforge`.
-5. The test's git helper, repository config and `"."` redirect come from the project's
+5. `context-test` pins the branch lookup on its own. With `get-git-info` stubbed per directory, a spec with a
+   source dir gets that repository's branch and commit. A spec without one gets the working directory's.
+6. The test's git helper, repository config and `"."` redirect come from the project's
    `ai.miniforge.workflow.isolation-support`. Its own git calls drop every `GIT_*` variable.
    The CLI and executor calls under test inherit the test JVM's environment.
    `tasks/test_runner.clj` strips `GIT_*` from that environment at launch.

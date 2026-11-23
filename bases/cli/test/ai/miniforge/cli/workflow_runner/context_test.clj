@@ -21,12 +21,19 @@
    [ai.miniforge.cli.worktree :as worktree]
    [ai.miniforge.cli.config :as config]
    [ai.miniforge.cli.workflow-runner.context :as sut]
+   [ai.miniforge.cli.workflow-runner.context-git :as context-git]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.tenancy.interface :as tenancy]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private git-info-by-dir
+  "What a stubbed `get-git-info` reports per directory. The branches and
+   commits differ, so a lookup in the wrong directory shows."
+  {"/tmp/spec-repo/work" {:git-branch "spec-branch" :git-commit "5pec000"}
+   "/tmp/cwd-repo"       {:git-branch "cwd-branch" :git-commit "c0d0000"}})
 
 (deftest ^{:stratum 0} create-workflow-context-prefers-explicit-execution-worktree-test
   (testing "execution-opts worktree-path overrides discovered repo root"
@@ -114,6 +121,20 @@
       (is (= :opencode (llm/client-backend (sut/create-llm-client nil nil true)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} decorate-spec-reads-git-info-from-the-spec-source-dir-test
+  (with-redefs [worktree/worktree-root (constantly "/tmp/cwd-repo")
+                context-git/get-git-info git-info-by-dir]
+    (testing "given a spec with a source dir → that repository's branch and commit"
+      (let [spec-context (:spec/context (sut/decorate-spec-with-runtime-context
+                                         {:spec/source-dir "/tmp/spec-repo/work"} {}))]
+        (is (= "spec-branch" (:git-branch spec-context)))
+        (is (= "5pec000" (:git-commit spec-context)))
+        (is (= "/tmp/cwd-repo" (:cwd spec-context)) "the working directory is still reported as :cwd")))
+    (testing "given a spec with no source dir → the working directory's branch and commit"
+      (let [spec-context (:spec/context (sut/decorate-spec-with-runtime-context {} {}))]
+        (is (= "cwd-branch" (:git-branch spec-context)))
+        (is (= "c0d0000" (:git-commit spec-context)))))))
 
 (deftest ^{:stratum 1} a-configured-operator-reaches-the-run-test
   ;; The boundary resolves once and puts the answer where create-context
