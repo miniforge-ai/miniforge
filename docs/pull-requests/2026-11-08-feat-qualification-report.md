@@ -94,6 +94,9 @@ data.
     would not read back as the report after UTF-8 (a lone surrogate in a
     gate title, a keyword holding a space), so published EDN always reads
     back as the evidence it records.
+19. Output holding a map keyed by collections is invalid: the hash leaves
+    such keys in insertion order, so equal fixtures built in a different
+    order would hash differently.
 
 From the schema PR's review: the verdict is `vocabulary/report-verdict`, so
 passing rows on a dirty tree, without a commit or without hashes give
@@ -111,7 +114,7 @@ passing rows on a dirty tree, without a commit or without hashes give
    every criterion unrun; an unreported criterion is incomplete; hashes repeat
    across runs; an invalid gate exits 2; an unwritable report exits 1 even
    when every criterion passed; the summary names the verdict and each row.
-3. Locally: 38 tests, 151 assertions, 0 failures. Over the PR budget, with
+3. Locally: 38 tests, 154 assertions, 0 failures. Over the PR budget, with
    the override and its reason in the PR description. Also covered: a pass on
    an unpinned build is incomplete and the summary says why; a short commit
    names the file.

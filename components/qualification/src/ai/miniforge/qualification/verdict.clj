@@ -58,11 +58,13 @@
   "True when `x`'s canonical EDN, the text its content hash digests,
    survives UTF-8 and reads back equal, so the hash repeats and names only
    `x`. A fn or other object fails, and so do two keys the canonical order
-   merges (`1` and `1.0`) and a lone surrogate, which UTF-8 makes `?`."
+   merges (`1` and `1.0`), a lone surrogate, which UTF-8 makes `?`, and a
+   map keyed by collections, whose key order the hash does not normalize."
   [x]
   (try+
    (let [text (content-hash/canonical-edn x)]
-     (and (= text (String. (.getBytes ^String text "UTF-8") "UTF-8"))
+     (and (not-any? #(and (map? %) (some coll? (keys %))) (tree-seq coll? seq x))
+          (= text (String. (.getBytes ^String text "UTF-8") "UTF-8"))
           (= x (edn/read-string text))))
    (catch Exception _
      false)))
