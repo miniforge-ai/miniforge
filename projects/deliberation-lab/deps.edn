@@ -10,6 +10,7 @@
         ai.miniforge/deliberation-harness {:local/root "../../components/deliberation-harness"}
         ai.miniforge/deliberation-workspace {:local/root "../../components/deliberation-workspace"}
         ai.miniforge/file-durability {:local/root "../../components/file-durability"}
+        ai.miniforge/resource-cleanup {:local/root "../../components/resource-cleanup"}
         ai.miniforge/llm {:local/root "../../components/llm"}
         ai.miniforge/logging {:local/root "../../components/logging"}
         ai.miniforge/messages {:local/root "../../components/messages"}

@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
  :deps {ai.miniforge/anomaly {:local/root "../anomaly"}
+        ai.miniforge/resource-cleanup {:local/root "../resource-cleanup"}
         ai.miniforge/messages {:local/root "../messages"}
         metosin/malli {:mvn/version "0.16.4"}
         babashka/fs {:mvn/version "0.5.34"}
