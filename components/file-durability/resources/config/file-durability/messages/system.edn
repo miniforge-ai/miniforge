@@ -4,4 +4,5 @@
   :file/unsafe-directory "Unsafe storage directory {path}: trusted ownership and protection from entry replacement are required."
   :file/unverified-publication "Storage publication at {path} could not verify exclusive creation and atomic replacement."
   :file/unsafe-acl "Storage protection at {path} requires readable access controls that do not grant additional permissions."
-  :file/unverified-locks "Storage could not verify mutual lock exclusion with the configured independent runtime."}}
+  :file/unverified-locks "Storage could not verify mutual lock exclusion with the configured independent runtime."
+  :file/unqualified-store "Storage does not match an explicitly selected supported local profile."}}

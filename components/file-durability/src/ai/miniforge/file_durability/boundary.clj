@@ -40,6 +40,12 @@
                        (t :file/unverified-locks)
                        {:durability/path (str path)}))
 
+(defn ^{:stratum 1} unqualified-store [path profile]
+  (anomaly/sub-anomaly :unavailable :anomalies.file-durability/unqualified-store
+                       (t :file/unqualified-store)
+                       {:durability/path (str path)
+                        :storage/profile profile}))
+
 (defn- ^{:stratum 1} failure [operation file]
   (anomaly/anomaly :fault (t :file/io-failed)
                    {:durability/operation operation

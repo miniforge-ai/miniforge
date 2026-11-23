@@ -26,7 +26,11 @@
                        ai.miniforge.file-durability.runtime-peer-fixtures-test
                        ai.miniforge.file-durability.lock-protocol-test
                        ai.miniforge.file-durability.lock-denial-integration-test
-                       ai.miniforge.file-durability.lock-qualification-integration-test]]
+                       ai.miniforge.file-durability.lock-qualification-integration-test
+                       ai.miniforge.file-durability.directory-pin-scan-test
+                       ai.miniforge.file-durability.owned-resource-integration-test
+                       ai.miniforge.file-durability.directory-pin-integration-test
+                       ai.miniforge.file-durability.attached-directory-integration-test]]
           (clojure.core/run! require suites)
           (let [{:keys [fail error]} (apply clojure.test/run-tests suites)]
             (when-not (zero? (+ fail error))

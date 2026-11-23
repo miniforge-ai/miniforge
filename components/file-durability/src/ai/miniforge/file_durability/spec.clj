@@ -23,3 +23,5 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (def ^{:stratum 2} RuntimeLockArguments [:tuple DirectoryFile peer/Peer lock/Limits])
+
+(def ^{:stratum 2} AttachedDirectoryArguments [:tuple DirectoryFile DirectoryFile])
