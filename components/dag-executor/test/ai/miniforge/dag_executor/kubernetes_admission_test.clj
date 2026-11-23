@@ -9,6 +9,7 @@
             [ai.miniforge.dag-executor.protocols.impl.runtime.deadline :as deadline]
             [ai.miniforge.dag-executor.kubernetes-creation-fixtures :as creation]
             [ai.miniforge.dag-executor.kubernetes-pod-fixtures :as pods]
+            [ai.miniforge.dag-executor.kubernetes-native-fixtures :as native]
             [ai.miniforge.dag-executor.result :as result]
             [clojure.java.shell :as shell]
             [clojure.test :refer [deftest is]]))
@@ -26,15 +27,16 @@
      :fixture/executor instance}))
 
 (defn- ^{:stratum 0} submit! [runtime & arguments]
-  (let [verb (second arguments)]
-    (swap! (:fixture/commands runtime) conj verb)
-    (if (= "create" verb)
-      (apply pods/capture-created! (:fixture/state runtime) (partial creation/response identity) arguments)
-      (creation/provider-reply 0 ""))))
+  (swap! (:fixture/commands runtime) conj (second (second arguments)))
+  (apply creation/response identity arguments))
 
-(defn- ^{:stratum 0} query! [runtime read! until arguments]
+(defn- ^{:stratum 0} legacy-command! [runtime & arguments]
+  (swap! (:fixture/commands runtime) conj (second arguments))
+  (throw (AssertionError.)))
+
+(defn- ^{:stratum 0} query! [runtime read! state until arguments]
   (swap! (:fixture/queries runtime) conj arguments)
-  (read! (:fixture/state runtime) until arguments))
+  (read! state until arguments))
 
 (defn- ^{:stratum 0} cached [runtime]
   @(:pod-cache (:fixture/executor runtime)))
@@ -69,8 +71,9 @@
   (if @seen (interrupt-clock!) (clock until)))
 
 (defn- ^{:stratum 1} acquire! [runtime read!]
-  (with-redefs [shell/sh (partial submit! runtime)
-                command/run! (partial query! runtime read!)]
+  (with-redefs [shell/sh (partial legacy-command! runtime)
+                command/run! (partial native/dispatch! (:fixture/state runtime)
+                                      (partial submit! runtime) (partial query! runtime read!))]
     (executor/acquire-environment! (:fixture/executor runtime) (random-uuid) {})))
 
 ;------------------------------------------------------------------------------ Layer 2

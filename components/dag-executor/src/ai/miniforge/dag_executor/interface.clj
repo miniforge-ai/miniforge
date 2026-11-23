@@ -16,17 +16,8 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.dag-executor.interface
-  "Public API for the DAG executor component.
-
-   Provides DAG-based task execution with:
-   - Dependency ordering and parallelism
-   - Task workflow state machine
-   - Budget and checkpoint management
-   - Integration with domain-specific lifecycle events
-   - Pluggable execution backends (K8s, Docker, worktree)
-
-   A DAG node is not 'generate code once' - it's a task workflow that runs
-   until it reaches a profile-defined terminal success state."
+  "Public task-workflow DAG API: dependency scheduling, budgets, checkpoints
+   and pluggable execution backends. Nodes run to profile-defined terminal success."
   (:require
    [ai.miniforge.dag-executor.branch-registry :as branch-registry]
    [ai.miniforge.dag-executor.result :as result]
@@ -431,14 +422,16 @@
    use namespace default and image docker.io/library/alpine:latest.
    :resources/timeout-seconds sets the positive signed-64-bit capsule lifetime
    (default 3600); a task may override it under its :resources map.
-   :kubernetes/creation-request-timeout-ms bounds provider HTTP requests (30000),
-   not the local creation process. :kubernetes/pod-ready-timeout-ms bounds total
+   :kubernetes/creation-request-timeout-ms sets the HTTP timeout and shared encoding,
+   native submission/capture and receipt-admission deadline (30000). Synchronous
+   encoding/parsing is not preempted; an elapsed budget cannot admit the result.
+   :kubernetes/pod-ready-timeout-ms bounds total
    local readiness (120000); :kubernetes/pod-ready-poll-interval-ms sets polling (2000).
    These millisecond settings must be integers in 1..Integer/MAX_VALUE.
    Invalid budgets return an unavailable executor whose operations return the
    configuration error without provider I/O. Successful acquisition retains the
-   Job UID and historical creation resource version in environment metadata;
-   this alone does not establish Pod ownership or full-stop containment."
+   Job UID/creation resource version and verified Pod UID/observed resource version.
+   These identity snapshots do not establish full-stop containment."
   executor/create-kubernetes-executor)
 
 (def ^{:stratum 0} create-docker-executor

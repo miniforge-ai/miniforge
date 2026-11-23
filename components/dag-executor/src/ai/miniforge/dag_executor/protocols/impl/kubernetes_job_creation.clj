@@ -4,10 +4,10 @@
 (ns ai.miniforge.dag-executor.protocols.impl.kubernetes-job-creation
   "Create a Job once, retaining only the matching server-provided identity."
   (:require [ai.miniforge.dag-executor.protocols.impl.runtime.messages :as messages]
-            [ai.miniforge.dag-executor.protocols.impl.kubernetes-defaults :as defaults]
+            [ai.miniforge.dag-executor.protocols.impl.kubernetes-job-submission :as submission]
+            [ai.miniforge.dag-executor.protocols.impl.runtime.deadline :as deadline]
             [ai.miniforge.dag-executor.result :as result]
             [cheshire.core :as json]
-            [clojure.java.shell :as shell]
             [clojure.string :as str]
             [slingshot.slingshot :refer [try+]]))
 
@@ -20,6 +20,16 @@
 (def ^{:stratum 0} resource-kind
   "A Pod or other resource is not proof of creating the requested Job."
   "Job")
+
+(def ^{:stratum 0 :private true} transport-reasons
+  "Only closed transport diagnostics can enter the creation failure record."
+  {:deadline :deadline
+   :incomplete-output :incomplete-output
+   :interrupted :interrupted
+   :output-limit :output-limit
+   :input-error :input-error
+   :command-io-error :command-io-failed
+   :command-error :command-failed})
 
 (def ^{:stratum 0 :private true} provider-reasons
   [[#"\AError from server \(AlreadyExists\):" :already-exists]
@@ -41,6 +51,12 @@
     (json/parse-string-strict out)
     (catch InterruptedException e (throw e))
     (catch Exception _ ::malformed-response)))
+
+(defn- ^{:stratum 0} admission-reason [until]
+  (cond
+    (.isInterrupted (Thread/currentThread)) :interrupted
+    (deadline/expired? until) :deadline
+    :else nil))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -70,17 +86,17 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} create!
-  "Submit once, admitting only an exact receipt. The HTTP budget is not a local process deadline."
+  "Submit once within one local deadline, admitting only an exact server receipt."
   [executable job request-timeout-ms]
   (try+
-    (let [requested (:metadata job)
-          {:keys [exit out err]} (shell/sh (or executable (:executable (defaults/data)))
-                                      "create" "-n" (:namespace requested) "-f" "-" "-o" "json"
-                                      (str "--request-timeout=" request-timeout-ms "ms")
-                                      :in (json/generate-string job))
+    (let [until (deadline/after-ms request-timeout-ms)
+          {:keys [exit out err reason]} (submission/submit! until executable job request-timeout-ms)
           observed (when (= 0 exit) (parse-reply out))
-          created (receipt job observed)]
+          created (receipt job observed)
+          admission-failure (admission-reason until)]
       (cond
+        admission-failure (unconfirmed admission-failure nil)
+        reason (unconfirmed (get transport-reasons reason :command-failed) nil)
         (not= 0 exit) (unconfirmed (command-reason err) exit)
         (= ::malformed-response observed) (unconfirmed :malformed-response exit)
         (nil? created) (unconfirmed :receipt-mismatch exit)

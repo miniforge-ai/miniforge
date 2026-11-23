@@ -4,6 +4,7 @@
 (ns ai.miniforge.dag-executor.kubernetes-pod-fixtures
   "Native producer-shaped Pod replies derived from the actual fixture Job response."
   (:require [ai.miniforge.dag-executor.kubernetes-creation-fixtures :as creation]
+            [ai.miniforge.dag-executor.result :as result]
             [cheshire.core :as json]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -38,6 +39,10 @@
   (boolean (some #{["-o" "json"]} (partition 2 1 arguments))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} ready [& _]
+  (result/ok {:pod-name pod-name
+              :status :running}))
 
 (def ^{:stratum 1 :private true} readers
   {["pods" false] list-pod

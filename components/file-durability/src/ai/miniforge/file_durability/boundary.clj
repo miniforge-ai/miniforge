@@ -46,6 +46,12 @@
                        (t :file/released-root)
                        {:durability/path (str path)}))
 
+(defn ^{:stratum 1} unreaped-peer [path]
+  (anomaly/sub-anomaly :unavailable :anomalies.file-durability/unreaped-peer
+                       (t :file/unreaped-peer)
+                       {:durability/path (str path)
+                        :durability/cleanup :unresolved}))
+
 (defn- ^{:stratum 1} failure [operation file]
   (anomaly/anomaly :fault (t :file/io-failed)
                    {:durability/operation operation
