@@ -11,7 +11,8 @@
 `qualification/run-gate!` runs a gate's scenario, joins its results with the
 gate's criteria, records the build, hashes the fixtures and config, and writes
 the report as EDN and JSON. A scenario that throws or returns malformed output
-still produces a report, with every criterion unrun. Stacked on the schema PR.
+still produces a report, with every criterion unrun. Builds on the schema PR,
+now merged.
 
 ## Motivation
 
@@ -89,7 +90,8 @@ passing rows on a dirty tree, without a commit or without hashes give
    every criterion unrun; an unreported criterion is incomplete; hashes repeat
    across runs; an invalid gate exits 2; an unwritable report exits 1 even
    when every criterion passed; the summary names the verdict and each row.
-3. Locally: 36 tests, 133 assertions, 0 failures. PR budget 599 / 600. Also covered: a pass on
+3. Locally: 36 tests, 133 assertions, 0 failures. PR budget 614 / 600, with
+   the override and its reason in the PR description. Also covered: a pass on
    an unpinned build is incomplete and the summary says why; a short commit
    names the file.
 
@@ -99,7 +101,7 @@ None. `bb qualify <gate-id>` and the first gate scenario (#2422) follow.
 
 ## Related Issues/PRs
 
-Stacked on the schema PR. Shared harness for tracker #2421.
+Builds on the schema PR (#2472, merged). Shared harness for tracker #2421.
 
 ## Checklist
 
