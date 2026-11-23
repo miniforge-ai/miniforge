@@ -5,7 +5,8 @@
   "Run the same real macOS storage fixtures in each supported product runtime."
   (:require [babashka.fs :as fs]
             [babashka.process :as process]
-            [clojure.string :as str])
+            [clojure.string :as str]
+            [storage-peer-runtime :as peer])
   (:import [java.io File])
   (:refer-clojure :exclude [run!]))
 
@@ -15,10 +16,17 @@
   "Run the native integration packet in a fresh runtime, failing on any assertion."
   (pr-str
    '(do
-      (require 'clojure.test)
+      (require 'clojure.test 'ai.miniforge.file-durability.runtime-peer-fixtures)
       (try
+        (ai.miniforge.file-durability.runtime-peer-fixtures/require-peer!)
         (let [suites '[ai.miniforge.file-durability.macos-acl-integration-test
-                       ai.miniforge.file-durability.native-probe-integration-test]]
+                       ai.miniforge.file-durability.native-probe-integration-test
+                       ai.miniforge.file-durability.runtime-lock-boundary-test
+                       ai.miniforge.file-durability.runtime-lock-refusal-integration-test
+                       ai.miniforge.file-durability.runtime-peer-fixtures-test
+                       ai.miniforge.file-durability.lock-protocol-test
+                       ai.miniforge.file-durability.lock-denial-integration-test
+                       ai.miniforge.file-durability.lock-qualification-integration-test]]
           (clojure.core/run! require suites)
           (let [{:keys [fail error]} (apply clojure.test/run-tests suites)]
             (when-not (zero? (+ fail error))
@@ -43,13 +51,14 @@
 
 (defn- ^{:stratum 1} babashka-check! [workspace tests]
   (let [jar (str (fs/path workspace "dist/miniforge.jar"))
+        property (str "-Dminiforge.test.lock-peer-classpath=" (peer/classpath! workspace))
         packaged (into [jar] tests)
         source (concat (map (partial storage-path workspace) ["src" "resources"]) packaged)]
     (process/shell "bb" "build:cli")
     (fs/with-temp-dir [isolated {}]
       (doseq [paths [source packaged]]
         (process/shell {:dir (str isolated)}
-                       "bb" "-cp" (str/join File/pathSeparator paths) "-e" runner)))))
+                       "bb" property "-cp" (str/join File/pathSeparator paths) "-e" runner)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

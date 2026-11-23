@@ -2,7 +2,8 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.file-durability.lock-spec
-  "Trusted deployment bounds for the isolated cross-runtime handshake.")
+  "Trusted deployment bounds for the isolated cross-runtime handshake."
+  (:require [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -15,3 +16,5 @@
    [:lock/timeout-ms Milliseconds]
    [:lock/poll-interval-ms Milliseconds]
    [:lock/exit-timeout-ms Milliseconds]])
+
+(comment (m/validate Limits {}))
