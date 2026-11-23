@@ -4,8 +4,8 @@
 (ns ai.miniforge.file-durability.boundary.linux-store
   "Check that a supported mount resolves to a non-virtual block device."
   (:require [ai.miniforge.file-durability.boundary.linux-mountinfo :as mountinfo]
-            [ai.miniforge.file-durability.boundary.root-identity :as identity]
-            [babashka.fs :as fs]))
+            [ai.miniforge.file-durability.boundary.linux-block-device :as block]
+            [ai.miniforge.file-durability.boundary.root-identity :as identity]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -13,25 +13,12 @@
   "Use the calling process's mount namespace rather than a host-wide table."
   "/proc/self/mountinfo")
 
-(def ^{:stratum 0 :private true} block-devices
-  "The kernel indexes block devices by mountinfo's major:minor value."
-  "/sys/dev/block")
-
-(defn- ^{:stratum 0} block-device? [target]
-  (and (fs/starts-with? target "/sys/devices")
-       (not (fs/starts-with? target "/sys/devices/virtual"))))
-
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} device-path [{:mount/keys [device]}]
-  (let [link (fs/path block-devices device)
-        target (when (fs/sym-link? link) (fs/real-path link))]
-    (when (and target (block-device? target)) target)))
+(defn ^{:stratum 1} observe [root]
+  (let [entry (mountinfo/matching-mount root (slurp mount-table))
+        backing (some-> entry :mount/device block/observe)]
+    (when (and backing (identity/same-device? root (:mount/target entry)))
+      (assoc entry :storage/backend :linux-block-posix :storage/device-path backing))))
 
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} observe [root]
-  (when-let [entry (mountinfo/matching-mount root (slurp mount-table))]
-    (let [backing (device-path entry)]
-      (when (and backing (identity/same-device? root (:mount/target entry)))
-        (assoc entry :storage/backend :linux-block-posix :storage/device-path backing)))))
+(comment (block/observe "0:0"))

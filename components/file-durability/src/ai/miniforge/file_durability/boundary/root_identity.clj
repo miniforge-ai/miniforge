@@ -9,10 +9,13 @@
 (defn ^{:stratum 0} read-identity [path]
   (let [{:keys [dev ino]} (fs/read-attributes path "unix:dev,ino" {:nofollow-links true})]
     (when (and (integer? dev) (integer? ino))
-      {:storage/device-number dev :storage/inode ino})))
+      {:storage/device-number dev
+       :storage/inode ino})))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} same-device? [first-path second-path]
   (let [device (:storage/device-number (read-identity first-path))]
     (and (some? device) (= device (:storage/device-number (read-identity second-path))))))
+
+(comment (read-identity (fs/path ".")))

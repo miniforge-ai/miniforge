@@ -4,43 +4,55 @@
 (ns ai.miniforge.file-durability.mac-store-test
   (:require [ai.miniforge.file-durability.boundary.mac-store :as store]
             [ai.miniforge.file-durability.boundary.native-probe :as probe]
-            [ai.miniforge.file-durability.publication-support :as support]
+            [ai.miniforge.file-durability.boundary.root-identity :as identity]
+            [ai.miniforge.file-durability.mac-store-fixtures :as fixtures]
             [babashka.fs :as fs]
-            [cheshire.core :as json]
             [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0 :private true} backing
-  {:DeviceIdentifier "disk0s1" :Internal true :WritableMedia true
-   :BusProtocol "Apple Fabric" :DeviceTreePath "IODeviceTree:/storage"
-   :DiskUUID "82002d9d-8d3f-427a-bd4b-cf9bb11131a3"})
+(def ^{:stratum 0 :private true} unsupported-volumes
+  "Each changed provider fact independently prevents APFS admission."
+  [{:DeviceIdentifier "another-volume"}
+   {:FilesystemName "unsupported"}
+   {:WritableVolume false}
+   {:APFSSnapshot true}
+   {:APFSSnapshot nil}
+   {:GlobalPermissionsEnabled false}
+   {:GlobalPermissionsEnabled nil}
+   {:MountPoint "relative"}
+   {:APFSPhysicalStores []}])
 
-(defn- ^{:stratum 0} volume [root backing-device ownership]
-  (cond-> {:DeviceIdentifier "disk1s1" :FilesystemName "APFS"
-           :WritableVolume true :APFSSnapshot false :MountPoint (str root)
-           :APFSPhysicalStores [{:APFSPhysicalStore backing-device}]}
-    (some? ownership) (assoc :GlobalPermissionsEnabled ownership)))
+(def ^{:stratum 0 :private true} unsupported-backings
+  "Require internal writable Apple Fabric topology and a stable device identity."
+  [{:DeviceIdentifier "another-device"}
+   {:Internal false}
+   {:WritableMedia false}
+   {:BusProtocol "USB"}
+   {:VirtualOrPhysical "Virtual"}
+   {:DeviceTreePath nil}
+   {:DiskUUID "invalid"}
+   {:DiskUUID nil}
+   {:DiskUUID 1}])
+
+(defn- ^{:stratum 0} verify-observation! [root expected volume backing]
+  (with-redefs [probe/read-output (partial fixtures/read-store root volume backing)]
+    (is (= expected (some? (store/observe root))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} read-store [root ownership arguments payload]
-  (case (first arguments)
-    "/bin/df" "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk1s1 10 1 9 10% /"
-    "/usr/sbin/diskutil" (last arguments)
-    "/usr/bin/plutil" (let [device (:DeviceIdentifier backing)]
-                       (json/generate-string (if (= device payload)
-                                               backing (volume root device ownership))))))
+(defn- ^{:stratum 1} verify-provider-facts! []
+  (let [root (fs/path "/staging")]
+    (with-redefs [fs/real-path fs/path identity/same-device? (constantly true)]
+      (verify-observation! root true {} {})
+      (doseq [volume unsupported-volumes] (verify-observation! root false volume {}))
+      (doseq [backing unsupported-backings] (verify-observation! root false {} backing))
+      (with-redefs [identity/same-device? (constantly false)]
+        (verify-observation! root false {} {})))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(deftest ^{:stratum 2} apfs-required-permission-enforcement-is-explicit
-  (support/with-root
-   (fn [directory]
-     (when (support/posix? directory)
-       (let [root (fs/real-path directory)]
-         (doseq [ownership [true false nil]]
-           (with-redefs [probe/read-output (partial read-store root ownership)]
-             (is (= (true? ownership) (some? (store/observe root)))))))))))
+(deftest ^{:stratum 2} test-apfs-observations-require-every-provider-fact
+  (verify-provider-facts!))
 
 (comment (clojure.test/run-tests 'ai.miniforge.file-durability.mac-store-test))

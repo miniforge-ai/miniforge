@@ -27,8 +27,13 @@
   "Disk metadata can nominate only a device identifier, never a path or flag."
   #"disk[0-9]+(?:s[0-9]+)*")
 
+(def ^{:stratum 0 :private true} device-prefix
+  "Only the device column of native APFS mount output can select disk metadata."
+  "/dev/")
+
 (defn- ^{:stratum 0} physical? [identifier info]
-  (let [tree (:DeviceTreePath info)]
+  (let [tree (:DeviceTreePath info)
+        disk-uuid (:DiskUUID info)]
     (and (= identifier (:DeviceIdentifier info))
          (true? (:Internal info))
          (true? (:WritableMedia info))
@@ -36,15 +41,16 @@
          (string? tree)
          (str/starts-with? tree "IODeviceTree:/")
          (not= "Virtual" (:VirtualOrPhysical info))
-         (uuid? (parse-uuid (:DiskUUID info ""))))))
+         (string? disk-uuid)
+         (uuid? (parse-uuid disk-uuid)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} volume-id [root]
   (let [rows (some-> (probe/read-output (conj df-apfs (str root)) nil) str/split-lines)
         disk (some-> rows second (str/split #"\s+" 2) first)]
-    (when (and (= 2 (count rows)) (string? disk) (str/starts-with? disk "/dev/"))
-      (re-matches disk-name (subs disk (count "/dev/"))))))
+    (when (and (= 2 (count rows)) (string? disk) (str/starts-with? disk device-prefix))
+      (re-matches disk-name (subs disk (count device-prefix))))))
 
 (defn- ^{:stratum 1} info [identifier]
   (some->> (probe/read-output (conj disk-info identifier) nil)
@@ -78,3 +84,5 @@
        :storage/volume volume
        :storage/mount (:MountPoint metadata)
        :storage/device-id (:DiskUUID device)})))
+
+(comment (physical? "unsupported" {}))
