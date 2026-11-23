@@ -220,6 +220,30 @@
                            {:path (str path)} e))))
     {}))
 
+(def ^:private max-symlink-hops
+  "Bound on following a chain of config symlinks, so a link cycle fails
+   instead of looping."
+  40)
+
+(defn- publish-target
+  "The file a write to path replaces: path itself, or, when it is a symlink,
+   the file the link chain points to. A dangling link resolves to its
+   missing target so the link is kept and the target gets created."
+  [path]
+  (loop [current (fs/absolutize path)
+         hops    0]
+    (cond
+      (not (fs/sym-link? current))
+      current
+
+      (>= hops max-symlink-hops)
+      (throw (ex-info (str "Too many symbolic links resolving config: " path)
+                      {:path (str path)}))
+
+      :else
+      (recur (fs/absolutize (fs/path (fs/parent current) (fs/read-link current)))
+             (inc hops)))))
+
 (defn write-file-atomically!
   "Write content to path via a unique sibling temp file and an atomic move, so
    a crash mid-write cannot truncate a user config and concurrent setup runs
@@ -228,7 +252,7 @@
    the temp file is owner-only on creation and takes the target's mode
    before any content lands in it."
   [path content]
-  (let [target (if (fs/exists? path) (fs/real-path path) (fs/absolutize path))
+  (let [target (publish-target path)
         _      (fs/create-dirs (fs/parent target))
         tmp    (fs/create-temp-file {:dir (fs/parent target) :prefix ".mf-config-" :suffix ".tmp"})]
     (try

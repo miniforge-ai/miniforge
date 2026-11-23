@@ -75,3 +75,14 @@
       (testing "no temp file is left in the directory"
         (is (= #{"real.json" "link.json"}
                (set (map fs/file-name (fs/list-dir dir)))))))))
+
+(deftest write-file-atomically-dangling-symlink-test
+  (fs/with-temp-dir [dir {}]
+    (let [real (str dir "/dotfiles/real.json")
+          link (str dir "/link.json")]
+      (fs/create-dirs (str dir "/dotfiles"))
+      (fs/create-sym-link link "dotfiles/real.json")
+      (tasks/write-file-atomically! link "new")
+      (testing "a link whose backing file is missing is kept, and the backing file created"
+        (is (fs/sym-link? link))
+        (is (= "new" (slurp real)))))))
