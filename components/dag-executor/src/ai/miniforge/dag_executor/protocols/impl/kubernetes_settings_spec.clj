@@ -16,6 +16,7 @@
 (def ^{:stratum 1} ExecutorSettings
   (conj CapsuleBudget
         [:kubernetes/creation-request-timeout-ms Millis]
+        [:kubernetes/pod-observation-request-timeout-ms Millis]
         [:kubernetes/pod-ready-timeout-ms Millis]
         [:kubernetes/pod-ready-poll-interval-ms Millis]))
 

@@ -6,13 +6,14 @@
             [ai.miniforge.config.interface :as config]
             [ai.miniforge.dag-executor.protocols.impl.kubernetes-acquisition :as acquisition]
             [ai.miniforge.dag-executor.protocols.impl.kubernetes-defaults :as defaults]
-            [ai.miniforge.dag-executor.protocols.impl.kubernetes-job-creation :as creation]
             [ai.miniforge.dag-executor.protocols.executor :as executor]
             [ai.miniforge.dag-executor.protocols.impl.kubernetes-client :as client]
             [ai.miniforge.dag-executor.protocols.impl.kubernetes-job-resources :as resources]
             [ai.miniforge.dag-executor.protocols.impl.runtime.deadline-command :as command]
             [ai.miniforge.dag-executor.protocols.impl.runtime.messages :as messages]
             [ai.miniforge.dag-executor.result :as result]
+            [ai.miniforge.dag-executor.kubernetes-creation-fixtures :as fixtures]
+            [ai.miniforge.dag-executor.kubernetes-pod-fixtures :as pods]
             [clojure.java.shell :as shell]
             [clojure.test :refer [deftest is]]
             [slingshot.slingshot :refer [try+]]))
@@ -158,9 +159,10 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} test-shipped-polling-budgets-reach-acquisition
-  (let [instance (kubernetes/create-kubernetes-executor {})]
-    (with-redefs [shell/sh refuse-provider!
-                  creation/create! accepted-job
+  (let [instance (kubernetes/create-kubernetes-executor {})
+        created (atom nil)]
+    (with-redefs [shell/sh (partial pods/capture-created! created (partial fixtures/response identity))
+                  command/run! (partial pods/read-pod! created)
                   client/wait-for-pod-ready (partial observe-readiness shipped-readiness-settings)]
       (is (result/ok? (executor/acquire-environment! instance (random-uuid) {}))))))
 
