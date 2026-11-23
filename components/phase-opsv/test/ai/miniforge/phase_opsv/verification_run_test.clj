@@ -37,6 +37,11 @@
   (doseq [measurements [nil [] :not-measurements]]
     (is (anomaly/anomaly? (phase/verification-receipt {} measurements)))))
 
+(deftest ^{:stratum 0} receipt-constructor-refuses-nonmap-request-before-correlation-test
+  (doseq [request [nil [] "not-a-request"]]
+    (is (= :invalid-input
+           (:anomaly/type (phase/verification-receipt request support/verification-measurements))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} fresh-candidate-observations-can-fail-successful-baseline-test

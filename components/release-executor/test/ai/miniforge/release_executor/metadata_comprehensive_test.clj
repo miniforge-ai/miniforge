@@ -353,40 +353,57 @@
 ;; invoke-releaser
 ;; ============================================================================
 (deftest ^{:stratum 0} invoke-releaser-nil-releaser
-  (testing "returns nil when releaser is nil"
-    (is (nil? (sut/invoke-releaser nil [{:code/files []}] "desc"
-                                       {:llm-backend :mock} nil)))))
+  (testing "returns nil :release-meta when releaser is nil"
+    (is (nil? (:release-meta (sut/invoke-releaser nil [{:code/files []}] "desc"
+                                                      {:llm-backend :mock} nil))))))
 
 (deftest ^{:stratum 0} invoke-releaser-nil-llm-backend
-  (testing "returns nil when llm-backend is nil"
+  (testing "returns nil :release-meta when llm-backend is nil"
     (let [releaser {:invoke-fn (fn [_ctx _input] {:status :success :output {:title "X"}})}]
-      (is (nil? (sut/invoke-releaser releaser [{:code/files []}] "desc"
-                                              {} nil))))))
+      (is (nil? (:release-meta (sut/invoke-releaser releaser [{:code/files []}] "desc"
+                                                             {} nil)))))))
 
 (deftest ^{:stratum 0} invoke-releaser-success
-  (testing "returns agent output on success"
+  (testing "returns agent output under :release-meta on success"
     (let [expected-output {:release/branch-name "mf/test" :release/pr-title "Test"}
           releaser {:invoke-fn (fn [_ctx _input]
                                  {:status :success :output expected-output})}
           result (sut/invoke-releaser releaser [{:code/files []}] "desc"
                                               {:llm-backend :mock} nil)]
-      (is (= expected-output result)))))
+      (is (= expected-output (:release-meta result))))))
 
-(deftest ^{:stratum 0} invoke-releaser-failure-returns-nil
-  (testing "returns nil when agent returns non-success status"
+(deftest ^{:stratum 0} invoke-releaser-threads-answer-channel-on-success
+  (testing "§7.7.2: the agent result's recorded answers + answer-log ride out"
     (let [releaser {:invoke-fn (fn [_ctx _input]
-                                 {:status :error :error "LLM timeout"})}
+                                 {:status :success :output {:release/pr-title "T"}
+                                  :codex-answers [{:peg-id "p" :answer "yes"}]
+                                  :codex-answer-log :recorded})}
           result (sut/invoke-releaser releaser [{:code/files []}] "desc"
                                               {:llm-backend :mock} nil)]
-      (is (nil? result)))))
+      (is (= [{:peg-id "p" :answer "yes"}] (:codex-answers result)))
+      (is (= :recorded (:codex-answer-log result))))))
+
+(deftest ^{:stratum 0} invoke-releaser-failure-returns-nil
+  (testing "returns nil :release-meta when agent returns non-success status;
+            §7.7.2 answer channel survives the failure"
+    (let [releaser {:invoke-fn (fn [_ctx _input]
+                                 {:status :error :error "LLM timeout"
+                                  :codex-answers [{:peg-id "p" :answer "no"}]
+                                  :codex-answer-log :recorded})}
+          result (sut/invoke-releaser releaser [{:code/files []}] "desc"
+                                              {:llm-backend :mock} nil)]
+      (is (nil? (:release-meta result)))
+      (is (= [{:peg-id "p" :answer "no"}] (:codex-answers result))
+          "answers recorded before the failure are observations, not casualties")
+      (is (= :recorded (:codex-answer-log result))))))
 
 (deftest ^{:stratum 0} invoke-releaser-exception-returns-nil
-  (testing "returns nil when agent throws exception"
+  (testing "returns nil :release-meta when agent throws exception"
     (let [releaser {:invoke-fn (fn [_ctx _input]
                                  (throw (Exception. "Boom")))}
           result (sut/invoke-releaser releaser [{:code/files []}] "desc"
                                               {:llm-backend :mock} nil)]
-      (is (nil? result)))))
+      (is (nil? (:release-meta result))))))
 
 (deftest ^{:stratum 0} invoke-releaser-uses-task-description-fallbacks
   (testing "falls back to code/summary then default when task-description is nil"
@@ -420,24 +437,24 @@
           result (sut/generate-release-metadata
                   releaser [{:code/files []}] "desc"
                   {:llm-backend :mock} nil)]
-      (is (= expected result)))))
+      (is (= expected (:release-meta result))))))
 
 (deftest ^{:stratum 0} generate-release-metadata-falls-back-on-agent-failure
   (testing "falls back to deterministic metadata when agent fails"
     (let [releaser {:invoke-fn (fn [_ctx _input] {:status :error})}
-          result (sut/generate-release-metadata
-                  releaser [{:code/files [{:path "a.clj" :action :create}]}]
-                  "Add feature" {:llm-backend :mock} nil)]
-      (is (contains? result :release/branch-name))
-      (is (= "Add feature" (:release/pr-title result))))))
+          {:keys [release-meta]} (sut/generate-release-metadata
+                                  releaser [{:code/files [{:path "a.clj" :action :create}]}]
+                                  "Add feature" {:llm-backend :mock} nil)]
+      (is (contains? release-meta :release/branch-name))
+      (is (= "Add feature" (:release/pr-title release-meta))))))
 
 (deftest ^{:stratum 0} generate-release-metadata-falls-back-when-no-releaser
   (testing "falls back to deterministic metadata when releaser is nil"
-    (let [result (sut/generate-release-metadata
-                  nil [{:code/files [{:path "b.clj" :action :create}]}]
-                  "Simple task" {} nil)]
-      (is (contains? result :release/branch-name))
-      (is (= "Simple task" (:release/pr-title result))))))
+    (let [{:keys [release-meta]} (sut/generate-release-metadata
+                                  nil [{:code/files [{:path "b.clj" :action :create}]}]
+                                  "Simple task" {} nil)]
+      (is (contains? release-meta :release/branch-name))
+      (is (= "Simple task" (:release/pr-title release-meta))))))
 
 (deftest ^{:stratum 0} generate-release-metadata-passes-workflow-data
   (testing "workflow-data is passed through to fallback metadata"
@@ -447,19 +464,19 @@
                            :review/gates-passed 1
                            :review/gates-failed 0
                            :review/gates-total 1}
-          result (sut/generate-release-metadata
-                  nil [{:code/files [{:path "a.clj" :action :create}]}]
-                  "Task" {} nil
-                  {:review-artifacts [review-artifact]})
+          result (:release-meta (sut/generate-release-metadata
+                                 nil [{:code/files [{:path "a.clj" :action :create}]}]
+                                 "Task" {} nil
+                                 {:review-artifacts [review-artifact]}))
           body (:release/pr-body result)]
       (is (str/includes? body "## Review"))
       (is (str/includes? body "LGTM")))))
 
 (deftest ^{:stratum 0} generate-release-metadata-5-arity-no-workflow-data
   (testing "5-arity version works without workflow data"
-    (let [result (sut/generate-release-metadata
-                  nil [{:code/files [{:path "a.clj" :action :create}]}]
-                  "Task" {} nil)]
+    (let [result (:release-meta (sut/generate-release-metadata
+                                 nil [{:code/files [{:path "a.clj" :action :create}]}]
+                                 "Task" {} nil))]
       (is (contains? result :release/branch-name))
       (is (not (str/includes? (:release/pr-body result) "## Review"))))))
 

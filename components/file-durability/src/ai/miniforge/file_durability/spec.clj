@@ -9,6 +9,11 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(def ^{:stratum 1} DirectoryFile
+  [:and File [:fn #(not (.isEmpty (.getPath ^java.io.File %)))]])
+
 (def ^{:stratum 1} TextWrite [:tuple File :string])
 
 (def ^{:stratum 1} ByteWrite [:tuple File bytes?])
+
+(def ^{:stratum 1} PublicationWrite [:tuple File bytes? fn?])

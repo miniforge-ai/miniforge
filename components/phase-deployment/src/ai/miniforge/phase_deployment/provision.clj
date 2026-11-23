@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.phase-deployment.provision
   "Provision phase interceptor."
   (:require [ai.miniforge.logging.interface :as log]
@@ -25,16 +24,20 @@
             [ai.miniforge.phase-deployment.policy :as policy]
             [ai.miniforge.phase-deployment.shell :as shell]
             [ai.miniforge.phase.interface :as phase]
-            [ai.miniforge.schema.interface :as schema]))
+            [ai.miniforge.phase.interface.gate :as phase-gate]
+            [ai.miniforge.schema.interface :as schema]
+            [clojure.java.io :as io])
+  (:import (java.nio.file Files)
+           (java.nio.file.attribute FileAttribute)))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Defaults + schemas
 
-(def default-config
+;; Defaults + schemas
+(def ^{:stratum 0} default-config
   "Provision phase defaults loaded from EDN."
   (defaults/phase-defaults :provision))
 
-(def ProvisionRunConfig
+(def ^{:stratum 0} ProvisionRunConfig
   [:map
    [:phase-config map?]
    [:stack-dir :string]
@@ -42,7 +45,7 @@
    [:env [:map-of :string :string]]
    [:gcp-project {:optional true} [:maybe :string]]])
 
-(def PreviewAnalysis
+(def ^{:stratum 0} PreviewAnalysis
   [:map
    [:creates nat-int?]
    [:updates nat-int?]
@@ -55,20 +58,18 @@
       [:name {:optional true} [:maybe :string]]
       [:action {:optional true} [:maybe :string]]]]]])
 
-(defn- validate!
+(defn- ^{:stratum 0} validate!
   [result-schema value]
   (schema/validate result-schema value))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Shared helpers
-
-(defn- get-logger
+(defn- ^{:stratum 0} get-logger
   "Resolve logger from ctx, creating a default if absent."
   [ctx]
   (or (get-in ctx [:execution/logger])
       (log/create-logger {:min-level :info :output :human})))
 
-(defn- failed-enter
+(defn- ^{:stratum 0} failed-enter
   "Build a :failed phase context for enter-time failures."
   [ctx start-time result-map]
   (-> ctx
@@ -77,12 +78,44 @@
       (assoc-in [:phase :started-at] start-time)
       (assoc-in [:phase :result] result-map)))
 
-(defn- merged-phase-config
+(defn- ^{:stratum 0} new-plan-file
+  "A path for this run's saved Pulumi plan, inside a fresh owner-only temp
+   directory. The preview writes the plan there; nothing else does."
+  []
+  (str (.resolve (Files/createTempDirectory "miniforge-pulumi-plan-"
+                                            (make-array FileAttribute 0))
+                 "plan.json")))
+
+(defn- ^{:stratum 0} discard-plan!
+  "Remove a saved plan and the temp directory made for it. The directory is
+   removed only once empty; nothing is deleted recursively."
+  [plan-file]
+  (when plan-file
+    (let [file (io/file plan-file)]
+      (io/delete-file file true)
+      (some-> (.getParentFile file) (io/delete-file true)))))
+
+(defn- ^{:stratum 0} merged-phase-config
   [ctx phase-kw]
   (phase/merge-with-defaults
    (assoc (or (get-in ctx [:phase-config]) {}) :phase phase-kw)))
 
-(defn- resolve-provision-config
+(defn- ^{:stratum 0} preview-result
+  [preview-data analysis preview-command]
+  {:status   :preview-complete
+   :output   preview-data
+   :artifact {:content  preview-data
+              :type     :pulumi-preview
+              :analysis analysis}
+   :command  preview-command
+   :metrics  {:duration-ms (:duration-ms preview-command)
+              :creates     (:creates analysis)
+              :updates     (:updates analysis)
+              :deletes     (:deletes analysis)}})
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} resolve-provision-config
   [ctx]
   (let [phase-config (merged-phase-config ctx :provision)
         input        (or (get-in ctx [:execution/input]) {})
@@ -99,7 +132,7 @@
                               gcp-project (assoc "GOOGLE_PROJECT" gcp-project))}
        true (assoc :gcp-project gcp-project)))))
 
-(defn analyze-preview
+(defn ^{:stratum 1} analyze-preview
   "Extract summary metrics from Pulumi preview JSON output."
   [preview-json]
   (let [steps   (or (:steps preview-json) (:Steps preview-json) [])
@@ -117,20 +150,123 @@
                           :action (or (:op step) (:Op step))})
                        steps)})))
 
-(defn- preview-result
-  [preview-data analysis preview-command]
-  {:status   :preview-complete
-   :output   preview-data
-   :artifact {:content  preview-data
-              :type     :pulumi-preview
-              :analysis analysis}
-   :command  preview-command
-   :metrics  {:duration-ms (:duration-ms preview-command)
-              :creates     (:creates analysis)
-              :updates     (:updates analysis)
-              :deletes     (:deletes analysis)}})
+(defn- ^{:stratum 1} store-provision-failure
+  [ctx start-time logger preview-result]
+  (let [error-type (shell/classify-error preview-result)]
+    (log/error logger :provision :provision/preview-failed
+               {:data {:stderr (:stderr preview-result)
+                       :error-type error-type}})
+    (failed-enter ctx start-time
+                  {:status     :error
+                   :error      (:stderr preview-result)
+                   :error-type error-type
+                   :command    (:command preview-result)
+                   :metrics    {:duration-ms (:duration-ms preview-result)}})))
 
-(defn- store-provision-preview
+(defn- ^{:stratum 1} invalid-config-result
+  [ctx start-time ex]
+  (failed-enter ctx start-time
+                {:status :error
+                 :error  (msg/t :provision/invalid-config
+                                {:error (ex-message ex)})}))
+
+(defn- ^{:stratum 1} with-saved-plan
+  "Call (f plan-file) with a new plan path. The plan is kept only while f
+   leaves the phase waiting on its gates; any other outcome, a throw
+   included, removes it."
+  [f]
+  (let [plan-file (new-plan-file)
+        pending? (volatile! false)]
+    (try
+      (let [entered (f plan-file)]
+        (vreset! pending? (= :pending-gates (get-in entered [:phase :status])))
+        entered)
+      (finally
+        (when-not @pending? (discard-plan! plan-file))))))
+
+(defn- ^{:stratum 1} apply-saved-plan
+  "After gates pass: apply the plan the gated preview saved
+   (`pulumi up --plan`), then capture outputs. Without that plan file
+   nothing is applied and the phase fails.
+
+   Only applies if :enter succeeded and gates passed. A gate denial or an
+   unacknowledged gate decision is read from the phase map, not :status:
+   the workflow's gate validation leaves :status as :enter set it."
+  [ctx]
+  (let [phase-status (get-in ctx [:phase :status])
+        logger       (get-logger ctx)]
+    (if (or (= :failed phase-status)
+            (phase-gate/gate-failed? (:phase ctx))
+            (= :error (get-in ctx [:phase :result :status])))
+      (assoc-in ctx [:phase :status] :failed)
+      (let [config    (get-in ctx [:phase :provision-config])
+            stack-dir (:stack-dir config)
+            stack     (:stack config)
+            env       (:env config)]
+        (log/info logger :provision :provision/apply-starting
+                  {:data {:stack-dir stack-dir :stack stack}})
+        (let [apply-result (shell/pulumi-up! stack-dir :stack stack :env env
+                                             :plan-file (:plan-file config))]
+          (if (schema/failed? apply-result)
+            (do
+              (log/error logger :provision :provision/apply-failed
+                         {:data {:stderr (:stderr apply-result)}})
+              (-> ctx
+                  (assoc-in [:phase :status] :failed)
+                  (update-in [:phase :result] merge
+                             {:status  :apply-failed
+                              :error   (:stderr apply-result)
+                              :error-type (:error-type apply-result)
+                              :metrics (merge (get-in ctx [:phase :result :metrics])
+                                              {:apply-duration-ms (:duration-ms apply-result)})})))
+            (let [outputs-result   (shell/pulumi-outputs! stack-dir :stack stack)
+                  outputs          (get outputs-result :parsed {})
+                  outputs-evidence (evidence/create-evidence
+                                    :evidence/pulumi-outputs
+                                    outputs
+                                    {:stack stack})]
+              (log/info logger :provision :provision/apply-complete
+                        {:data {:output-keys (vec (keys outputs))}})
+              (-> ctx
+                  (assoc-in [:phase :status] :completed)
+                  (update-in [:phase :result] merge
+                             {:status  :success
+                              :outputs outputs
+                              :metrics (merge (get-in ctx [:phase :result :metrics])
+                                              {:apply-duration-ms (:duration-ms apply-result)})})
+                  (evidence/add-evidence-to-ctx outputs-evidence)))))))))
+
+(defn ^{:stratum 1} error-provision
+  "Handle provision phase errors. The attempt's saved plan, if any, is
+   removed."
+  [ctx ex]
+  (try
+    (log/error (get-logger ctx) :provision :provision/error
+               {:data {:message (ex-message ex)
+                       :data    (ex-data ex)}})
+    (-> ctx
+        (assoc-in [:phase :status] :failed)
+        (update :execution/errors (fnil conj [])
+                {:type    :provision-error
+                 :phase   :provision
+                 :message (ex-message ex)
+                 :data    (ex-data ex)}))
+    (finally
+      (discard-plan! (get-in ctx [:phase :provision-config :plan-file])))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} leave-provision
+  "Apply the saved plan when the gates passed (apply-saved-plan). Whatever
+   the outcome, applied, refused, denied or thrown, the plan and its
+   directory are removed afterwards."
+  [ctx]
+  (try
+    (apply-saved-plan ctx)
+    (finally
+      (discard-plan! (get-in ctx [:phase :provision-config :plan-file])))))
+
+(defn- ^{:stratum 2} store-provision-preview
   [ctx start-time config preview-command]
   (let [preview-data     (get preview-command :parsed {})
         analysis         (analyze-preview preview-data)
@@ -159,115 +295,42 @@
                                                    preview-command))
         (evidence/add-evidence-to-ctx preview-evidence)
         (assoc-in [:phase :provision-config]
-                  (select-keys config [:stack-dir :stack :env])))))
+                  (select-keys config [:stack-dir :stack :env :plan-file])))))
 
-(defn- store-provision-failure
-  [ctx start-time logger preview-result]
-  (let [error-type (shell/classify-error preview-result)]
-    (log/error logger :provision :provision/preview-failed
-               {:data {:stderr (:stderr preview-result)
-                       :error-type error-type}})
-    (failed-enter ctx start-time
-                  {:status     :error
-                   :error      (:stderr preview-result)
-                   :error-type error-type
-                   :command    (:command preview-result)
-                   :metrics    {:duration-ms (:duration-ms preview-result)}})))
+;------------------------------------------------------------------------------ Layer 3
 
-(defn- invalid-config-result
-  [ctx start-time ex]
-  (failed-enter ctx start-time
-                {:status :error
-                 :error  (msg/t :provision/invalid-config
-                                {:error (ex-message ex)})}))
-
-;------------------------------------------------------------------------------ Layer 2
 ;; Phase interceptors + registration
-
-(defn enter-provision
-  "Execute provisioning preview and capture the artifact used by gates."
+(defn ^{:stratum 3} enter-provision
+  "Execute the provisioning preview, saving its plan, and capture the artifact
+   used by gates. The plan is kept only while the phase waits on its gates: a
+   failed preview or a throw removes it."
   [ctx]
   (let [start-time (System/currentTimeMillis)
         logger     (get-logger ctx)]
     (try
-      (let [config         (resolve-provision-config ctx)
-            stack-dir      (:stack-dir config)
-            stack          (:stack config)
-            preview-result (do
-                             (log/info logger :provision :provision/preview-starting
-                                       {:data {:stack-dir stack-dir :stack stack}})
-                             (shell/pulumi-preview! stack-dir
-                                                    :stack stack
-                                                    :env (:env config)))]
-        (if (schema/failed? preview-result)
-          (store-provision-failure ctx start-time logger preview-result)
-          (store-provision-preview ctx start-time config preview-result)))
+      (let [resolved (resolve-provision-config ctx)]
+        (with-saved-plan
+          (fn [plan-file]
+            (let [config         (assoc resolved :plan-file plan-file)
+                  stack-dir      (:stack-dir config)
+                  stack          (:stack config)
+                  preview-result (do
+                                   (log/info logger :provision :provision/preview-starting
+                                             {:data {:stack-dir stack-dir :stack stack}})
+                                   (shell/pulumi-preview! stack-dir
+                                                          :stack stack
+                                                          :env (:env config)
+                                                          :plan-file plan-file))]
+              (if (schema/failed? preview-result)
+                (store-provision-failure ctx start-time logger preview-result)
+                (store-provision-preview ctx start-time config preview-result))))))
       (catch clojure.lang.ExceptionInfo ex
         (invalid-config-result ctx start-time ex)))))
 
-(defn leave-provision
-  "After gates pass: execute pulumi up and capture outputs.
-
-   Only applies if :enter succeeded and gates passed."
-  [ctx]
-  (let [phase-status (get-in ctx [:phase :status])
-        logger       (get-logger ctx)]
-    (if (or (= :failed phase-status)
-            (= :error (get-in ctx [:phase :result :status])))
-      (assoc-in ctx [:phase :status] :failed)
-      (let [config    (get-in ctx [:phase :provision-config])
-            stack-dir (:stack-dir config)
-            stack     (:stack config)
-            env       (:env config)]
-        (log/info logger :provision :provision/apply-starting
-                  {:data {:stack-dir stack-dir :stack stack}})
-        (let [apply-result (shell/pulumi-up! stack-dir :stack stack :env env)]
-          (if (schema/failed? apply-result)
-            (do
-              (log/error logger :provision :provision/apply-failed
-                         {:data {:stderr (:stderr apply-result)}})
-              (-> ctx
-                  (assoc-in [:phase :status] :failed)
-                  (update-in [:phase :result] merge
-                             {:status  :apply-failed
-                              :error   (:stderr apply-result)
-                              :metrics (merge (get-in ctx [:phase :result :metrics])
-                                              {:apply-duration-ms (:duration-ms apply-result)})})))
-            (let [outputs-result   (shell/pulumi-outputs! stack-dir :stack stack)
-                  outputs          (get outputs-result :parsed {})
-                  outputs-evidence (evidence/create-evidence
-                                    :evidence/pulumi-outputs
-                                    outputs
-                                    {:stack stack})]
-              (log/info logger :provision :provision/apply-complete
-                        {:data {:output-keys (vec (keys outputs))}})
-              (-> ctx
-                  (assoc-in [:phase :status] :completed)
-                  (update-in [:phase :result] merge
-                             {:status  :success
-                              :outputs outputs
-                              :metrics (merge (get-in ctx [:phase :result :metrics])
-                                              {:apply-duration-ms (:duration-ms apply-result)})})
-                  (evidence/add-evidence-to-ctx outputs-evidence)))))))))
-
-(defn error-provision
-  "Handle provision phase errors."
-  [ctx ex]
-  (let [logger (get-logger ctx)]
-    (log/error logger :provision :provision/error
-               {:data {:message (ex-message ex)
-                       :data    (ex-data ex)}})
-    (-> ctx
-        (assoc-in [:phase :status] :failed)
-        (update :execution/errors (fnil conj [])
-                {:type    :provision-error
-                 :phase   :provision
-                 :message (ex-message ex)
-                 :data    (ex-data ex)}))))
+;------------------------------------------------------------------------------ Layer 4
 
 ;; Registration
-
-(defmethod phase/get-phase-interceptor-method :provision
+(defmethod ^{:stratum 4} phase/get-phase-interceptor-method :provision
   [_]
   {:name   :provision
    :enter  enter-provision

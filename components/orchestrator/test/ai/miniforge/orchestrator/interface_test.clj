@@ -19,9 +19,11 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [clojure.string :as str]
+   [ai.miniforge.knowledge.interface]
    [ai.miniforge.orchestrator.interface :as sut]
    [ai.miniforge.orchestrator.core :as core]
-   [ai.miniforge.orchestrator.protocol :as proto]))
+   [ai.miniforge.orchestrator.protocol :as proto]
+   [ai.miniforge.workflow.interface]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -145,6 +147,42 @@
 (deftest ^{:stratum 0} format-knowledge-block-empty-test
   (testing "Empty zettel list produces no block"
     (is (nil? (core/format-knowledge-block [] :implementer)))))
+
+;; ControlPlane — execute-workflow deregistration.
+;; Each run-workflow stub records whether the workflow was in
+;; active-workflows while it ran, so an empty atom afterwards means the
+;; entry was removed rather than never added.
+(deftest ^{:stratum 0} execute-workflow-cleans-up-atom-on-exception-test
+  (testing "active-workflows entry is removed even when run-workflow throws"
+    (let [cp         (sut/create-control-plane ::llm ::k-store ::a-store)
+          wf-id      (random-uuid)
+          registered (atom nil)]
+      (with-redefs [ai.miniforge.workflow.interface/start
+                    (fn [_mgr _spec _ctx] wf-id)
+                    ai.miniforge.workflow.interface/run-workflow
+                    (fn [_mgr _spec _ctx]
+                      (reset! registered (contains? @(:active-workflows cp) wf-id))
+                      (throw (ex-info "simulated failure" {})))]
+        (is (thrown? Exception (proto/execute-workflow cp {:title "regression"} {})))
+        (is (true? @registered))
+        (is (empty? @(:active-workflows cp)))))))
+
+(deftest ^{:stratum 0} execute-workflow-cleans-up-atom-on-return-test
+  (testing "active-workflows entry is removed after run-workflow returns"
+    (let [cp         (sut/create-control-plane ::llm ::k-store ::a-store)
+          wf-id      (random-uuid)
+          registered (atom nil)]
+      (with-redefs [ai.miniforge.workflow.interface/start
+                    (fn [_mgr _spec _ctx] wf-id)
+                    ai.miniforge.workflow.interface/run-workflow
+                    (fn [_mgr _spec _ctx]
+                      (reset! registered (contains? @(:active-workflows cp) wf-id))
+                      {:workflow/status :completed})]
+        (let [result (proto/execute-workflow cp {:title "regression"} {})]
+          (is (= wf-id (:workflow-id result)))
+          (is (= :completed (:status result)))
+          (is (true? @registered))
+          (is (empty? @(:active-workflows cp))))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

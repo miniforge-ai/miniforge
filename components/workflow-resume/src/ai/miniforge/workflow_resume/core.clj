@@ -141,13 +141,17 @@
        :workflow/spec))
 
 (defn- ^{:stratum 0} ensure-reconstruction-source
-  [checkpoint-data events-dir workflow-id events raw-events]
+  "Nil when there is something to resume from. With no checkpoint and no
+   events, the unreadable checkpoint's own anomaly when there is one —
+   it names the files — else a `:not-found` anomaly."
+  [checkpoint-data events-dir workflow-id events raw-events unreadable-checkpoint]
   (when-not (or checkpoint-data (seq events))
-    (anomaly/anomaly :not-found
-                     (str "No events found for workflow: " workflow-id)
-                     {:workflow-id workflow-id
-                      :events-dir (str events-dir)
-                      :raw-event-count (count raw-events)})))
+    (or unreadable-checkpoint
+        (anomaly/anomaly :not-found
+                         (str "No events found for workflow: " workflow-id)
+                         {:workflow-id workflow-id
+                          :events-dir (str events-dir)
+                          :raw-event-count (count raw-events)}))))
 
 (defn- ^{:stratum 0} checkpoint-status
   [checkpoint-data]
@@ -452,10 +456,15 @@
      :completed-dag-artifacts — recovered artifacts from completed DAG tasks
      :dag-paused?          — boolean
      :dag-pause-reason     — keyword or nil
+     :checkpoint-read-failures — vector of anomalies, one per checkpoint
+                             file that exists but could not be read;
+                             what it held was not restored
 
    Returns a `:not-found` anomaly if no valid events exist for the
-   workflow. Events that fail shape validation (missing or non-keyword
-   `:event/type`) are silently dropped at the boundary."
+   workflow, or the checkpoint's own anomaly when it could not be read
+   and there are no events either. Events that fail shape validation
+   (missing or non-keyword `:event/type`) are silently dropped at the
+   boundary."
   [events-dir workflow-id]
   (anomaly/let-ok [_config @resume-config
                    _valid (schema/validate schema/ReconstructContextInput
@@ -463,14 +472,19 @@
                                             :workflow-id workflow-id}
                                            {:message "Invalid reconstruct-context input"
                                             :schema-name :workflow-resume/reconstruct-context})]
-    (let [checkpoint-data (workflow-checkpoints/load-checkpoint-data workflow-id)
+    (let [loaded (workflow-checkpoints/load-checkpoint-data workflow-id)
+          unreadable-checkpoint (when (anomaly/anomaly? loaded) loaded)
+          checkpoint-data (when-not unreadable-checkpoint loaded)
+          read-failures (or (get-in unreadable-checkpoint [:anomaly/data :checkpoint/read-failures])
+                            (get checkpoint-data :checkpoint/read-failures []))
           raw-events (or (es/read-workflow-events-by-id events-dir workflow-id) [])
           events (vec (filter schema/valid-event? raw-events))]
       (anomaly/let-ok [_source (ensure-reconstruction-source checkpoint-data
                                                              events-dir
                                                              workflow-id
                                                              events
-                                                             raw-events)]
+                                                             raw-events
+                                                             unreadable-checkpoint)]
         (let [by-type (group-by :event/type events)
               phase-results (restored-phase-results checkpoint-data events)
               completed-phases (restored-completed-phases checkpoint-data events phase-results)
@@ -498,4 +512,5 @@
            :dag-paused? (boolean dag-pause-info)
            :dag-pause-reason (:pause-reason dag-pause-info)
            :machine-snapshot machine-snapshot
-           :checkpoint-manifest (:manifest checkpoint-data)})))))
+           :checkpoint-manifest (:manifest checkpoint-data)
+           :checkpoint-read-failures read-failures})))))

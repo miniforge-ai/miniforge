@@ -24,11 +24,6 @@
   ;; fleet config errors
   :repo/required              "Repository is required. Use owner/name."
   :repo/invalid-format        "Invalid repository format. Expected owner/name."
-  :config-lock/update-failed  "Config update failed."
-  :config-lock/locked         "Config file is locked by another process; retry later."
-  :config-lock/interrupted    "Interrupted while waiting for config file lock."
-  :config-lock/unavailable    "Config file lock unavailable; retry later."
-  :config-lock/acquire-failed "Failed to acquire config file lock: {error}"
 
   ;; blocking-reason-line fallback
   :blocker/fallback-message    "Blocked"
@@ -328,4 +323,6 @@
  ;; consolidated shared keys (deduped)
  :filter/add-pane-title "Add pane-local filter"
  :pr/count              "{count} PRs"
- :phase/label           "Phase: {phase}"}}
+ :phase/label           "Phase: {phase}"
+ :server/public-bind-without-auth
+ "Refusing to serve the dashboard on {host} without login: anyone who can reach that address could read every workflow's events. Set MINIFORGE_WEB_USERNAME and MINIFORGE_WEB_PASSWORD, or bind 127.0.0.1."}}

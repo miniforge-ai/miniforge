@@ -1,0 +1,6 @@
+;; Title: Miniforge.ai
+;; Author: Christopher Lester (christopher@miniforge.ai)
+;; Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+
+{:deliberation-lab/messages
+ {:cli/usage "Usage: clojure -M:run smoke|run MANIFEST.edn NEW_OUTPUT_DIR, or clojure -M:run verify DIR"}}

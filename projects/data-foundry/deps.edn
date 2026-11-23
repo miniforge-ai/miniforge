@@ -36,14 +36,19 @@
         ai.miniforge/redaction                 {:local/root "../../components/redaction"}
         ai.miniforge/cursor-store              {:local/root "../../components/cursor-store"}
         ai.miniforge/dag-executor              {:local/root "../../components/dag-executor"}
+        ai.miniforge/subprocess                {:local/root "../../components/subprocess"}
         ai.miniforge/dag-primitives            {:local/root "../../components/dag-primitives"}
         ai.miniforge/data-quality              {:local/root "../../components/data-quality"}
         ai.miniforge/event-stream              {:local/root "../../components/event-stream"}
         ai.miniforge/decision-envelope         {:local/root "../../components/decision-envelope"}
         ai.miniforge/effect-transaction        {:local/root "../../components/effect-transaction"}
         ai.miniforge/execution-grant           {:local/root "../../components/execution-grant"}
+        ai.miniforge/kubernetes-target         {:local/root "../../components/kubernetes-target"}
+        ai.miniforge/failure-classifier        {:local/root "../../components/failure-classifier"}
         ai.miniforge/file-durability           {:local/root "../../components/file-durability"}
+        ai.miniforge/resource-cleanup          {:local/root "../../components/resource-cleanup"}
         ai.miniforge/knowledge                 {:local/root "../../components/knowledge"}
+        ai.miniforge/llm                       {:local/root "../../components/llm"}
         ai.miniforge/logging                   {:local/root "../../components/logging"}
         ai.miniforge/messages                  {:local/root "../../components/messages"}
         ai.miniforge/phase                     {:local/root "../../components/phase"}

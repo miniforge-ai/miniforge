@@ -70,18 +70,65 @@
                {:run-id "run-1" :phase :implement
                 :consultation {:status :pinned :pin-read? true
                                :situation "changing-one-side-of-a-boundary"
+                               :answer-log :recorded
                                :pegs [{:id "peg-a" :answer "no"
                                        :landings {"yes" ["p1"] "no" ["p2"]}}]
                                :unmatched-answers nil}})]
     (is (uuid? (:consultation/id entry)))
     (is (= "no" (get-in entry [:consultation/pegs 0 :answer]))
         "the explicit answer survives into the durable shape")
+    (is (= :recorded (:consultation/answer-log entry))
+        "the §7.7.2 lost-vs-unanswered marker survives into the durable shape")
     (is (= entry (gap/record-consultation! dir entry)))
     (is (= {:entries [] :skipped 0} (gap/read-ledger dir))
         "a consultation is not a miss — the miss ledger stays empty")
     (let [{:keys [entries skipped]} (gap/read-consultations dir)]
       (is (= [entry] entries))
       (is (= 0 skipped)))))
+
+(def ^{:stratum 0} unmatched-situation "about-to-commit-consequential")
+
+;; Built through the producer, from the summary shape codex-pin emits.
+(defn- ^{:stratum 0} consultation [status anomaly situation]
+  (gap/build-consultation-entry
+   {:run-id "run-1" :phase :plan
+    :consultation {:status status :anomaly anomaly :situation situation}}))
+
+(def ^{:stratum 0} pinned
+  (consultation :pinned nil "changing-one-side-of-a-boundary"))
+
+;; 3 matched, 1 unmatched attempt, then an unreadable codex and 2 unmapped phases.
+(def ^{:stratum 0} mixed-consultations
+  (concat (repeat 3 pinned)
+          [(consultation :skipped :situation-unmatched unmatched-situation)
+           (consultation :skipped :codex-unreadable "s")]
+          (repeat 2 (consultation :unmapped nil nil))))
+
+(defn- ^{:stratum 0} miss-at
+  "A ledger miss in the producer's shape, recorded at `instant`."
+  [bucket instant]
+  (assoc (gap/build-entry {:run-id "r" :phase :implement :signal drift-signal
+                           :situation nil :consultation nil
+                           :bucket bucket :attribution nil})
+         :miss/at instant))
+
+;; The shape codex/harvest-decisions returns.
+(defn- ^{:stratum 0} decision [date outcome & miss-ids]
+  {:decided (java.time.LocalDate/parse date) :outcome outcome :misses (vec miss-ids)})
+
+(defn- ^{:stratum 0} temp-run-dir []
+  (str (java.nio.file.Files/createTempDirectory
+         "codex-gap-test-"
+         (into-array java.nio.file.attribute.FileAttribute []))))
+
+(defn- ^{:stratum 0} report-over-runs
+  "The bb codex-gap-report aggregation: every run's ledger is read, the
+   entries pooled, and incomplete reads counted rather than dropped."
+  [dirs]
+  (let [reads      (map gap/read-ledger dirs)
+        entries    (vec (mapcat :entries reads))
+        unreadable (count (filter gap/incomplete-read? reads))]
+    (gap/build-report entries {:unreadable-ledgers unreadable})))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -276,3 +323,146 @@
         (is (re-find #"routing: 1 of 4" text))
         (is (re-find #"anchoring: 22 problems, 4 unanchored, 5 speculative" text))
         (is (re-find #"review queue: 1" text))))))
+
+(deftest ^{:stratum 1} consultation-entry-records-the-skip-cause
+  (is (= :situation-unmatched
+         (:consultation/anomaly
+          (consultation :skipped :situation-unmatched unmatched-situation))))
+  (is (nil? (:consultation/anomaly pinned))))
+
+(deftest ^{:stratum 1} coverage-reports-matched-of-attempted-consultations
+  (let [r     (gap/build-report [] {:consultations mixed-consultations})
+        match (get-in r [:coverage :consultation-match])
+        text  (gap/render-report r)]
+    (testing "an unreadable codex and an unmapped phase are not attempts"
+      (is (= 3 (:matched match)))
+      (is (= 4 (:attempted match)))
+      (is (= 0.75 (:rate match))))
+    (testing "the unmatched attempt's situation is the slot's member"
+      (is (= [unmatched-situation] (:unmatched match)))
+      (is (re-find (re-pattern (str "unmatched: " unmatched-situation)) text)))
+    (is (re-find #"3 of 4 attempted consultations matched a situation \(75%\)" text))))
+
+(deftest ^{:stratum 1} coverage-sets-pre-anomaly-skips-apart
+  (let [r     (gap/build-report [] {:consultations [pinned (consultation :skipped nil "s")]})
+        match (get-in r [:coverage :consultation-match])]
+    (is (= {:matched 1 :attempted 1 :unclassified 1}
+           (select-keys match [:matched :attempted :unclassified])))
+    (is (re-find #"1 older skipped consultation\(s\) unclassified" (gap/render-report r)))))
+
+(deftest ^{:stratum 1} coverage-with-no-attempts-reports-no-rate
+  (let [r (gap/build-report [] {:consultations [(consultation :unconfigured nil nil)]})]
+    (is (nil? (get-in r [:coverage :consultation-match :rate])))
+    (is (re-find #"no consultation attempted" (gap/render-report r)))))
+
+(deftest ^{:stratum 1} unreadable-consultations-mark-the-rate-incomplete
+  (let [r (gap/build-report [] {:consultations [pinned] :unreadable-consultations 2})]
+    (is (= 2 (get-in r [:coverage :consultation-match :unreadable])))
+    (is (re-find #"INCOMPLETE: consultations unreadable in 2 run" (gap/render-report r))))
+  (testing "nothing attempted but files unreadable is still flagged"
+    (is (re-find #"no consultation attempted, INCOMPLETE"
+                 (gap/render-report (gap/build-report [] {:unreadable-consultations 1}))))))
+
+(deftest ^{:stratum 1} a-read-that-lost-entries-is-incomplete
+  (is (true? (gap/incomplete-read? {:entries [pinned] :skipped 1})))
+  (is (true? (gap/incomplete-read? {:codex-gap/anomaly :ledger-read-failed})))
+  (is (false? (gap/incomplete-read? {:entries [pinned] :skipped 0}))))
+
+(deftest ^{:stratum 1} incomplete-miss-ledgers-mark-the-report-incomplete
+  (let [[clean lossy failed] (repeatedly 3 temp-run-dir)
+        miss (miss-at :uncovered "2026-09-01T10:00:00Z")]
+    (gap/record-miss! clean miss)
+    (gap/record-miss! lossy miss)
+    (spit (io/file lossy "codex-gap-ledger.edn") "{torn\n" :append true)
+    ;; a directory where the ledger file belongs: opening it is an IOException
+    (.mkdirs (io/file failed "codex-gap-ledger.edn"))
+    (testing "a failed read is an anomaly with no entries"
+      (let [result (gap/read-ledger failed)]
+        (is (= :ledger-read-failed (:codex-gap/anomaly result)))
+        (is (nil? (:entries result)))))
+    (testing "a failed read marks the header incomplete"
+      (let [r (report-over-runs [clean failed])]
+        (is (= 1 (:unreadable-ledgers r)))
+        (is (re-find #"INCOMPLETE: miss ledger not fully read in 1 run"
+                     (gap/render-report r)))))
+    (testing "a lossy read marks the header incomplete"
+      (let [r (report-over-runs [clean lossy])]
+        (is (= 2 (:entry-count r)) "the readable entries are still reported")
+        (is (re-find #"INCOMPLETE: miss ledger not fully read in 1 run"
+                     (gap/render-report r)))))
+    (testing "both kinds are counted per run"
+      (is (re-find #"INCOMPLETE: miss ledger not fully read in 2 run"
+                   (gap/render-report (report-over-runs [clean lossy failed])))))
+    (testing "a clean read shows no marker"
+      (let [r (report-over-runs [clean])]
+        (is (= 0 (:unreadable-ledgers r)))
+        (is (not (re-find #"INCOMPLETE" (gap/render-report r))))))
+    (testing "the option defaults to zero"
+      (is (= 0 (:unreadable-ledgers (gap/build-report [] {})))))
+    (testing "a report map without the count still renders, unmarked"
+      (let [r (dissoc (report-over-runs [clean]) :unreadable-ledgers)]
+        (is (not (re-find #"INCOMPLETE" (gap/render-report r))))))))
+
+(deftest ^{:stratum 1} recorded-consultations-feed-the-coverage-rate
+  ;; The bb codex-gap-report path: entries recorded per run, read back, reported.
+  (let [dir (str (java.nio.file.Files/createTempDirectory
+                   "codex-gap-match-"
+                   (into-array java.nio.file.attribute.FileAttribute [])))]
+    (gap/record-consultation! dir pinned)
+    (gap/record-consultation! dir (consultation :skipped :situation-ambiguous unmatched-situation))
+    (let [consultations (:entries (gap/read-consultations dir))
+          text (gap/render-report (gap/build-report [] {:consultations consultations}))]
+      (is (re-find #"1 of 2 attempted consultations matched a situation \(50%\)" text)))))
+
+(deftest ^{:stratum 1} learning-pairs-a-miss-with-its-harvest-decision
+  (let [miss (miss-at :uncovered "2026-09-01T10:00:00Z")
+        r    (gap/build-report [miss] {:harvest [(decision "2026-09-04" :admitted (:miss/id miss))]})]
+    (is (= {:status :measured :decided 1 :median-days 3.0 :open 0}
+           (select-keys (:learning r) [:status :decided :median-days :open])))
+    (is (re-find #"learning: 1 miss\(es\) decided, median 3.0 day" (gap/render-report r)))))
+
+(deftest ^{:stratum 1} learning-counts-a-refusal-as-a-decision
+  (let [miss (miss-at :uncovered "2026-09-01T10:00:00Z")
+        r    (gap/build-report [miss] {:harvest [(decision "2026-09-02" :refused (:miss/id miss))]})]
+    (is (= 1 (get-in r [:learning :decided])))
+    (is (= 1.0 (get-in r [:learning :median-days])))))
+
+(deftest ^{:stratum 1} learning-uses-the-earliest-decision-naming-a-miss
+  (let [miss (miss-at :uncovered "2026-09-01T10:00:00Z")
+        r    (gap/build-report [miss] {:harvest [(decision "2026-09-10" :admitted (:miss/id miss))
+                                                 (decision "2026-09-05" :refused (:miss/id miss))]})]
+    (is (= 4.0 (get-in r [:learning :median-days])))))
+
+(deftest ^{:stratum 1} learning-keeps-unnamed-misses-open
+  (let [named   (miss-at :uncovered "2026-09-01T10:00:00Z")
+        unnamed (miss-at :uncovered "2026-09-02T10:00:00Z")
+        r       (gap/build-report [named unnamed]
+                                  {:harvest [(decision "2026-09-04" :admitted (:miss/id named))]})]
+    (is (= 1 (get-in r [:learning :open])))
+    (is (= [(:miss/id unnamed)] (get-in r [:learning :misses])))))
+
+(deftest ^{:stratum 1} learning-without-harvest-records-reports-unavailable
+  (let [r (gap/build-report [(miss-at :uncovered "2026-09-01T10:00:00Z")] {})]
+    (is (= :harvest-unavailable (get-in r [:learning :status])))
+    (is (nil? (get-in r [:learning :median-days])))
+    (is (re-find #"learning: harvest records unavailable; 1 open" (gap/render-report r)))))
+
+(deftest ^{:stratum 1} learning-lists-the-decided-misses
+  (let [miss (miss-at :uncovered "2026-09-01T10:00:00Z")
+        r    (gap/build-report [miss] {:harvest [(decision "2026-09-04" :admitted (:miss/id miss))]})]
+    (is (= [(:miss/id miss)] (get-in r [:learning :decided-misses])))
+    (is (re-find (re-pattern (str "decided: " (:miss/id miss))) (gap/render-report r)))))
+
+(deftest ^{:stratum 1} learning-keeps-review-queue-misses-out-of-the-rate
+  (let [queued (miss-at :review-queue "2026-09-01T10:00:00Z")
+        r      (gap/build-report [queued] {:harvest [(decision "2026-09-04" :admitted (:miss/id queued))]})]
+    (is (= 0 (get-in r [:learning :decided])))
+    (is (= [(:miss/id queued)] (get-in r [:learning :misses])))))
+
+(deftest ^{:stratum 1} learning-counts-a-decided-miss-without-a-usable-timestamp
+  (let [miss (assoc (miss-at :uncovered "unused") :miss/at #inst "2026-09-01")
+        r    (gap/build-report [miss] {:harvest [(decision "2026-09-04" :admitted (:miss/id miss))]})]
+    (is (= {:decided 1 :undated 1 :median-days nil :open 0}
+           (select-keys (:learning r) [:decided :undated :median-days :open])))
+    (is (re-find #"1 miss\(es\) decided, none with a usable timestamp" (gap/render-report r)))))
+

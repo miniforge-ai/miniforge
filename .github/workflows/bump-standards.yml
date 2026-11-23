@@ -1,6 +1,11 @@
 # Triggered by miniforge-ai/miniforge-standards push to main via repository_dispatch.
 # Updates the standards submodule and recompiles the policy pack.
-# Requires no extra secrets beyond GITHUB_TOKEN.
+#
+# The PR is pushed and opened with a GitHub App token (HOMEBREW_APP_ID /
+# HOMEBREW_APP_PRIVATE_KEY, shared with release.yml), not GITHUB_TOKEN: this
+# repo does not let GITHUB_TOKEN open pull requests, and a PR opened by
+# GITHUB_TOKEN would not trigger the pull_request workflows its required
+# checks come from.
 
 name: Bump Standards
 
@@ -15,8 +20,7 @@ on:
         type: string
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   bump:
@@ -54,9 +58,28 @@ jobs:
             clojure-${{ runner.os }}-
 
       - name: Update standards submodule
+        env:
+          # repository_dispatch from miniforge-standards carries the pushed
+          # commit in client_payload.sha; workflow_dispatch takes the `sha`
+          # input. Blank means latest main.
+          REQUESTED_SHA: ${{ github.event.client_payload.sha || inputs.sha }}
         run: |
+          set -euo pipefail
           git -C standards/miniforge fetch origin
-          git -C standards/miniforge checkout origin/main
+          target=origin/main
+          if [ -n "${REQUESTED_SHA}" ]; then
+            if ! printf '%s' "${REQUESTED_SHA}" | grep -Eq '^[0-9a-f]{7,40}$'; then
+              echo "::error::sha must be a hex commit id, got: ${REQUESTED_SHA}"
+              exit 1
+            fi
+            target="${REQUESTED_SHA}"
+            # Pin only reviewed standards: the commit must be on main.
+            if ! git -C standards/miniforge merge-base --is-ancestor "${target}" origin/main; then
+              echo "::error::${target} is not a commit on miniforge-standards main"
+              exit 1
+            fi
+          fi
+          git -C standards/miniforge checkout --detach "${target}"
           git add standards/miniforge
           NEW_SHA=$(git -C standards/miniforge rev-parse HEAD)
           echo "NEW_SHA=$NEW_SHA" >> "$GITHUB_ENV"
@@ -71,10 +94,19 @@ jobs:
           [ -f "$PACK" ] || { echo "ERROR: pack not found at $PACK"; exit 1; }
           bb -e "(clojure.edn/read-string (slurp \"$PACK\"))" && echo "Pack is valid EDN"
 
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1.12.0
+        with:
+          app-id: ${{ secrets.HOMEBREW_APP_ID }}
+          private-key: ${{ secrets.HOMEBREW_APP_PRIVATE_KEY }}
+          owner: miniforge-ai
+          repositories: miniforge
+
       - name: Open pull request
         uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
           branch: auto/bump-standards-${{ env.NEW_SHA }}
           commit-message: |
             chore(standards): bump standards/miniforge to ${{ env.NEW_SHA }}
@@ -100,3 +132,52 @@ jobs:
             3. Merge when satisfied — the branch will be deleted automatically on merge.
           labels: automated,standards
           delete-branch: true
+
+  # Same alert as refresh-cost-table.yml and ci.yml's main-status job: one
+  # open tracking issue, a comment per further failure, closed by the next
+  # green run. No checkout or toolchain, so it survives the breakage.
+  alert:
+    name: Alert on failure
+    runs-on: ubuntu-latest
+    needs: [bump]
+    if: ${{ !cancelled() }}
+    permissions:
+      issues: write
+    concurrency:
+      group: bump-standards-alert
+      cancel-in-progress: false
+    steps:
+      - name: Open, update, or close the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RESULT: ${{ needs.bump.result }}
+          LABEL: bump-standards-red
+          TITLE: Bump Standards workflow is failing
+        run: |
+          set -euo pipefail
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          # REST list, not search: the search index lags issue creation.
+          issue=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/issues?state=open&labels=${LABEL}&per_page=100" \
+            --jq 'map(select(.pull_request == null)) | .[0].number // empty')
+          case "${RESULT}" in
+            success)
+              if [ -n "${issue}" ]; then
+                gh issue close "${issue}" --comment "Green again. Run: ${run_url}"
+              fi
+              ;;
+            failure)
+              body="${GITHUB_WORKFLOW} failed (${GITHUB_EVENT_NAME}). Run: ${run_url}"
+              if [ -n "${issue}" ]; then
+                gh issue comment "${issue}" --body "${body}"
+              else
+                gh label create "${LABEL}" --color b60205 \
+                  --description "${GITHUB_WORKFLOW} is failing" >/dev/null 2>&1 || true
+                gh issue create --title "${TITLE}" --label "${LABEL}" --body "${body}"
+              fi
+              ;;
+            *)
+              echo "Result ${RESULT}; not alerting."
+              ;;
+          esac

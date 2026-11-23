@@ -6,6 +6,9 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn ^{:stratum 0} queue? [value]
+  (instance? clojure.lang.PersistentQueue value))
+
 (defn ^{:stratum 0} initial [store]
   {:store store
    :pending clojure.lang.PersistentQueue/EMPTY

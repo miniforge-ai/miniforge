@@ -18,12 +18,9 @@
 (ns ai.miniforge.event-stream.heartbeat
   "Phase heartbeat scheduler."
   (:require
+   [ai.miniforge.event-stream.boundary.heartbeat-scheduler :as scheduler]
    [ai.miniforge.event-stream.core :as core]
-   [ai.miniforge.logging.interface :as log])
-  (:import
-   [java.util.concurrent Executors ScheduledExecutorService ScheduledFuture
-                         ThreadFactory TimeUnit]
-   [java.util.concurrent.atomic AtomicLong]))
+   [ai.miniforge.logging.interface :as log]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -34,12 +31,6 @@
    named-constants.mdc, composed math is preferred when the unit
    composition is part of the intent."
   (* 30 1000))
-
-(def ^{:stratum 0} ^:private heartbeat-thread-counter
-  "Monotonic counter for naming heartbeat threads. Gives each
-   scheduler a unique suffix so jstack output disambiguates threads
-   when the same phase id runs concurrently across workflows."
-  (AtomicLong. 0))
 
 (defn- ^{:stratum 0} make-heartbeat-task
   "Return one scheduled heartbeat emission task."
@@ -68,24 +59,9 @@
                    :data {:phase-id phase-id
                           :error (ex-message e)}})))))
 
-(defn ^{:stratum 0} stop-heartbeat!
-  ([handle]
-   (stop-heartbeat! handle {}))
-  ([handle {:keys [may-interrupt?] :or {may-interrupt? false}}]
-   (when-let [^ScheduledFuture fut (:heartbeat/future handle)]
-     (.cancel fut (boolean may-interrupt?)))
-   (when-let [^ScheduledExecutorService executor (:heartbeat/executor handle)]
-     (.shutdown executor))))
+(def ^{:stratum 0} stop-heartbeat! scheduler/stop!)
 
 ;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} daemon-thread-factory [phase-id]
-  (let [n (.incrementAndGet ^AtomicLong heartbeat-thread-counter)]
-    (reify ThreadFactory
-      (newThread [_ runnable]
-        (doto (Thread. runnable (str "miniforge-phase-heartbeat-"
-                                     (name phase-id) "-" n))
-          (.setDaemon true))))))
 
 (defn- ^{:stratum 1} resolve-interval-ms [opts]
   (let [interval-ms (or (:interval-ms opts) default-interval-ms)]
@@ -115,28 +91,9 @@
            start-ms    (System/currentTimeMillis)
            active-since (java.util.Date. ^long start-ms)
            last-tick   (atom start-ms)
-           executor    (Executors/newSingleThreadScheduledExecutor
-                         (daemon-thread-factory phase-id))
            task        (make-heartbeat-task event-stream workflow-id phase-id
                                             active-since seq-num last-tick)
-           ;; Schedule defensively — any failure between executor
-           ;; creation and a successful schedule shuts the executor
-           ;; down rather than leaking a parked thread.
-           future-handle
-           (try
-             (.scheduleAtFixedRate ^ScheduledExecutorService executor
-                                   ^Runnable task
-                                   ^long interval-ms
-                                   ^long interval-ms
-                                   TimeUnit/MILLISECONDS)
-             (catch Throwable t
-               (.shutdownNow ^ScheduledExecutorService executor)
-               (throw t)))]
-       ;; Retain the ScheduledFuture so stop-heartbeat! can cancel
-       ;; the periodic task directly instead of relying on executor
-       ;; shutdown semantics to stop ticking.
-       {:heartbeat/executor   executor
-        :heartbeat/future     future-handle
-        :heartbeat/phase-id   phase-id
-        :heartbeat/last-tick  last-tick
-        :heartbeat/seq-num    seq-num}))))
+           resources (scheduler/start! phase-id interval-ms task)]
+       (assoc resources :heartbeat/phase-id phase-id
+                        :heartbeat/last-tick last-tick
+                        :heartbeat/seq-num seq-num)))))

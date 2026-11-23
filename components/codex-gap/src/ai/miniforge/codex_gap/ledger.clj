@@ -44,7 +44,12 @@
    zero-entropy detection needs observations from runs where the guarded
    failure never happened -- exactly the runs the miss ledger ignores.
    `consultation` is the $7.4.3 summary off the phase result; its :pegs
-   rows already carry :answer (explicit, or nil = presented-unanswered)."
+   rows already carry :answer (explicit, or nil = presented-unanswered).
+   :consultation/answer-log is the $7.7.2 lost-vs-unanswered marker
+   (:absent | :recorded | :unreadable): under :unreadable the session's
+   answer log existed but did not parse, so a peg row's nil :answer
+   means LOST, not declined -- the telemetry reader keeps such runs out
+   of its unanswered count."
   [{:keys [run-id phase consultation]}]
   {;; the summary's own identity when it carries one (stamped at
    ;; construction, shared with the leave's miss entries); minted here
@@ -55,7 +60,9 @@
    :consultation/phase phase
    :consultation/situation (get consultation :situation)
    :consultation/status (get consultation :status)
+   :consultation/anomaly (get consultation :anomaly)
    :consultation/pin-read? (get consultation :pin-read?)
+   :consultation/answer-log (get consultation :answer-log)
    :consultation/pegs (get consultation :pegs)
    :consultation/unmatched-answers (get consultation :unmatched-answers)})
 
@@ -82,6 +89,10 @@
    :miss/pegs (get consultation :pegs)
    :miss/bucket bucket
    :miss/attribution attribution})
+
+(defn ^{:stratum 0} incomplete-read? [read-result]
+  (or (some? (:codex-gap/anomaly read-result))
+      (pos? (get read-result :skipped 0))))
 
 (defn- ^{:stratum 0} write-anomaly [dir e]
   {:codex-gap/anomaly :ledger-write-failed

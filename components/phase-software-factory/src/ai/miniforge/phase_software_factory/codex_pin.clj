@@ -43,6 +43,11 @@
    only fires for paths with an on-disk file."
   ".miniforge/codex-consider.md")
 
+;; Failed lookups are logged too (:source :absent); asking for the pin is not seeing it.
+(defn- ^{:stratum 0} pin-fetch?
+  [{:keys [path source]}]
+  (and (= pin-path path) (not= :absent source)))
+
 (def ^{:stratum 0} phase->situation
   "Which codex situation each phase enters at. This map IS the push
    mechanism's routing: the orchestrator supplies the situation, the codex
@@ -154,7 +159,9 @@
                                    (get phase->secondary-situations phase))
                  content (str/join "\n\n" (cons (:content entry) (map :content secondaries)))
                  pegs (into (vec (:pegs entry)) (mapcat :pegs secondaries))]
-             {:entry {:path (:path entry) :content content} :status :pinned
+             ;; :keep-inline? so a shedding planner (N12 §6) still sees the pin.
+             {:entry {:path (:path entry) :content content :keep-inline? true}
+              :status :pinned
               :anomaly nil :situation situation :pegs (not-empty pegs)})))))))
 
 (defn ^{:stratum 1} landings-outcome
@@ -189,7 +196,8 @@
    `context-reads` is the session's recorded context_read log (§7.4.2), or
    nil when the session did not surface one — then :pin-read? is nil
    (unknown), not false; absence of the record is not evidence of absence
-   of the read.
+   of the read. A recorded lookup of the pin that resolved :absent is not
+   a read: the agent asked and got nothing.
 
    :pegs is the §7.7 per-peg record: one row per peg the consultation
    presented — {:id peg-id
@@ -205,10 +213,21 @@
    channel, not noise to drop. The :landings map keeps every branch's
    landing set so routing relevance (both branches reaching the same
    problem set, §4.4.1) stays computable from the record alone. nil
-   (not []) when nothing was presented."
+   (not []) when nothing was presented.
+
+   `answer-log` is the session's answer-channel state
+   (:absent | :recorded | :unreadable), surfaced as :answer-log on the
+   summary. :unreadable means the answer log existed but did not parse
+   — every presented peg still records :answer nil, but the marker lets
+   the telemetry reader keep LOST observations out of its unanswered
+   count (a torn log is not evidence the agent declined to answer).
+   nil derives the marker from `answers` (recorded when non-nil, else
+   absent) for callers that predate the channel."
   ([outcome context-reads]
-   (consultation-summary outcome context-reads nil))
+   (consultation-summary outcome context-reads nil nil))
   ([outcome context-reads answers]
+   (consultation-summary outcome context-reads answers nil))
+  ([outcome context-reads answers answer-log]
    (let [answer-of (reduce (fn [m {:keys [peg-id answer]}]
                              (assoc m peg-id answer))
                            {} answers)
@@ -225,6 +244,8 @@
               :status    (:status outcome)
               :anomaly   (:anomaly outcome)
               :situation (:situation outcome)
+              :answer-log (or answer-log
+                              (if (some? answers) :recorded :absent))
               :pegs      (when-let [pegs (seq (:pegs outcome))]
                            ;; :answers renamed on destructure: the peg row's
                            ;; branch map and the recorded answer log are
@@ -243,7 +264,7 @@
                                          :landings branch-landings})
                                       pegs)))
               :pin-read? (when (some? context-reads)
-                           (boolean (some #(= pin-path (:path %)) context-reads)))}
+                           (boolean (some pin-fetch? context-reads)))}
        unmatched (assoc :unmatched-answers (vec unmatched))))))
 
 ;------------------------------------------------------------------------------ Layer 2

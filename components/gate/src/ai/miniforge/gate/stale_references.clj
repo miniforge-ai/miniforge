@@ -186,13 +186,13 @@
    the attempt's own artifact let an empty-diff retry pass vacuously
    while the stale rename persisted (trap-bench REPAIR DEMONSTRATION,
    reps rq1-rq3: every run's final iteration was decision :allow on
-   zero files)."
+   zero files). NUL-delimited and untrimmed, so a name git would quote
+   (non-ASCII, a quote, a leading space) is listed as it is on disk."
   [worktree]
-  (let [tracked (str (git worktree "diff" "--name-only" "HEAD" "--"))
-        untracked (str (git worktree "ls-files" "--others" "--exclude-standard"))]
-    (->> (concat (str/split-lines tracked) (str/split-lines untracked))
-         (map str/trim)
-         (remove str/blank?)
+  (let [tracked (str (git worktree "diff" "-z" "--name-only" "HEAD" "--"))
+        untracked (str (git worktree "ls-files" "-z" "--others" "--exclude-standard"))]
+    (->> (concat (str/split tracked #"\u0000") (str/split untracked #"\u0000"))
+         (remove empty?)
          distinct
          vec)))
 

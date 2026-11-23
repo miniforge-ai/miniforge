@@ -30,6 +30,7 @@
   (:require
    [ai.miniforge.gate.decide :as decide]
    [ai.miniforge.gate.grant :as grant]
+   [ai.miniforge.gate.messages :as messages]
    ;; Require implementations for side effects
    [ai.miniforge.gate.syntax]
    [ai.miniforge.gate.lint]
@@ -50,7 +51,10 @@
    ;; :no-secrets capabilities without an explicit caller.
    [ai.miniforge.gate.capabilities]
    [ai.miniforge.event-stream.interface :as events]
+   [ai.miniforge.gate.no-secrets :as no-secrets]
    [ai.miniforge.gate.registry :as registry]
+   [ai.miniforge.gate.result :as check-result]
+   [ai.miniforge.gate.schema :as gate-schema]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.schema.interface :as schema]))
 
@@ -78,28 +82,24 @@
      Set of gate keywords"
   registry/list-gates)
 
+(defn ^{:stratum 0} outgoing-secrets
+  "The :no-secrets check over CTX's worktree alone, with no artifact: its
+   working changes and the commits since the task base, i.e. what a
+   commit or push from it would publish. Same result shape as a gate
+   check; emits no gate event, since no phase gate is running."
+  [ctx]
+  (no-secrets/check-no-secrets {} ctx))
+
 ;;------------------------------------------------------------------------------ Layer 0.5
 ;; Gate result predicates
-(defn ^{:stratum 0} passed?
-  "Check if a gate result passed.
-
-   Accepts either of two canonical result shapes:
-   1. Hand-shaped gate result with explicit `:passed?` key
-      (legacy gate convention — syntax, lint, etc.).
-   2. Canonical response shape from `response/success` /
-      `response/error` (what format and any new gate should return).
-      `response/success?` recognizes the `:status :success` form.
-
-   Bridging both lets gates return the project-wide success/anomaly
-   factories without each one re-establishing its own ad-hoc shape.
+(def ^{:stratum 0 :malli/schema [:=> [:cat [:maybe :map]] :boolean]} passed?
+  "Check if a gate result passed. Accepts the legacy `:passed?` shape
+   and the canonical `response/success` / `response/error` shape; see
+   `ai.miniforge.gate.result/passed?`, the one reader every gate-result
+   consumer shares.
 
    Returns: boolean"
-  [result]
-  (cond
-    (contains? result :passed?) (boolean (:passed? result))
-    (response/success? result)  true
-    (response/error? result)    false
-    :else                       false))
+  check-result/passed?)
 
 ;; Gate operations
 (defn ^{:stratum 0} emit-gate-event!
@@ -146,6 +146,7 @@
 
 (defn ^{:stratum 1} failed?
   "Check if a gate result failed. See `passed?` for accepted shapes."
+  {:malli/schema [:=> [:cat [:maybe :map]] :boolean]}
   [result]
   (not (passed? result)))
 
@@ -159,6 +160,7 @@
 
    Returns:
      {:passed? bool :errors [...] :gate gate-kw}"
+  {:malli/schema [:=> [:cat :keyword :any [:maybe :map]] gate-schema/CheckResult]}
   [gate-kw artifact ctx]
   (let [{:keys [check]} (get-gate gate-kw)
         start-ms (System/currentTimeMillis)]
@@ -192,6 +194,7 @@
 
    Returns the gate's repair result (either `{:success? bool :artifact ...}`
    or a `response/success` map) with `:gate gate-kw` assoc'd on top."
+  {:malli/schema [:=> [:cat :keyword :any :any [:maybe :map]] gate-schema/RepairResult]}
   [gate-kw artifact errors ctx]
   (let [{:keys [repair]} (get-gate gate-kw)]
     (if repair
@@ -205,7 +208,7 @@
         (catch Exception ex
           (emit-gate-event! ctx gate-kw :failed [{:type :repair-error :message (ex-message ex)}])
           (schema/exception-failure :artifact ex {:gate gate-kw :artifact artifact})))
-      (schema/failure :artifact {:message "No repair function for gate"}
+      (schema/failure :artifact {:message (messages/t :gate/no-repair-fn)}
                       {:gate gate-kw :artifact artifact}))))
 
 ;; Response chain support
@@ -240,7 +243,7 @@
             (if (passed? result)
               result
               (response/throw-anomaly! :anomalies.gate/validation-failed
-                                      "Gate validation failed"
+                                      (messages/system-t :gate/validation-failed)
                                       {:errors (:errors result)})))))))
    (response/create :gates)
    gate-kws))
@@ -257,6 +260,7 @@
 
    Returns:
      {:passed? bool :results [...]}"
+  {:malli/schema [:=> [:cat [:sequential :keyword] :any [:maybe :map]] gate-schema/ChecksResult]}
   [gate-kws artifact ctx]
   (let [results (mapv #(check-gate % artifact ctx) gate-kws)
         all-passed? (every? passed? results)]

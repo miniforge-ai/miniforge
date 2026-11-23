@@ -142,6 +142,25 @@
        distinct
        vec))
 
+(defn- ^{:stratum 0} unreadable-log-peg-ids
+  "Ids of every peg presented by a consultation whose §7.7.2 answer log
+   was :unreadable — the session recorded answers but the log tore, so
+   those peg rows carry :answer nil for a LOST observation, not an
+   unanswered one. Read from both per-run sources: consultation entries
+   (:consultation/answer-log) and miss-ledger rows (the summary minus
+   :pegs rides :miss/consultation)."
+  [miss-entries consult-entries]
+  (into #{}
+        (keep :id)
+        (concat
+         (mapcat :consultation/pegs
+                 (filter #(= :unreadable (:consultation/answer-log %))
+                         consult-entries))
+         (mapcat :miss/pegs
+                 (filter #(= :unreadable
+                             (get-in % [:miss/consultation :answer-log]))
+                         miss-entries)))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} consultation-answer-slots
@@ -242,7 +261,17 @@
                      entropy (entropy-bits freqs)
                      collapsed (count (filter :collapsed? obs))]
                  [peg {:runs (count obs)
-                       :unanswered-runs (count (remove (comp seq :answers) obs))
+                       ;; A run with no answers AND a torn answer log is a
+                       ;; LOST observation (§7.7.2), counted separately —
+                       ;; folding it into :unanswered-runs would let log
+                       ;; corruption masquerade as the agent declining to
+                       ;; answer.
+                       :unanswered-runs (count (filter #(and (empty? (:answers %))
+                                                             (not (:answer-log-unreadable? %)))
+                                                       obs))
+                       :unreadable-log-runs (count (filter #(and (empty? (:answers %))
+                                                                 (:answer-log-unreadable? %))
+                                                           obs))
                        :answer-sources (frequencies (keep :answer-source obs))
                        :counted-source (cond (seq mech-obs) :mechanism
                                              (seq counted) :explicit
@@ -318,8 +347,11 @@
   [run-dir nodes gate-map]
   (let [ledger-res (ledger/read-ledger (str run-dir))
         consult-res (ledger/read-consultations (str run-dir))
-        consult-pegs (mapcat :consultation/pegs (get consult-res :entries []))
-        explicit-by-id (explicit-answers-by-id (get consult-res :entries []))
+        miss-entries (get ledger-res :entries [])
+        consult-entries (get consult-res :entries [])
+        consult-pegs (mapcat :consultation/pegs consult-entries)
+        unreadable-ids (unreadable-log-peg-ids miss-entries consult-entries)
+        explicit-by-id (explicit-answers-by-id consult-entries)
         surviving-ids (into #{} (keep :consultation/id)
                             (get consult-res :entries []))
         recovered-groups (missing-consultation-groups
@@ -384,7 +416,14 @@
                                   mech-won? :mechanism
                                   (seq valid-explicit) :explicit
                                   :else nil)
-                 :observed? (boolean (or mech-won? (seq valid-explicit)))}
+                 :observed? (boolean (or mech-won? (seq valid-explicit)))
+                 ;; §7.7.2 lost-vs-unanswered: presented under a torn
+                 ;; answer log. Only discounts the unanswered count when
+                 ;; the observation also produced no answers (aggregate
+                 ;; applies that conjunction) — a mechanism-observed peg
+                 ;; is answered regardless of the explicit channel's
+                 ;; state.
+                 :answer-log-unreadable? (contains? unreadable-ids id)}
           (seq invalid-explicit) (assoc :invalid-answers invalid-explicit)
           (and mech-won? (seq valid-explicit))
           (assoc :explicit-answers valid-explicit))))}))

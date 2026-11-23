@@ -26,7 +26,8 @@
    [ai.miniforge.decision-envelope.interface :as env]
    [ai.miniforge.gate.grant :as grant]
    [ai.miniforge.gate.messages :as msg]
-   [ai.miniforge.gate.reason :as reason]))
+   [ai.miniforge.gate.reason :as reason]
+   [ai.miniforge.gate.result :as check-result]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -57,7 +58,7 @@
    fix what the record never named."
   [result]
   (let [gate (name (get result :gate :unknown))
-        errors (or (seq (:errors result)) [nil])]
+        errors (or (seq (check-result/errors result)) [nil])]
     (mapv (fn [error]
             (reason/create :reason/gate-check-failed
                           (msg/system-t :decide/gate-failed
@@ -93,14 +94,15 @@
   "Phase-level envelope from a `check-gates` result (Ariadne 1d): ONE
    envelope per gated transition. Policy-gate results already carry an
    envelope — their reasons and obligations merge in; a mechanical gate
-   failure contributes a :reason/gate-check-failed; a nil artifact with
+   failure (per `gate.result/passed?`, so a canonical `response/success`
+   result passes) contributes a :reason/gate-check-failed; a nil artifact with
    gates configured contributes :reason/missing-artifact. Pins come
    from the first policy envelope present (nil pins otherwise). The 3-arity
    form accepts runtime-owned pins before the single envelope is created."
   ([checks artifact-nil?] (gates->envelope checks artifact-nil? nil))
   ([{:keys [results]} artifact-nil? runtime-pins]
    (let [gate-envs (keep :envelope results)
-        mech-failures (remove :envelope (remove :passed? results))
+        mech-failures (remove :envelope (remove check-result/passed? results))
         pins (or runtime-pins (:envelope/pins (first gate-envs))
                  {:pins/pack-revision nil
                   :pins/rule-ids []

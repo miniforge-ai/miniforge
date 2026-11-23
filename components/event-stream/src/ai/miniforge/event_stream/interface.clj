@@ -29,14 +29,40 @@
    [ai.miniforge.event-stream.interface.opsv :as opsv]
    [ai.miniforge.event-stream.interface.stream :as stream]
    [ai.miniforge.event-stream.digest :as digest]
-   [ai.miniforge.event-stream.heartbeat :as heartbeat]
+   [ai.miniforge.event-stream.boundary.heartbeat :as heartbeat]
+   [ai.miniforge.event-stream.layout-reader :as layout-reader]
+   [ai.miniforge.event-stream.layout-tail :as layout-tail]
    [ai.miniforge.event-stream.operator-requests :as operator-requests]
    [ai.miniforge.event-stream.reader :as reader]
+   [ai.miniforge.event-stream.recovery-location-spec :as recovery-location]
    [ai.miniforge.event-stream.sinks :as sinks]
+   [ai.miniforge.event-stream.sinks.cleanup :as cleanup]
+   [ai.miniforge.event-stream.sinks.file :as file]
+   [ai.miniforge.event-stream.sinks.naming :as naming]
    [ai.miniforge.event-stream.workflow-discovery :as discovery]
    [ai.miniforge.event-stream.timeline :as timeline]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} create-current-event-stream
+  "Create a durable stream for the supported current profiles; see interface.stream."
+  stream/create-current-event-stream)
+
+(def ^{:stratum 0} current-event-stream?
+  "Validate current stream structure, including closed streams; not availability or authority."
+  stream/current-event-stream?)
+
+(def ^{:stratum 0} legacy-event-stream?
+  "Validate legacy stream structure without granting execution authority."
+  stream/legacy-event-stream?)
+
+(def ^{:stratum 0} current-journal-directory
+  "Return a current stream's canonical journal directory, including after close. Not an authority check."
+  stream/current-journal-directory)
+
+(def ^{:stratum 0} close-current-event-stream!
+  "Release a current stream's journal ownership; not a listener drain."
+  stream/close-current-event-stream!)
 
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; Stream lifecycle and control state
@@ -58,8 +84,16 @@
 
 (def ^{:stratum 0} cancel!
   "Set the control-state atom's :stopped flag true. Returns the new
-   state map."
+   state map. The 2-arity also records the cancel's
+   {:cancel/requested-by :cancel/source :action/id?}; the first record is
+   kept."
   control-state/cancel!)
+
+(def ^{:stratum 0} cancellation
+  "Return the first recorded cancel's
+   {:cancel/requested-by :cancel/source :action/id?} map, or nil when no
+   cancel recorded one."
+  control-state/cancellation)
 
 (def ^{:stratum 0} paused?
   "Return the boolean :paused flag from a control-state atom."
@@ -75,8 +109,36 @@
    quiesce fence, in-flight counter, optional snowflake generator).
    Optional opts map: :logger, :sinks (vector of sink fns), :config
    (builds sinks from config), :snowflake-generator (BD-2b event-id
-   generator for lexically-sortable ids)."
+   generator for lexically-sortable ids), :retention (bound on the
+   in-memory history, e.g. `bounded-retention`; absent = unbounded)."
   stream/create-event-stream)
+
+(def ^{:stratum 0} bounded-retention
+  "Retention policy for a stream that lives for days (the web dashboard):
+   per workflow, every lifecycle event, the newest health event per
+   dependency and the newest 500 others, for the 100 most recently active
+   workflows. Pass as `:retention` to
+   `create-event-stream`; merge over it to change a limit."
+  stream/bounded-retention)
+
+(def ^{:stratum 0} compact-events
+  "`(compact-events events policy)`: the events of `events` (a vector in
+   publish order) that a retention policy such as `bounded-retention`
+   keeps, still in publish order. For a reader that bounds history it
+   loads from disk the way a bounded stream bounds its own. Pure."
+  stream/compact-events)
+
+(def ^{:stratum 0} prepare-current-publication
+  "Prepare a supported current-write draft as [scope redacted-draft] or an anomaly.
+   This validates chain v2, intervention v2, Spec snapshots, OPSV and workflow lifecycle drafts;
+   it grants no lifecycle authority or receipt."
+  stream/prepare-current-publication)
+
+(def ^{:stratum 0} create-event-draft
+  "Construct an uncommitted envelope without a sequence number. No publication,
+   redaction, or admission occurs; retain this draft across publication retries.
+   Do not pass an uncommitted draft to the legacy publish! API."
+  stream/create-event-draft)
 
 (def ^{:stratum 0} create-envelope
   "Build an event envelope map with an atomically-assigned per-workflow
@@ -97,6 +159,26 @@
    running sinks or subscribers."
   stream/publish!)
 
+(def ^{:stratum 0} publish-persisted!
+  "Like publish!, but returns the result only when the event was persisted.
+   A current stream's receipt passes through. On a legacy stream an anomaly or
+   rejection passes through, and the event passes only when the stream has a
+   durable sink (the file sink) and every durable sink wrote it; otherwise an
+   :unavailable anomaly with :publication/reason :no-durable-sink or
+   :sink-write-failed."
+  stream/publish-persisted!)
+
+(def ^{:stratum 0} durable-sink
+  "Mark a legacy-stream sink as persisting each event it returns from without
+   throwing, so publish-persisted! can count it."
+  stream/durable-sink)
+
+(def ^{:stratum 0} replay!
+  "Deliver an event another process already stored to a legacy stream's
+   log and subscribers without its sinks (also for publishes to this
+   stream meanwhile). A current stream returns an :unsupported anomaly."
+  stream/replay!)
+
 (def ^{:stratum 0} subscribe!
   "Register a callback for events. 3-arg form subscribes to all events;
    4-arg form takes a filter-fn (fn [event] -> bool) so only matching
@@ -110,7 +192,8 @@
 (def ^{:stratum 0} get-events
   "Query the in-memory event log. Returns a vector of event maps.
    Optional opts map filters/pages: :workflow-id, :event-type, :offset,
-   :limit."
+   :limit. Current streams also support authoritative :scope [type UUID] and
+   return anomalies for invalid query options."
   stream/get-events)
 
 (def ^{:stratum 0} get-latest-status
@@ -128,7 +211,22 @@
    reference this path so archival's live → archived rename moves them
    together. Arities: (workflow-id) defaults base-dir to
    ~/.miniforge/events; (base-dir workflow-id)."
-  sinks/workflow-dir)
+  file/workflow-dir)
+
+(def ^{:stratum 0} retention-hold
+  "Multimethod `(retention-hold hold-key workflow-id events-dir)`: register
+   a method under your own hold key to keep a workflow's archived events
+   past their TTL while your store still needs them (the event cleanup
+   asks every registered hold). Workflow id is the events directory name;
+   events-dir is the events root being cleaned."
+  cleanup/retention-hold)
+
+(def ^{:stratum 0} cleanup-stale-events!
+  "`(cleanup-stale-events! {:events-dir dir :ttl-ms ms})`: run the event
+   retention pass now, as the file sink does in the background when it is
+   created (which runs are archived or pruned: see the sinks namespace).
+   Returns the number of files removed."
+  cleanup/cleanup-stale-events!)
 
 (def ^{:stratum 0} default-events-dir
   "The default events root (`~/.miniforge/events`) as a java.io.File —
@@ -144,6 +242,21 @@
    side: the operator-event consumer (Phase D D-2). Arities: () defaults
    base-dir to ~/.miniforge/events; (base-dir)."
   sinks/operator-dir)
+
+(def ^{:stratum 0} live-dir
+  "`{base-dir}/live/`, one directory per in-flight workflow. Arities:
+   () for ~/.miniforge/events; (base-dir)."
+  sinks/live-dir)
+
+(def ^{:stratum 0} archived-dir
+  "`{base-dir}/archived/`, where the archive moves a terminal workflow's
+   directory. Arities: () for ~/.miniforge/events; (base-dir)."
+  sinks/archived-dir)
+
+(def ^{:stratum 0} event-file-ms
+  "`(event-file-ms file-name)`: the epoch ms an event file name records,
+   in any grammar the sink has used; nil for any other name."
+  naming/event-file-ms)
 
 (def ^{:stratum 0} serialize-event
   "Serialize an event map to the canonical Transit-JSON wire string —
@@ -171,7 +284,7 @@
    no fence and only waits for in-flight publishes. Returns a map:
    {:ok? true :pending-publishers 0} or {:ok? false :reason :timeout
    :pending-publishers N}. Opts: :workflow-id, :timeout-ms (default
-   5000)."
+   5000). Unsupported on current-profile streams."
   stream/quiesce!)
 
 (def ^{:stratum 0} drain!
@@ -180,25 +293,34 @@
    :drained-count N}, {:ok? false :reason :timeout :pending-count N}, or
    {:ok? false :reason :sink-error :failed-sinks [...]}. Opts:
    :timeout-ms (default 5000) is the total budget across in-flight
-   settle plus sink drain."
+   settle plus sink drain. Unsupported on current-profile streams."
   stream/drain!)
 
 ;; Phase heartbeat scheduler — start/stop liveness signalling for long-running phases.
 (def ^{:stratum 0} start-heartbeat!
-  "Start periodic :workflow/phase-heartbeat emission for a phase on a
-   daemon scheduled executor. Returns an opaque stop handle map
-   (:heartbeat/executor, :heartbeat/future, :heartbeat/phase-id,
-   :heartbeat/last-tick, :heartbeat/seq-num) to pass to stop-heartbeat!.
-   Throws ex-info when event-stream is not IDeref, or when :interval-ms
-   is not a positive integer. opts: {:interval-ms long} (default 30s)."
+  "Start profile-aware phase heartbeats; return an owned stop handle or anomaly.
+   Current opts: positive :interval-ms (default 30s), :progress-sources (default
+   :unknown). Declare sources only when substantive-work ports are instrumented
+   continuously from entry. Every start creates a fresh activation; no replay
+   inference. Legacy construction and invalid-interval exceptions are retained."
   heartbeat/start-heartbeat!)
 
 (def ^{:stratum 0} stop-heartbeat!
-  "Stop a heartbeat scheduler returned by start-heartbeat!. Nil-safe.
-   Cancels the periodic ScheduledFuture (does not interrupt an in-flight
-   tick unless opts :may-interrupt? is true) then shuts down the backing
-   executor. Returns nil."
+  "Stop an owned scheduler. Nil-safe. Current handles close admission and cancel
+   before waiting for an in-flight tick; successful stop leaves no running tick.
+   Optional :may-interrupt? defaults false. Returns nil or a current anomaly."
   heartbeat/stop-heartbeat!)
+
+(def ^{:stratum 0} observe-heartbeat-progress!
+  "Report substantive progress through a captured current activation handle.
+   Source must be declared at entry; position is positive, strictly increasing
+   per source and activation. Repeats, stale positions and stopped handles cannot
+   advance progress. Unknown coverage remains unknown. Returns nil or anomaly."
+  heartbeat/observe-heartbeat-progress!)
+
+(def ^{:stratum 0} heartbeat-dropped-count
+  "Return the current activation's failed ephemeral publication count or anomaly."
+  heartbeat/heartbeat-dropped-count)
 
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; Event constructors
@@ -242,23 +364,60 @@
   "Construct an N3 governed OPSV effect disposition event."
   opsv/actuation-disposition)
 
+(def ^{:stratum 0} CheckpointLocation
+  "Paired nonempty root/run-directory strings; producers supply validated canonical paths."
+  recovery-location/Location)
+
+(def ^{:stratum 0} checkpoint-location
+  "Construct paired canonical root and physical run-directory metadata from validated paths; no I/O."
+  events/checkpoint-location)
+
+(def ^{:stratum 0} checkpoint-written
+  "Construct a checkpoint write fact: stream, workflow UUID, phase, path, byte size,
+   optional location record (1.1.0) or legacy root string (1.0.0)."
+  events/checkpoint-written)
+
+(def ^{:stratum 0} checkpoint-write-failed
+  "Construct a failed write fact: stream, workflow UUID, phase, error-message/class map."
+  events/checkpoint-write-failed)
+
+(def ^{:stratum 0} machine-snapshot-written
+  "Construct a snapshot write fact: stream, workflow UUID, state, path, byte size,
+   optional location record (1.1.0) or legacy root string (1.0.0)."
+  events/machine-snapshot-written)
+
+(def ^{:stratum 0} machine-snapshot-write-failed
+  "Construct a failed snapshot fact: stream, workflow UUID, state, error-message/class map."
+  events/machine-snapshot-write-failed)
+
+(def ^{:stratum 0} workflow-resumed
+  "Construct a resume fact: stream, original workflow UUID, state, phase, skipped phases."
+  events/workflow-resumed)
+
+(def ^{:stratum 0} workflow-spec-hash-mismatch
+  "Construct a drift fact: stream, workflow UUID, expected hash, actual hash."
+  events/workflow-spec-hash-mismatch)
+
 (def ^{:stratum 0} workflow-started
   "Build and return a :workflow/started event envelope map. Multi-arity
    for the legacy 2/3-arg call shape; the opts arity may carry
    :routing/trigger-event-id so the automation-edge-correlator links the
-   handler workflow back to its routing trigger."
+   handler workflow back to its routing trigger. Current drafts require
+   :workflow/intent in opts and do not reserve a sequence number."
   events/workflow-started)
 
 (def ^{:stratum 0} phase-started
   "Build and return a :workflow/phase-started event envelope map for the
-   given phase keyword; optional context is attached as :phase/context."
+   given phase keyword; optional context is attached as :phase/context.
+   Current drafts require a fifth options argument with :phase/expected-agent."
   events/phase-started)
 
 (def ^{:stratum 0} phase-completed
   "Build and return a :workflow/phase-completed event envelope map.
-   Records :phase/outcome (default :success) and, when present on the
+   Records :phase/outcome (legacy default :success) and, when present on the
    result, duration, artifacts, error, transition-request, redirect-to,
-   tokens, cost, meta, and termination-reason."
+   tokens, cost, meta, and termination-reason. Current drafts require explicit
+   outcome, duration and artifacts; construction does not reserve a position."
   events/phase-completed)
 
 (def ^{:stratum 0} workspace-persisted
@@ -298,16 +457,16 @@
   events/tool-call-completed)
 
 (def ^{:stratum 0} phase-heartbeat
-  "Build and return a :workflow/phase-heartbeat event envelope map for
-   long-running phase liveness (:phase/active-since,
-   :phase/events-emitted, :phase/last-event-at,
-   :phase/gap-since-last-event-ms)."
+  "Build a heartbeat without publishing. Current streams require N3 §3.1.1
+   liveness and explicit progress coverage; legacy streams retain tick fields.
+   Current drafts acquire their journal sequence only on publication."
   events/phase-heartbeat)
 
 (def ^{:stratum 0} workflow-completed
   "Build and return a :workflow/completed event envelope map carrying a
    status keyword and optional duration plus opts (tokens, cost,
-   pr-info, pr-infos, evidence-bundle-id)."
+   pr-info, pr-infos, evidence-bundle-id). Current drafts require :completed status,
+   duration and evidence identity, and carry no competing status field."
   events/workflow-completed)
 
 (def ^{:stratum 0} workflow-failed
@@ -315,8 +474,21 @@
    the error (Throwable, anomaly map, or plain map) into
    :workflow/failure-reason, :workflow/error-details,
    :workflow/anomaly-code, and :workflow/retryable?; optional
-   :failure/class."
+   :failure/class. Current drafts require the class and may carry
+   :workflow/failure-phase in opts."
   events/workflow-failed)
+
+(def ^{:stratum 0} workflow-cancelled
+  "Build and return a :workflow/cancelled event envelope map (N3): a run
+   an operator stopped, reported apart from :workflow/completed and
+   :workflow/failed. Takes the cancel's
+   {:cancel/requested-by :cancel/source :action/id?} and the run's
+   duration in ms. Returns an :invalid-input anomaly when the requester is
+   not a non-blank string, the source is not one N3 names (:cli :api :tui
+   :supervisor :control-action), a :control-action
+   source has no :action/id uuid, or the duration is not a non-negative
+   integer."
+  events/workflow-cancelled)
 
 (def ^{:stratum 0} llm-request
   "Build and return an :llm/request event envelope map for an LLM call
@@ -361,15 +533,16 @@
   events/gate-failed)
 
 (def ^{:stratum 0} phase-decision
-  "One event per gated phase transition carrying the DecisionEnvelope."
+  "Carry the exact runtime DecisionEnvelope. Current streams receive a draft;
+   legacy streams retain constructor-assigned positions. Retain drafts for retries."
   events/phase-decision)
 
 (def ^{:stratum 0} gate-rule-applied
   "Build and return a :gate/rule-applied event envelope map: per-rule
    policy evidence recording rule-id evaluated in phase with status
-   (:passed, :failed, :skipped-by-phase, :not-applicable). Optional
+   (:passed, :failed, :skipped-by-phase, :not-applicable, :guidance). Optional
    extra carries :severity, :enforcement, and a NON-SENSITIVE
-   :violation summary."
+   :violation summary. Current streams receive sequence-free drafts."
   events/gate-rule-applied)
 
 (def ^{:stratum 0} tool-invoked
@@ -460,6 +633,12 @@
    action id; optional result as :action/result."
   events/control-action-executed)
 
+(def ^{:stratum 0} create-chain-event-draft
+  "Args: [stream event-type payload & [opts]]. Validate a v2 chain payload before
+   allocating event identity. Supply run/definition identity and type-specific fields.
+   No sequence or admission occurs; do not pass to the legacy publisher."
+  events/create-chain-event-draft)
+
 (def ^{:stratum 0} chain-started
   "Build and return a :chain/started event envelope map (chains are not
    workflow-scoped, so :workflow/id is nil) carrying :chain/id and
@@ -468,18 +647,20 @@
 
 (def ^{:stratum 0} chain-step-started
   "Build and return a :chain/step-started event envelope map carrying
-   :chain/id, :step/id, :step/index, and :step/workflow-id."
+   :chain/id, :step/id, :step/index, and :step/workflow-id.
+   Optional final opts accept :workflow/id for child identity and legacy sequencing."
   events/chain-step-started)
 
 (def ^{:stratum 0} chain-step-completed
   "Build and return a :chain/step-completed event envelope map carrying
-   :chain/id, :step/id, and :step/index."
+   :chain/id, :step/id, and :step/index.
+   Optional final opts accept :workflow/id for child identity and legacy sequencing."
   events/chain-step-completed)
 
 (def ^{:stratum 0} chain-step-failed
   "Build and return a :chain/step-failed event envelope map carrying
    :chain/id, :step/id, :step/index, and :chain/error; optional
-   :failure/class."
+   :failure/class and :workflow/id in the final options map."
   events/chain-step-failed)
 
 (def ^{:stratum 0} chain-completed
@@ -932,7 +1113,8 @@
    timestamp-prefixed filename, parsed as transit-JSON and de-prefixed.
    Arg `dir` is a java.io.File or String path. Returns a vector of
    parsed event maps, or nil when the directory does not exist.
-   Unparseable files are silently dropped."
+   Unreadable files are skipped; their paths are in the vector's
+   metadata under `:event-stream/unreadable-files`."
   reader/read-workflow-events)
 
 (def ^{:stratum 0} stored-workflow-ids
@@ -944,13 +1126,36 @@
    archived → live → legacy directories of a workflow, or nil."
   reader/workflow-events-dir)
 
+(def ^{:stratum 0} event-order-key
+  "`(event-order-key event)`: [timestamp-ms sequence-number], the order to
+   sort read events by before taking the newest; file names order them
+   only to their recorded time."
+  reader/event-order-key)
+
 (def ^{:stratum 0} read-workflow-events-by-id
   "Read events for a workflow id under a base events dir, probing the
    archived → live → legacy layouts and reading the first that exists.
    Args: base-dir, workflow-id (UUID, keyword, or string). Returns a
    vector of parsed event maps, or nil when no layout contains the
-   workflow."
+   workflow. Unreadable files are skipped; their paths are in the
+   vector's metadata under `:event-stream/unreadable-files`."
   reader/read-workflow-events-by-id)
+
+(def ^{:stratum 0} start-layout-tail!
+  "`(start-layout-tail! events-dir on-event & [opts])`: follow the runs
+   other processes write under `events-dir` (live/ and archived/
+   workflow directories) on a daemon thread, calling `on-event` with each
+   new event in creation order, with UUID ids. Runs active at start are
+   read in full; older history is skipped. Opts: :poll-ms (500),
+   :window-ms (600000, how recently a directory was written to count as
+   active), :thread-name. Returns a function that stops it."
+  layout-tail/start!)
+
+(def ^{:stratum 0} read-layout-start-event
+  "`(read-layout-start-event events-dir workflow-id)`: the run's
+   :workflow/started event from its archived/ or live/ directory under
+   `events-dir`, ids as UUIDs; nil when there is none."
+  layout-reader/start-event)
 
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; Event timeline renderer

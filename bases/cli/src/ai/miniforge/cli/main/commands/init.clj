@@ -11,6 +11,7 @@
    Layer 3 — `init-cmd` (public CLI entry)."
   (:require
    [babashka.fs :as fs]
+   [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.repo-analyzer.interface :as analyzer]
@@ -71,12 +72,14 @@
 
 ;; Command entry point
 (defn ^{:stratum 3} init-cmd
-  "CLI entry point for the init command."
+  "CLI entry point for the init command. Exits 1 when the repository does
+   not exist."
   [opts]
   (let [repo-path (get opts :repo (str (fs/cwd)))]
     (cond
       (not (fs/exists? repo-path))
-      (display/print-error (messages/t :init/repo-not-found {:path repo-path}))
+      (do (display/print-error (messages/t :init/repo-not-found {:path repo-path}))
+          (shared/exit! 1))
 
       :else
       (do

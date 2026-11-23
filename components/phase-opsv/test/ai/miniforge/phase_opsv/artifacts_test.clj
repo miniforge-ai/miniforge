@@ -5,7 +5,7 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.evidence-bundle.interface :as evidence]
-            [ai.miniforge.phase-opsv.artifact-test-support :refer [with-context step]]
+            [ai.miniforge.phase-opsv.artifact-test-support :refer [with-context step attempted-output discovery-output]]
             [ai.miniforge.phase-opsv.artifact-boundary :as boundary]
             [ai.miniforge.phase-opsv.evidence-runtime :as runtime]
             [ai.miniforge.phase-opsv.interface :as phase]
@@ -36,7 +36,7 @@
 
 (defn- ^{:stratum 0} assert-idempotent-publication [ctx directory]
   (let [prepared (runtime/ensure-assembly ctx)
-        output {:opsv/experiment-pack (get-in ctx [:execution/input :opsv/experiment-pack])}
+        output (discovery-output ctx)
         first (boundary/publish-with-exception-handling prepared :opsv/discover output)
         retry (boundary/publish-with-exception-handling prepared :opsv/discover output)]
     (is (= first retry))
@@ -50,7 +50,7 @@
         bundle-id (get-in prepared [:execution/input :opsv/evidence-bundle-id])
         assembly (evidence/get-opsv-assembly (:opsv/evidence-assembly-store prepared) bundle-id)]
     (is (anomaly/anomaly? failed))
-    (is (= output (get-in failed [:anomaly/data :opsv/phase-output])))
+    (is (= (attempted-output output) (get-in failed [:anomaly/data :opsv/phase-output])))
     (is (empty? (:opsv/artifact-refs assembly)))))
 
 (defn- ^{:stratum 0} assert-unavailable-assembly [ctx directory]
@@ -59,13 +59,13 @@
 
 (defn- ^{:stratum 0} assert-unacknowledged-artifact [ctx directory]
   (let [prepared (runtime/ensure-assembly ctx)
-        output {:opsv/experiment-pack (get-in ctx [:execution/input :opsv/experiment-pack])}
+        output (discovery-output ctx)
         refusal (constantly (anomaly/anomaly :unavailable "assembly unavailable" {}))
         result (with-redefs [evidence/accumulate-opsv-evidence! refusal]
                  (boundary/publish-with-exception-handling prepared :opsv/discover output))
         id (get-in result [:anomaly/data :artifact/id])]
     (is (anomaly/anomaly? result))
-    (is (= output (get-in result [:anomaly/data :opsv/phase-output])))
+    (is (= (attempted-output output) (get-in result [:anomaly/data :opsv/phase-output])))
     (is (= id (:artifact/id (artifact/read-published directory id))))
     (is (nil? (get-in result [:anomaly/data :opsv/phase-output :opsv/artifact-refs])))))
 
@@ -85,7 +85,7 @@
         result (with-redefs [artifact/publish! fatal-publication]
                  (boundary/publish-with-exception-handling prepared :opsv/actuate output))]
     (is (= :fatal (:anomaly/type result)))
-    (is (= output (get-in result [:anomaly/data :opsv/phase-output])))))
+    (is (= (attempted-output output) (get-in result [:anomaly/data :opsv/phase-output])))))
 
 (defn- ^{:stratum 1} assert-verification-publication-recovery [ctx directory]
   (let [synthesized (reduce step ctx (take 5 support/handlers))

@@ -24,10 +24,15 @@
    [malli.error :as me]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.schema.core :as core]
+   [ai.miniforge.schema.instrument :as instrument]
    [ai.miniforge.schema.vocab :as vocab]
    [ai.miniforge.schema.logging :as logging]
    [ai.miniforge.schema.logging-vocab :as logging-vocab]
-   [ai.miniforge.schema.supervisory :as supervisory]))
+   [ai.miniforge.schema.supervisory :as supervisory]
+   [ai.miniforge.schema.supervisory-records-spec :as records]
+   [ai.miniforge.schema.supervisory-admission-spec :as admission]
+   [ai.miniforge.schema.semantic-version-spec :as version]
+   [ai.miniforge.schema.text-spec :as text]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -100,6 +105,42 @@
   logging/Scenario)
 
 ;; Supervisory entity schemas
+(def ^{:stratum 0} NonBlankString
+  "Current-write text containing at least one non-whitespace Unicode character."
+  text/NonBlankString)
+
+(def ^{:stratum 0} SemanticVersion
+  "Resolved semantic wire version; not a selector, range, or workspace DateVer."
+  version/SemanticVersion)
+
+(def ^{:stratum 0} InterventionState
+  "Canonical intervention lifecycle state vocabulary."
+  records/InterventionState)
+
+(def ^{:stratum 0} SpecRecord
+  "Current-write Spec record with required origin and non-blank title."
+  admission/SpecRecord)
+
+(def ^{:stratum 0} InterventionRecord
+  "Current-write intervention record with justification; not authorization."
+  admission/InterventionRecord)
+
+(def ^{:stratum 0} SpecProjection
+  "Deployed open Spec projection shape; not a current-write admission contract."
+  records/SpecProjection)
+
+(def ^{:stratum 0} InterventionProjection
+  "Deployed open intervention projection shape; not an authorization validator."
+  records/InterventionProjection)
+
+(def ^{:stratum 0} spec-statuses
+  "Ordered lifecycle vocabulary for long-lived supervisory work records."
+  records/spec-statuses)
+
+(def ^{:stratum 0} intervention-states
+  "Ordered intervention lifecycle vocabulary; permitted transitions are separate."
+  records/intervention-states)
+
 (def ^{:stratum 0} WorkflowRun
   "Malli open `:map` schema for a supervisory workflow run: `:workflow/id`,
    `:workflow/key`, `:workflow/status`, `:workflow/phase`,
@@ -153,8 +194,8 @@
   vocab/task-statuses)
 
 (def ^{:stratum 0} artifact-types
-  "Vector of artifact-type keywords (`:spec`, `:plan`, `:adr`, `:code`,
-   `:test`, `:review`, `:manifest`, `:image`, `:telemetry`, `:incident`)."
+  "Allowed generic and N6 OPSV artifact-type keywords.
+   Type admission does not validate domain content, provenance, or execution authority."
   vocab/artifact-types)
 
 (def ^{:stratum 0} workflow-phases
@@ -453,6 +494,15 @@
   ([errors opts]
    (merge {:valid? false :errors errors} opts)))
 
+;; Function-schema instrumentation
+(def ^{:stratum 0} instrument-fixture
+  "clojure.test fixture that checks every function schema declared in the
+   given namespaces (`:malli/schema` var metadata or `m/=>`) while the
+   wrapped tests run. Args: & ns-syms.
+   A call or return value that breaks its schema throws ex-info with
+   `:type` `:malli.core/invalid-input` or `:malli.core/invalid-output`."
+  instrument/instrument-fixture)
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} validate
@@ -545,10 +595,10 @@
                   :agent/role :invalid-role})
   ;; => {:agent/id ["should be a uuid"], :agent/role ["should be either ..."]}
 
-  ;; Validate and return or throw
-  (validate Task {:task/id (random-uuid)
-                  :task/type :implement
-                  :task/status :pending})
+  ;; Validate and return the value or an anomaly
+  (validate-anomaly Task {:task/id (random-uuid)
+                          :task/type :implement
+                          :task/status :pending})
   ;; => {:task/id #uuid "...", :task/type :implement, :task/status :pending}
 
   ;; Supervisory entity validation

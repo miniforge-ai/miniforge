@@ -16,7 +16,7 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.pr-lifecycle.anomaly.fetch-actionable-comments-result-test
-  "Coverage for `responder/fetch-actionable-comments-result`
+  "Coverage for `review-comments/fetch-actionable-comments-result`
    (anomaly-returning).
 
    Upstream poller error -> `:fault` anomaly. The orchestrator returns
@@ -26,7 +26,7 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.pr-poller :as poller]
-   [ai.miniforge.pr-lifecycle.responder :as responder]))
+   [ai.miniforge.pr-lifecycle.responder-comments :as review-comments]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -37,9 +37,10 @@
                   (fn [_ _]
                     (dag/ok {:comments [{:comment/type :review-comment
                                          :comment/author "alice"
+                                         :comment/author-association "MEMBER"
                                          :comment/path "src/x.clj"
                                          :comment/body "fix this"}]}))]
-      (let [result (responder/fetch-actionable-comments-result "/tmp" 42)]
+      (let [result (review-comments/fetch-actionable-comments-result "/tmp" 42)]
         (is (not (anomaly/anomaly? result)))
         (is (vector? (:comments result)))
         (is (vector? (:groups result)))
@@ -55,9 +56,10 @@
                                          :comment/body "auto comment"}
                                         {:comment/type :review-comment
                                          :comment/author "alice"
+                                         :comment/author-association "MEMBER"
                                          :comment/path "src/x.clj"
                                          :comment/body "real comment"}]}))]
-      (let [result (responder/fetch-actionable-comments-result "/tmp" 42)]
+      (let [result (review-comments/fetch-actionable-comments-result "/tmp" 42)]
         (is (= 1 (count (:comments result))))
         (is (= "alice" (:comment/author (first (:comments result)))))))))
 
@@ -66,7 +68,7 @@
   (testing "poller DAG err yields :fault anomaly"
     (with-redefs [poller/fetch-pr-comments
                   (fn [_ _] (dag/err :network "down"))]
-      (let [result (responder/fetch-actionable-comments-result "/tmp" 42)]
+      (let [result (review-comments/fetch-actionable-comments-result "/tmp" 42)]
         (is (anomaly/anomaly? result))
         (is (= :fault (:anomaly/type result)))
         (is (= 42 (:pr-number (:anomaly/data result))))
@@ -76,5 +78,5 @@
   (testing ":anomaly/message is the canonical fetch-failure string"
     (with-redefs [poller/fetch-pr-comments
                   (fn [_ _] (dag/err :downstream "boom"))]
-      (let [result (responder/fetch-actionable-comments-result "/tmp" 42)]
+      (let [result (review-comments/fetch-actionable-comments-result "/tmp" 42)]
         (is (= "Failed to fetch PR comments" (:anomaly/message result)))))))

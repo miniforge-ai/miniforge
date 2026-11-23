@@ -21,6 +21,7 @@
    [ai.miniforge.config.user :as user]
    [ai.miniforge.config.governance :as governance]
    [ai.miniforge.config.digest :as digest]
+   [ai.miniforge.config.execution :as execution]
    [ai.miniforge.config.profile :as profile]
    [ai.miniforge.config.resource :as resource]))
 
@@ -56,11 +57,15 @@
    resource). Empty map {} if neither resource can be read."
   user/default-config)
 
-(def ^{:stratum 0} miniforge-home
-  "Function returning the miniforge home directory as a string.
-   Args: none. Returns: MINIFORGE_HOME env var if set, else
-   `<user.home>/.miniforge`. Never nil."
-  user/miniforge-home)
+(def ^{:stratum 0} miniforge-home-override
+  "Function returning MINIFORGE_HOME when it is set, else nil. Args: none."
+  user/miniforge-home-override)
+
+(def ^{:stratum 0} path-outside?
+  "True when `path` does not resolve inside directory `home`. Args:
+   [home path]. With `miniforge-home-override`, a command that deletes
+   under a root can refuse one outside the home the user chose."
+  user/path-outside?)
 
 (def ^{:stratum 0} repo-config-dir-name
   "String naming the repo-level config directory: \".miniforge\"."
@@ -93,37 +98,22 @@
   ([] (user/load-merged-config-with-repo))
   ([user-path repo-path] (user/load-merged-config-with-repo user-path repo-path)))
 
-(defn ^{:stratum 0} save-user-config
-  "Save user configuration to file."
-  ([config] (user/save-user-config config))
-  ([config path] (user/save-user-config config path)))
-
-(defn ^{:stratum 0} init-user-config
-  "Initialize user config file with defaults."
-  ([] (user/init-user-config))
-  ([path] (user/init-user-config path)))
-
-(defn ^{:stratum 0} update-user-config
-  "Update a specific key in user config."
-  ([key-path value] (user/update-user-config key-path value))
-  ([key-path value path] (user/update-user-config key-path value path)))
-
-(defn ^{:stratum 0} reset-user-config
-  "Reset user config to defaults."
-  ([] (user/reset-user-config))
-  ([path] (user/reset-user-config path)))
-
-(defn ^{:stratum 0} edit-user-config
-  "Open user config in $EDITOR."
-  ([] (user/edit-user-config))
-  ([path] (user/edit-user-config path)))
-
 (defn ^{:stratum 0} merge-configs
   "Merge configurations with precedence."
   [& configs]
   (apply user/merge-configs configs))
 
 ;; Governance config functions
+(def ^{:stratum 0} governed-required?
+  "True when a user config requires governed (capsule) execution: any value
+   at [:execution :require-governed?] other than false or nil. Args: [cfg]."
+  execution/governed-required?)
+
+(def ^{:stratum 0} user-config-requires-governed?
+  "Whether the user config file requires governed execution, read strictly:
+   an unparseable or non-map file counts as requiring it. Args: [] or [path]."
+  execution/user-config-requires-governed?)
+
 (defn ^{:stratum 0} load-governance-config
   "Load governance config with full merge chain (resource -> profile -> user -> pack -> compile)."
   ([config-key] (governance/load-governance-config config-key))
@@ -165,3 +155,13 @@
   "Resolve git token for a host kind using profile + env var chain."
   [host-kind & [opts]]
   (profile/resolve-token host-kind opts))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} miniforge-home
+  "The miniforge home directory as a string: MINIFORGE_HOME when set
+   (`miniforge-home-override`), else `<user.home>/.miniforge`. Never nil.
+   It reads the override through its var, so a test that binds the
+   override moves the home too."
+  []
+  (or (miniforge-home-override) (user/default-miniforge-home)))

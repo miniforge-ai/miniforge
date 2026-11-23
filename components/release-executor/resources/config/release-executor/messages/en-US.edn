@@ -21,6 +21,35 @@
   :pr/create-unconfirmed "gh pr create reported success but printed no PR URL — cannot confirm a PR was opened (output: {output})"
   :pr/reuse-unresolved "A PR already exists for this branch but could not be resolved via gh pr view: {error}"
   :pr/reuse-no-url "gh pr view returned no PR URL"
+  :pr/closed "Branch {branch} already has a closed PR ({pr-url}); not opening another"
+  :pr/merged-other "Branch {branch} already has a merged PR ({pr-url}) of another commit; this release's commit is in no PR"
+  :pr/lookup-failed "Could not check whether branch {branch} already has a PR: {error}"
+
+  ;; push and PR creation recorded as effect transactions
+  :push/unresolved "Whether branch {branch} was pushed is unknown and the remote could not confirm it: {detail}"
+  :push/no-commit "No release commit to push on branch {branch}"
+  :push/probe-destination-differs "origin pushes somewhere other than its single fetch URL, so git ls-remote cannot confirm the push"
+  :pr/unresolved "Whether a PR was opened for branch {branch} is unknown and GitHub could not confirm it: {detail}"
+  :pr/recorded-not-found "A PR for branch {branch} is recorded as opened, but GitHub lists none"
+
+  ;; release branch
+  :branch/diverged "Release branch {branch} already exists and does not contain HEAD; not reusing it"
+
+  ;; publish after prepare
+  :publish/worktree-moved "The worktree moved after the release was prepared: expected {branch} at {commit-sha}, found {head-branch} at {head-sha}; not publishing"
+  :publish/index-changed "Changes were staged on {branch} after the release was prepared (or the index could not be read); not publishing"
+
+  ;; push HTTPS+token fallback (host mode): why no credential was sent
+  :push/token-retry-skipped
+  "The HTTPS token retry was not attempted and no credential was sent: {reason}."
+  :push/token-retry-not-single-target
+  "origin has more than one push URL (a mirror or several url/pushurl entries)"
+  :push/token-retry-rewritten
+  "git rewrites origin's push URL (insteadOf or pushInsteadOf), so the destination is not the configured URL"
+  :push/token-retry-untrusted-host
+  "origin's push URL is not on github.com, the only host the token is sent to"
+  :push/token-retry-env-config
+  "the environment already sets GIT_CONFIG_COUNT or GIT_CONFIG_PARAMETERS, so the retry could not run under the config that was checked"
 
   ;; push HTTPS+token fallback
   :push/https-fallback-setup-failed
@@ -29,6 +58,10 @@
   "Pushed via HTTPS token fallback but could not restore the origin remote URL; it may still embed the GitHub token. Scrub it: git remote set-url origin {remote-url}. Restore error: {restore-error}"
   :push/https-fallback-push-and-restore-failed
   "HTTPS token-fallback push failed and the origin remote URL could not be restored; it may still embed the GitHub token. Scrub it: git remote set-url origin {remote-url}. Push error: {push-error}. Restore error: {restore-error}"
+
+  ;; bounded remote calls (fetch, push, gh)
+  :shell/timed-out
+  "{command} did not finish within {timeout-ms} ms; it and its child processes were killed. A stalled connection or a credential prompt can cause this."
 
   ;; pipeline steps
   :step/metadata-generation-failed "Releaser agent failed to generate release metadata"

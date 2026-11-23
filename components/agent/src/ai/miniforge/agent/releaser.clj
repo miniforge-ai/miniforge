@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.agent.releaser
   "Releaser agent implementation.
    Generates branch names, commit messages, PR titles and descriptions
@@ -37,9 +36,9 @@
    [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Releaser-specific schemas
 
-(def ReleaseArtifact
+;; Releaser-specific schemas
+(def ^{:stratum 0} ReleaseArtifact
   [:map
    [:release/id uuid?]
    [:release/branch-name [:re #"^[a-zA-Z0-9][a-zA-Z0-9._/\-]{0,99}$"]]
@@ -50,37 +49,12 @@
    [:release/created-at {:optional true} inst?]])
 
 ;; System Prompt - loaded from resources/prompts/releaser.edn
-
-(def releaser-system-prompt
+(def ^{:stratum 0} releaser-system-prompt
   "System prompt for the releaser agent.
    Loaded from EDN resource for configurability."
   (delay (prompts/load-prompt :releaser)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Releaser functions
-
-(defn validate-release-artifact
-  [artifact]
-  (let [schema-valid? (m/validate ReleaseArtifact artifact)]
-    (if-not schema-valid?
-      {:valid? false
-       :errors (schema/explain ReleaseArtifact artifact)}
-      ;; Additional validations
-      (cond
-        ;; PR title too long
-        (> (count (:release/pr-title artifact "")) 70)
-        {:valid? false
-         :errors {:pr-title "PR title exceeds 70 characters"}}
-
-        ;; Commit message empty first line
-        (str/blank? (first (str/split-lines (:release/commit-message artifact ""))))
-        {:valid? false
-         :errors {:commit-message "Commit message first line cannot be empty"}}
-
-        :else
-        {:valid? true :errors nil}))))
-
-(defn summarize-files
+(defn ^{:stratum 0} summarize-files
   "Create a summary of file operations."
   [files]
   (let [by-action (group-by :action files)
@@ -95,28 +69,7 @@
       (str/join ", " parts)
       "no file changes")))
 
-(defn input->text
-  "Convert input to text for the LLM."
-  [input context]
-  (let [code-artifact (:code-artifact input)
-        task-description (:task-description input)
-        files (:code/files code-artifact)
-        file-summary (when files (summarize-files files))]
-    (str "Generate release metadata for the following changes:\n\n"
-         (when task-description
-           (str "## Task Description\n" task-description "\n\n"))
-         (when (:code/summary code-artifact)
-           (str "## Implementation Summary\n" (:code/summary code-artifact) "\n\n"))
-         (when file-summary
-           (str "## Files Changed\n" file-summary "\n\n"))
-         (when files
-           (str "## File Details\n"
-                (str/join "\n" (map #(str "- " (name (:action %)) ": " (:path %)) files))
-                "\n\n"))
-         (when-let [repo (:repository context)]
-           (str "## Repository\n" repo "\n\n")))))
-
-(defn parse-release-response
+(defn ^{:stratum 0} parse-release-response
   "Parse the LLM response to extract release artifact.
    Handles both EDN in code blocks and plain EDN.
    Returns nil if the parsed result is not a map."
@@ -131,7 +84,7 @@
     (catch Exception _
       nil)))
 
-(defn slugify
+(defn ^{:stratum 0} slugify
   "Convert a string to a URL-safe slug.
    Handles basic ASCII transliteration and normalizes spacing."
   [s]
@@ -156,8 +109,7 @@
 
 ;; make-fallback-artifact removed — silent fallback masks real failures,
 ;; prevents retry/repair from working, and short-circuits checkpoint resume.
-
-(defn repair-release-artifact
+(defn ^{:stratum 0} repair-release-artifact
   "Attempt to repair a release artifact based on validation errors."
   [artifact errors _context]
   (let [repaired (atom artifact)]
@@ -188,10 +140,8 @@
      :repairs-made (when (not= artifact @repaired)
                      {:original-errors errors})}))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Public API
-
-(defn- invoke-releaser-session
+(defn- ^{:stratum 0} invoke-releaser-session
   "Session body for the releaser: build mcp-opts, call LLM.
 
    `effective-system` is the base releaser prompt with the
@@ -207,7 +157,61 @@
       (llm/chat llm-client user-prompt
                 (merge {:system effective-system} mcp-opts)))))
 
-(defn create-releaser
+(defn ^{:stratum 0} release-summary
+  [artifact]
+  {:id (:release/id artifact)
+   :branch (:release/branch-name artifact)
+   :pr-title (:release/pr-title artifact)
+   :files-summary (:release/files-summary artifact)})
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; Releaser functions
+(defn ^{:stratum 1} validate-release-artifact
+  [artifact]
+  (let [schema-valid? (m/validate ReleaseArtifact artifact)]
+    (if-not schema-valid?
+      {:valid? false
+       :errors (schema/explain ReleaseArtifact artifact)}
+      ;; Additional validations
+      (cond
+        ;; PR title too long
+        (> (count (:release/pr-title artifact "")) 70)
+        {:valid? false
+         :errors {:pr-title "PR title exceeds 70 characters"}}
+
+        ;; Commit message empty first line
+        (str/blank? (first (str/split-lines (:release/commit-message artifact ""))))
+        {:valid? false
+         :errors {:commit-message "Commit message first line cannot be empty"}}
+
+        :else
+        {:valid? true :errors nil}))))
+
+(defn ^{:stratum 1} input->text
+  "Convert input to text for the LLM."
+  [input context]
+  (let [code-artifact (:code-artifact input)
+        task-description (:task-description input)
+        files (:code/files code-artifact)
+        file-summary (when files (summarize-files files))]
+    (str "Generate release metadata for the following changes:\n\n"
+         (when task-description
+           (str "## Task Description\n" task-description "\n\n"))
+         (when (:code/summary code-artifact)
+           (str "## Implementation Summary\n" (:code/summary code-artifact) "\n\n"))
+         (when file-summary
+           (str "## Files Changed\n" file-summary "\n\n"))
+         (when files
+           (str "## File Details\n"
+                (str/join "\n" (map #(str "- " (name (:action %)) ": " (:path %)) files))
+                "\n\n"))
+         (when-let [repo (:repository context)]
+           (str "## Repository\n" repo "\n\n")))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} create-releaser
   "Create a Releaser agent with optional configuration overrides.
 
    Options:
@@ -242,7 +246,8 @@
                                     (get input :task/behavior-addendum ""))]
           (if llm-client
             ;; Use the real LLM with artifact session for MCP tool support
-            (let [{:keys [llm-result artifact worktree-artifacts]}
+            (let [{:keys [llm-result artifact worktree-artifacts
+                          codex-answers codex-answer-log]}
                   (artifact-session/with-session context
                     #(invoke-releaser-session % llm-client user-prompt
                                               effective-system config context on-chunk))
@@ -257,7 +262,12 @@
                         {:data {:success (llm/success? llm-response)
                                 :tokens (:tokens normalized)
                                 :streaming? (boolean on-chunk)}})
-              (if (result-boundary/usable-content? normalized)
+              ;; §7.7.2 explicit answers: recorded peg answers (and the
+              ;; lost-vs-unanswered answer-log marker) ride the releaser
+              ;; result on success AND failure so the release phase can
+              ;; hand them to the consultation summary.
+              (cond->
+               (if (result-boundary/usable-content? normalized)
                 (let [parsed (result-boundary/authoritative-payload normalized)]
                   (if parsed
                     (let [release-with-meta (-> parsed
@@ -267,20 +277,15 @@
                     ;; LLM returned content but no parseable release artifact — fail explicitly
                     (response/error "LLM response could not be parsed as release artifact"
                                     {:tokens (:tokens normalized)})))
-                (result-boundary/error-response normalized "LLM call failed")))
+                (result-boundary/error-response normalized "LLM call failed"))
+               (some? codex-answers) (assoc :codex-answers codex-answers)
+               (some? codex-answer-log) (assoc :codex-answer-log codex-answer-log)))
             ;; No LLM client — fail explicitly
             (response/error "No LLM backend provided"))))
 
       :validate-fn validate-release-artifact
 
       :repair-fn repair-release-artifact})))
-
-(defn release-summary
-  [artifact]
-  {:id (:release/id artifact)
-   :branch (:release/branch-name artifact)
-   :pr-title (:release/pr-title artifact)
-   :files-summary (:release/files-summary artifact)})
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

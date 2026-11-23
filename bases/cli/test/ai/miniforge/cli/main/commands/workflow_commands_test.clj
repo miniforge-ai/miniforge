@@ -21,6 +21,7 @@
    [clojure.test :refer [deftest testing is use-fixtures]]
    [babashka.fs :as fs]
    [ai.miniforge.cli.app-config :as app-config]
+   [ai.miniforge.cli.main.commands.intervention-outcome :as outcome]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.commands.workflow-commands :as sut]
    [ai.miniforge.cli.worktree :as worktree]
@@ -30,7 +31,7 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;------------------------------------------------------------------------------ Layer 0: Fixtures & factories
+;; Fixtures & factories
 (def ^{:stratum 0} ^:dynamic *tmp-dir* nil)
 
 (defn ^{:stratum 0} tmp-dir-fixture [f]
@@ -98,11 +99,16 @@
 
 (deftest ^{:stratum 0} workflow-cancel-cmd-requests-a-cancel-intervention-test
   (testing "cancel command writes a governed intervention request"
-    (let [requests (atom [])]
+    (let [requests (atom [])
+          exit-code (atom nil)]
       (with-redefs [es/request-intervention!
                     (fn [request]
                       (swap! requests conj request)
-                      (assoc request :intervention/id (random-uuid)))]
+                      (assoc request :intervention/id (random-uuid)))
+                    ;; The run applying it is covered in
+                    ;; workflow-cancel-outcome-test; here it is stubbed.
+                    outcome/await-transition (constantly {:intervention/state :verified})
+                    shared/exit! (fn [code] (reset! exit-code code))]
         ;; A UUID id reflects the real contract: the operator writer
         ;; rejects a non-UUID workflow target, so a governed run's id is
         ;; always a UUID string.
@@ -110,6 +116,7 @@
               output (with-out-str (sut/workflow-cancel-cmd {:id wid}))
               request (first @requests)]
           (is (.contains output "Cancel"))
+          (is (nil? @exit-code) "an applied cancel exits 0")
           (is (= 1 (count @requests)))
           ;; The legacy poller verb was `stop`; the intervention
           ;; vocabulary names the same operation `:cancel`.
@@ -126,7 +133,7 @@
     (with-redefs [es/request-intervention!
                   (fn [_request] (throw (ex-info "disk full" {})))
                   shared/exit! (fn [_] nil)]
-      (let [output (with-out-str (sut/workflow-cancel-cmd {:id (str (random-uuid))}))]
+      (let [output (with-out-str (binding [*err* *out*] (sut/workflow-cancel-cmd {:id (str (random-uuid))})))]
         (is (.contains output "disk full"))
         (is (not (.contains output "Cancel signal sent")))))))
 
@@ -136,7 +143,7 @@
                   (fn [_request]
                     (anomaly/anomaly :invalid-input "bad request" {}))
                   shared/exit! (fn [_] nil)]
-      (let [output (with-out-str (sut/workflow-cancel-cmd {:id (str (random-uuid))}))]
+      (let [output (with-out-str (binding [*err* *out*] (sut/workflow-cancel-cmd {:id (str (random-uuid))})))]
         (is (.contains output "bad request"))
         (is (not (.contains output "Cancel signal sent")))))))
 
@@ -148,7 +155,7 @@
           output  (atom "")]
       (with-redefs [worktree/worktree-root (constantly nil)
                     shared/exit! (fn [_] (reset! exited? true))]
-        (reset! output (with-out-str (sut/workflow-gc-scratch-cmd {}))))
+        (reset! output (with-out-str (binding [*err* *out*] (sut/workflow-gc-scratch-cmd {})))))
       (is @exited?)
       ;; The i18n message must mention "git repository" so the user understands.
       (is (re-find #"(?i)git" @output)))))
@@ -191,7 +198,7 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-;------------------------------------------------------------------------------ Layer 1: Tests
+;; Tests
 (deftest ^{:stratum 1} derive-status-test
   (testing "completed events derive 'completed' status"
     (is (= "completed" (sut/derive-status (make-events :completed)))))

@@ -19,6 +19,7 @@
 (ns ai.miniforge.connector-file.writer
   "File writing for JSON and EDN formats."
   (:require [cheshire.core :as json]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]))
 
 (defn write-json
@@ -39,7 +40,7 @@
   "Write records as EDN vector to file."
   [path records mode]
   (let [existing (when (and (= mode :append) (.exists (io/file path)))
-                   (read-string (slurp path)))
+                   (edn/read-string (slurp path)))
         all-records (if existing
                       (into (vec existing) records)
                       (vec records))]

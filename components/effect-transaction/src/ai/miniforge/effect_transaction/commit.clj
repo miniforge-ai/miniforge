@@ -43,7 +43,7 @@
                        (call/changes (call/result (partial effect-fn committing)))
                        now))))
 
-(defn- ^{:stratum 0} deny!
+(defn ^{:stratum 0} deny!
   "Record a failed commit-time grant recheck without firing the effect."
   [dir t auth ^Instant now]
   (let [failure (msg/t :grant/recheck-failed

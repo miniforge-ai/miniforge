@@ -20,6 +20,7 @@
             [clojure.test :refer [deftest is testing]]
             [ai.miniforge.connector-http.interface :as connector-http]
             [ai.miniforge.cursor-store.interface :as sut]
+            [ai.miniforge.cursor-store.store :as store]
             [ai.miniforge.logging.interface :as log])
   (:import [java.time Instant]
            [java.util Date]))
@@ -31,6 +32,11 @@
        "/cursor-store-test-"
        (random-uuid)
        "/pipelines/pipeline.edn"))
+
+(defn- ^{:stratum 0} cursors-dir
+  "The directory the store writes a pipeline's cursor file into."
+  ^java.io.File [pipeline-path]
+  (io/file (.getParentFile (io/file pipeline-path)) ".cursors"))
 
 (def ^{:stratum 0} ^:private logger (log/create-logger {:min-level :debug :output :human}))
 
@@ -218,6 +224,29 @@
                           [["Ingest PRs" "Ingest PRs"] :cursor :cursor/value]))))
       (is (= 10 (get-in (:cursors (sut/load-cursors logger path))
                         [["Ingest PRs" "Ingest PRs"] :cursor :cursor/value]))))))
+
+(deftest ^{:stratum 1} save-leaves-only-the-cursor-file-test
+  (testing "a save leaves no temp file beside the cursor file"
+    (let [path (tmp-pipeline-path)]
+      (sut/save-cursors logger path (stage-cursor "Ingest PRs" 10))
+      (sut/save-cursors logger path (stage-cursor "Ingest PRs" 11))
+      (is (= ["pipeline.edn"] (vec (.list (cursors-dir path))))))))
+
+(deftest ^{:stratum 1} failed-replace-keeps-the-previous-file-test
+  (testing "a save that fails before the rename leaves the previous cursors readable"
+    ;; New content goes to a sibling temp file and is renamed over the
+    ;; cursor file. Writing the cursor file in place truncates it first,
+    ;; and a run killed there leaves the empty file that
+    ;; non-map-cursor-file-fails-loudly-test shows fails every later run.
+    (let [path (tmp-pipeline-path)]
+      (sut/save-cursors logger path (stage-cursor "Ingest PRs" 10))
+      (with-redefs [store/move-target! (fn [_tmp _target]
+                                         (throw (java.io.IOException. "simulated")))]
+        (is (false? (:success? (sut/save-cursors logger path
+                                                 (stage-cursor "Ingest PRs" 11))))))
+      (is (= 10 (get-in (:cursors (sut/load-cursors logger path))
+                        [["Ingest PRs" "Ingest PRs"] :cursor :cursor/value])))
+      (is (= ["pipeline.edn"] (vec (.list (cursors-dir path))))))))
 
 (deftest ^{:stratum 1} non-map-cursor-file-fails-loudly-test
   (testing "a file that does not hold a map is a failure, not a fresh start"
