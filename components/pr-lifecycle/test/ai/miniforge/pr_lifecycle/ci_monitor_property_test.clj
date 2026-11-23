@@ -34,20 +34,24 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 ;------------------------------------------------------------------------------ Helpers
-(def ^{:stratum 0} valid-states
-  "Realistic GitHub check states."
-  ["COMPLETED" "QUEUED" "WAITING" "IN_PROGRESS" nil])
-
-(def ^{:stratum 0} valid-conclusions
-  "Realistic GitHub check conclusions."
-  ["SUCCESS" "FAILURE" "NEUTRAL" "CANCELLED" "SKIPPED"
-   "ACTION_REQUIRED" "TIMED_OUT" nil])
+(def ^{:stratum 0} valid-checks
+  "Realistic `gh pr checks --json` state/bucket pairs (gh 2.102), plus a
+   check with neither field."
+  [{:state "SUCCESS" :bucket "pass"}
+   {:state "FAILURE" :bucket "fail"}
+   {:state "TIMED_OUT" :bucket "fail"}
+   {:state "IN_PROGRESS" :bucket "pending"}
+   {:state "QUEUED" :bucket "pending"}
+   {:state "SKIPPED" :bucket "skipping"}
+   {:state "NEUTRAL" :bucket "skipping"}
+   {:state "CANCELLED" :bucket "cancel"}
+   {:state nil :bucket nil}])
 
 ;------------------------------------------------------------------------------ Property: All-success yields :success
 (deftest ^{:stratum 0} compute-ci-status-all-success-test
-  (testing "Property: all COMPLETED/SUCCESS checks always yield :success"
+  (testing "Property: all SUCCESS/pass checks always yield :success"
     (doseq [n (range 1 20)]
-      (let [checks (vec (repeat n {:name "test" :state "COMPLETED" :conclusion "SUCCESS"}))
+      (let [checks (vec (repeat n {:name "test" :state "SUCCESS" :bucket "pass"}))
             result (checks/compute-ci-status checks)]
         (is (response/success? result)
             (str n " SUCCESS checks should yield :success"))))))
@@ -64,8 +68,8 @@
   (testing "Property: QUEUED check prevents :success status (unless failure present)"
     (dotimes [_ 50]
       (let [success-checks (vec (for [i (range (inc (rand-int 5)))]
-                                  {:name (str "pass-" i) :state "COMPLETED" :conclusion "SUCCESS"}))
-            pending-check {:name "queued" :state "QUEUED" :conclusion nil}
+                                  {:name (str "pass-" i) :state "SUCCESS" :bucket "pass"}))
+            pending-check {:name "queued" :state "QUEUED" :bucket "pending"}
             checks (conj success-checks pending-check)
             result (checks/compute-ci-status checks)]
         (is (= :pending (:status result))
@@ -77,9 +81,7 @@
   "Generate n random CI check maps."
   [n]
   (mapv (fn [i]
-          {:name (str "check-" i)
-           :state (rand-nth valid-states)
-           :conclusion (rand-nth valid-conclusions)})
+          (assoc (rand-nth valid-checks) :name (str "check-" i)))
         (range n)))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -123,10 +125,10 @@
 
 ;------------------------------------------------------------------------------ Property: Failure precedence
 (deftest ^{:stratum 2} compute-ci-status-failure-precedence-test
-  (testing "Property: if any check has FAILURE conclusion with COMPLETED state, status is :failure"
+  (testing "Property: if any check is in the fail bucket, status is :failure"
     (dotimes [_ 50]
       (let [base-checks (random-checks (rand-int 10))
-            fail-check {:name "forced-fail" :state "COMPLETED" :conclusion "FAILURE"}
+            fail-check {:name "forced-fail" :state "FAILURE" :bucket "fail"}
             checks (conj base-checks fail-check)
             result (checks/compute-ci-status checks)]
         (is (= :failure (:status result))
