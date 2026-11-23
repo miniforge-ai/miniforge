@@ -71,7 +71,7 @@
             (is (not= ::still-waiting result)
                 "the wait ends on :stopped while :paused is still true")
             (when (map? result)
-              (is (= :failed (:execution/status result)))
+              (is (= :cancelled (:execution/status result)))
               (is (some #(= :dashboard-stop (:type %))
                         (:execution/errors result)))))
           (finally

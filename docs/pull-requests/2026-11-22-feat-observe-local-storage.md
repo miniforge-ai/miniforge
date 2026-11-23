@@ -40,29 +40,42 @@ mount-option field. Ext4 is deferred: its external journal can be selected from
 the superblock without its mount table advertising a separate device. Until
 positive journal-topology evidence exists, an ext4 mount cannot qualify through
 this single-device profile. Existing non-durable workflows are unchanged.
+Bind both path observations to the selected mount row's kernel major:minor
+device, using Linux's stat device encoding. An overmounted ancestor cannot make
+two tmpfs path lookups attest a hidden XFS row. Unknown device encodings refuse.
+Also require distinct mount identities and the actual parent chain for every
+covering prefix. Hidden children and stacked prefixes refuse even when the
+covering read-only mount shares the writable child's filesystem device.
+Ordinary visible nested mounts remain supported. Parent relationships follow
+the [kernel mountinfo contract](https://man7.org/linux/man-pages/man5/proc_pid_mountinfo.5.html).
 
 ## Testing plan
 
 Use producer-shaped mount and disk-metadata fixtures. Pin rejection of unsupported
 mounts, ambiguous tables, virtual or unmapped devices, mismatched root devices,
 disabled APFS ownership and invalid UUID types. Mock only native I/O boundaries.
-The packet, including the real macOS ACL fixtures, passes 21 tests and 122 assertions
+The packet, including the real macOS ACL fixtures, passes 27 tests and 138 assertions
 in each JVM product, Babashka source and a fresh package.
 Disabling the filesystem allowlist, device checks or ownership
 check fails six, two and two assertions respectively on JVM and Babashka, with no
 runtime errors. Ignoring the selected native exit protocol fails two further assertions.
 Removing the separate-device guard fails six further assertions on each runtime,
 covering both option fields and combined external-device layouts, with no errors.
+Bypassing the kernel-device binding fails a stale-snapshot device regression;
+bypassing mount-parent verification independently fails the same-device read-only
+overmount regression. Both fail once with no errors on JVM and Babashka.
 The realistic PCI/virtio regression mirrors [Oracle's sysfs example](https://docs.oracle.com/en/operating-systems/oracle-linux/8/udev/udev-QueryingUdevandSysfs_view_attributes_for_a_device_and_its_parent_devices.html).
 Controller transport follows the [kernel NVMe ABI](https://www.kernel.org/doc/html/latest/admin-guide/abi-stable.html).
 Host detection follows the [native tool contract](https://www.freedesktop.org/software/systemd/man/latest/systemd-detect-virt.html).
 Separate XFS devices follow the [kernel filesystem contract](https://github.com/torvalds/linux/blob/master/Documentation/admin-guide/xfs.rst).
 Ext4 remains deferred after tracing external-journal selection and mount reporting
 in [the kernel implementation](https://github.com/torvalds/linux/blob/master/fs/ext4/super.c).
+Device decoding follows the [kernel ABI](https://github.com/torvalds/linux/blob/master/include/linux/kdev_t.h),
+with independent ordinary, extended-field, mismatch and range-boundary fixtures.
 Read-only local metadata checks confirm the macOS fixture shape;
 the optional physical-classification field is absent even on this host's backing
 partition. Strict lint and actual dependency-layer checks pass.
-All nine exact namespace REPL examples pass on JVM and native Babashka.
+All ten exact namespace REPL examples pass on JVM and native Babashka.
 The macOS ACL missing-path
 interceptor calls the captured three-argument probe directly, so redefining the
 public probe cannot intercept its own default-arity delegation. Production ACL

@@ -44,22 +44,14 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} cancelled
-  "The :workflow/cancelled payload, or an :invalid-input anomaly for a
-   record N3 does not accept."
-  [cancellation duration-ms]
+(defn ^{:stratum 1} valid-cancellation?
+  "True for a cancel record N3 accepts: a non-blank requester, a source N3
+   names, and an action id for a :control-action source."
+  [cancellation]
   (let [{:cancel/keys [requested-by source] action-id :action/id} cancellation]
-    (if (and (string? requested-by) (not (str/blank? requested-by))
-             (contains? cancel-sources source)
-             (or (not= :control-action source) (uuid? action-id))
-             (nat-int? duration-ms))
-      (cond-> {:message (msg/t :workflow/cancelled {:requested-by requested-by})
-               :cancel/requested-by requested-by
-               :cancel/source source
-               :workflow/duration-ms duration-ms}
-        (uuid? action-id) (assoc :action/id action-id))
-      (anomaly/anomaly :invalid-input (msg/system :workflow/invalid-cancellation)
-                       {:cancellation cancellation :duration-ms duration-ms}))))
+    (boolean (and (string? requested-by) (not (str/blank? requested-by))
+                  (contains? cancel-sources source)
+                  (or (not= :control-action source) (uuid? action-id))))))
 
 (defn- ^{:stratum 1} error-details [error]
   (cond
@@ -68,6 +60,20 @@
     :else error))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} cancelled
+  "The :workflow/cancelled payload, or an :invalid-input anomaly for a
+   record N3 does not accept."
+  [cancellation duration-ms]
+  (let [{:cancel/keys [requested-by source] action-id :action/id} cancellation]
+    (if (and (valid-cancellation? cancellation) (nat-int? duration-ms))
+      (cond-> {:message (msg/t :workflow/cancelled {:requested-by requested-by})
+               :cancel/requested-by requested-by
+               :cancel/source source
+               :workflow/duration-ms duration-ms}
+        (uuid? action-id) (assoc :action/id action-id))
+      (anomaly/anomaly :invalid-input (msg/system :workflow/invalid-cancellation)
+                       {:cancellation cancellation :duration-ms duration-ms}))))
 
 (defn ^{:stratum 2} failed [error failure-class]
   (let [details (error-details error)

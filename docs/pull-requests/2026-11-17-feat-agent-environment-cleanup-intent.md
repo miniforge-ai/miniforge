@@ -10,9 +10,9 @@
 
 Third PR for issue #2506. Every delete of an agent environment now goes through the ledger. A
 compare-and-set first records the intent: the UID and generation to delete, and when it was
-requested. Only a caller whose intent the ledger took sends the delete. The outcome is then recorded
-against that intent in stages: applied when the provider confirms the deletes, verified when the
-target no longer shows the UID. Only a verified cleanup releases the entry.
+requested. Only a caller whose intent the ledger took sends the delete. The outcome is recorded against that intent in stages.
+It is applied when the provider confirms the deletes, and verified when the target no longer shows the UID. Only a
+verified cleanup releases the entry.
 
 API surface class 1: in-process EDN.
 
@@ -28,9 +28,9 @@ top of this.
 On `main`, a release called the provider's delete and only then wrote the ledger. If that write
 failed, the deletes had run while the ledger still showed the environment provisioned, which #2521
 documented as a known gap. Cleanup after a partial provision did the same. Neither recorded whether
-the UID was actually gone. Copilot's review of #2524 showed why this matters for takeover: a
-controller could delete an environment another controller had adopted, and a failed cleanup left a
-resource nothing in the ledger pointed at. Recording the intent first gives each delete one owner
+the UID was gone. Copilot's review of #2524 showed why this matters for takeover.
+A controller could delete an environment another controller had adopted.
+A failed cleanup left a resource nothing in the ledger pointed at. Recording the intent first gives each delete one owner
 and a durable record that survives a crash between the delete and its outcome.
 
 ## Changes in Detail
@@ -38,28 +38,28 @@ and a durable record that survives a crash between the delete and its outcome.
 1. `lifecycle.cleanup`, new:
    1. `intent`: `{:cleanup/attempt :cleanup/uid :cleanup/generation :cleanup/requested-at
       :cleanup/applied? :cleanup/verified?}`. Each attempt gets a random id, so two attempts at one
-      clock instant hold different intents, and each owns only the intent its own write recorded.
+      clock instant hold different intents. Each owns only the intent its own write recorded.
    2. `released!` writes the intent under the caller's lease. The write moves the entry to the new
       `:state/releasing` only while that entry still admits a release under the lease. A caller
       whose intent the ledger did not take is refused, and nothing is deleted.
    3. It then deletes by UID and observes the target. The delete is verified when the UID is no
       longer there, and an observation that fails verifies nothing. The outcome is written only to
-      an entry that still holds this intent: `:state/released` only when the deletes applied and are
-      verified, otherwise `:state/cleanup-uncertain` to retry. A UID that is gone does not release
+      an entry that still holds this intent. It becomes `:state/released` only when deletes applied
+      and are verified; otherwise it becomes `:state/cleanup-uncertain` to retry. A UID that is gone does not release
       an entry whose deletes the provider reported failed, since its delete may cover more than the
       namespace. The receipt adds a `:step/verified` step, so a release is
       `:outcome/applied` only when its deletes are verified. If another attempt replaced the intent
-      before this one recorded its outcome, and the entry is not released, the call returns the
-      entry's refusal (`environment-releasing` or `cleanup-uncertain`), so it is retried rather
-      than reported done.
+      before this one recorded its outcome, the call checks whether the entry is released.
+      An unreleased entry returns its refusal (`environment-releasing` or `cleanup-uncertain`).
+      The call is retried rather than reported done.
    4. `reservation-cleaned!` does the same for a partial provision. The intent goes on the
       reservation and applies only while that generation is still provisioning. It records the
       environment, so its lease can retry the release.
 2. `lifecycle`: `release!` uses `cleanup/released!`. The old delete-then-settle path is removed.
 3. `lifecycle.provisioning`: `provision-failed` cleans up through `reservation-cleaned!`. When nothing
    is to be deleted, `uncleaned!` records released (every step failed) or cleanup-uncertain. When the
-   ledger does not record the outcome, its anomaly still carries the receipt ids, and the
-   environment's lease when the cleanup intent was stored, so the caller can retry the release. When
+   ledger does not record the outcome, its anomaly still carries the receipt ids.
+   When the cleanup intent was stored, it also carries the environment's lease so the caller can retry release. When
    the intent was not stored, no lease is offered: the entry holds no environment, so the lease
    could not be used. That reservation stays provisioning until PR #2524's reconcile deletes the
    partial environment.

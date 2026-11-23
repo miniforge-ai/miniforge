@@ -249,6 +249,20 @@
    Returns a vector of phase interceptors."
   pipeline/build-pipeline)
 
+(def ^{:stratum 0} cancelled?
+  "True for a run result that ended :cancelled (N2 2.2)."
+  pipeline/cancelled?)
+
+(def ^{:stratum 0} run-outcome
+  "How a finished run result ended: :completed, :cancelled or :failed."
+  pipeline/run-outcome)
+
+(def ^{:stratum 0} cancellation
+  "Who cancelled a :cancelled run result and from where, as its
+   :workflow/cancelled event reports it: {:cancel/requested-by
+   :cancel/source :cancel/reason? :action/id?}."
+  pipeline/cancellation)
+
 (def ^{:stratum 0} validate-pipeline
   "Validate a workflow's pipeline (phase + execution-machine checks). Args:
    [workflow]. Returns {:valid? boolean :errors [...] :warnings [...]}."

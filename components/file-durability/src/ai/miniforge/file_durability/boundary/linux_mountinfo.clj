@@ -9,23 +9,34 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- ^{:stratum 0} closest-target [^Path root mounts]
+(defn- ^{:stratum 0} covering-mounts [^Path root mounts]
   (->> mounts
-       (keep :mount/target)
-       (filter #(.startsWith root ^Path %))
-       (sort-by #(.getNameCount ^Path %))
-       last))
+       (filter :mount/target)
+       (filter #(.startsWith root ^Path (:mount/target %)))
+       (sort-by #(.getNameCount ^Path (:mount/target %)))))
+
+(defn- ^{:stratum 0} attached? [[parent child]]
+  (and (not= (:mount/target parent) (:mount/target child))
+       (= (:mount/id parent) (:mount/parent child))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} matching-mount
+(defn- ^{:stratum 1} visible-chain? [covering]
+  (and (= (count covering) (count (set (map :mount/id covering))))
+       (every? attached? (partition 2 1 covering))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} matching-mount
   "Return the most specific mount only when its identity is unambiguous."
   [^Path root contents]
   (let [mounts (mapv row/parse (str/split-lines contents))
-        closest (closest-target root mounts)
-        matches (filter #(= closest (:mount/target %)) mounts)
+        covering (covering-mounts root mounts)
+        closest (:mount/target (last covering))
+        matches (filter #(= closest (:mount/target %)) covering)
         entry (first matches)]
     (when (and closest (not-any? nil? mounts) (= 1 (count matches))
+               (visible-chain? covering)
                (row/writable-local-type? entry))
       entry)))
 

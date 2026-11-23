@@ -11,9 +11,9 @@
 `bb lint:malli-types` turns every brick function's Malli schema
 (`:malli/schema` var metadata or `m/=>`) into clj-kondo types at
 `.clj-kondo/metosin/malli-types-clj/config.edn`, which clj-kondo loads with
-no config change. A call whose literal arguments, or whose use of the return
-value, contradict the schema is then a lint error in the editor and in
-`bb lint:clj:all`. CI runs `bb lint:malli-types:check`, which fails when the
+no config change. Contradictory literal arguments or use of the return value
+become lint errors. Editors and `bb lint:clj:all` both report them. CI runs `bb lint:malli-types:check`, which fails
+when the
 committed types differ from the current schemas.
 
 Builds on #2297 (merged), which declares the first schemas (the gate
@@ -23,18 +23,18 @@ interface).
 
 The gate PR (#2297) checks the gate interface's schemas in instrumented tests,
 which catches a bad call only when a test runs it. clj-kondo catches the same
-mistakes in calls no test reaches, at lint time: a gate named by string
-(`Expected: keyword, received: string`), a single keyword where
+mistakes in calls no test reaches, at lint time. Examples include a gate named by string
+(`Expected: keyword, received: string`). Other examples include a single keyword where
 `check-gates` wants a sequence, a boolean result used as a number.
 
 ## Changes in Detail
 
 1. `development/src/ai/miniforge/malli_types.clj`: `schema-namespaces` scans
    the `src` trees of `components/*` and `bases/*` for files that declare a
-   function schema; `kondo-config` loads them, collects the metadata and builds
+   function schema. `kondo-config` loads them, collects the metadata and builds
    the clj-kondo config with `malli.clj-kondo` (an empty config when nothing
-   declares one); `emit!` writes it to `config-path` itself rather than through
-   `malli.clj-kondo/save!`, whose path differs between Malli versions;
+   declares one). `emit!` writes it to `config-path` itself rather than through
+   `malli.clj-kondo/save!`, whose path differs between Malli versions.
    `check!` exits 1 when the committed file is missing or reads as different
    data. The messages both print come from
    `development/resources/config/malli-types/messages/system.edn`, which
@@ -51,15 +51,15 @@ mistakes in calls no test reaches, at lint time: a gate named by string
 ## Testing Plan
 
 1. `malli-types-test`: a test function's `:malli/schema` becomes a
-   `:type-mismatch` entry with the declared args and return; no namespaces give
-   a config with no types; the scan, over a temporary tree, returns the
+   `:type-mismatch` entry with the declared args and return. No namespaces give
+   a config with no types. The scan, over a temporary tree, returns the
    declaring `src` namespaces of components and bases and skips test trees and
-   plain sources; the declaration match takes `:malli/schema` and `=>` under
+   plain sources. The declaration match takes `:malli/schema` and `=>` under
    any alias (`m/=>`, `malli.core/=>`), with spacing after the paren, or
-   referred bare, and ignores a schema value that only contains `:=>`;
+   referred bare. It ignores a schema value that only contains `:=>`.
    `current?` is false for a missing or different file and true after
-   `write-config!`; each printed message resolves from the catalog and names
-   the path, and fails as a bare key name when the catalog is missing.
+   `write-config!`. Each printed message resolves from the catalog and names
+   the path. A missing catalog leaves a bare key name.
 2. `bb lint:malli-types:check` passes on the committed file and exits 1 after
    the file is replaced with an empty config.
 3. A probe calling `check-gate` with a string, `check-gates` with a keyword,
@@ -73,7 +73,7 @@ Development and CI only.
 
 ## Related Issues/PRs
 
-1. #2297 (gate function schemas and test instrumentation), merged.
+PR #2297 (gate function schemas and test instrumentation), merged.
 
 ## Checklist
 

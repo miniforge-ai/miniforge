@@ -62,7 +62,7 @@
 
 (defn- ^{:stratum 0} dirty?
   [worktree-path]
-  (let [r (worktree/run-git "-C" worktree-path "status" "--porcelain")]
+  (let [r (apply worktree/run-git (worktree/hook-free-git-args worktree-path ["status" "--porcelain"]))]
     (if (zero? (:exit r))
       (result/ok (-> (get r :out "") str/trim seq boolean))
       (result/err :archive-status-failed
@@ -84,13 +84,13 @@
 
 (defn ^{:stratum 0} stage-all!
   [worktree-path]
-  (let [r (worktree/run-git "-C" worktree-path "add" "-A")]
+  (let [r (apply worktree/run-git (worktree/hook-free-git-args worktree-path ["add" "-A"]))]
     (if (zero? (:exit r))
       (result/ok :staged)
       (result/err :archive-stage-failed (get r :err "git add -A failed")))))
 
 (defn- ^{:stratum 0} commit-staged!
-  "Commit staged changes with --no-verify and without a signature.
+  "Commit staged changes with no hook, no fsmonitor, and no signature.
    Persist runs inside a scratch worktree where the host pre-commit hook
    (bb pre-commit) fails because deps are not installed, and where the
    operator's global commit.gpgsign would route a machine commit through
@@ -98,10 +98,13 @@
    (\"1Password: failed to fill whole buffer\") and silently strands the
    task's work in the worktree (trap-bench series 4-6). Persist is
    infrastructure preservation, not a validated or attributable commit;
-   the gate layer upstream owns validation."
+   the gate layer upstream owns validation. `--no-verify` alone leaves
+   post-commit and other hooks running (see `worktree/hook-free-git-args`)."
   [worktree-path message]
-  (let [r (worktree/run-git "-C" worktree-path "-c" "commit.gpgsign=false" "commit"
-                   "--no-verify" "--allow-empty-message" "-m" message)]
+  (let [r (apply worktree/run-git
+                 (worktree/hook-free-git-args worktree-path
+                                              ["-c" "commit.gpgsign=false" "commit" "--no-verify"
+                                               "--allow-empty-message" "-m" message]))]
     (if (zero? (:exit r))
       (result/ok :committed)
       (result/err :archive-commit-failed
@@ -204,7 +207,7 @@
   (if-not (detached? branch)
     (result/ok branch)
     (let [name (recovery-branch-name task-id)
-          r    (worktree/run-git "-C" worktree-path "checkout" "-B" name)]
+          r    (apply worktree/run-git (worktree/hook-free-git-args worktree-path ["checkout" "-B" name]))]
       (if (zero? (:exit r))
         (result/ok name)
         (result/err :archive-detach-recovery-failed

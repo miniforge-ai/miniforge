@@ -11,7 +11,21 @@
 
 (defn- ^{:stratum 0} observe-root [] (store/observe (fs/path "/workspace")))
 
+(deftest ^{:stratum 0} test-overmounted-ancestor-cannot-attest-a-hidden-xfs-device
+  (let [fixture (fixtures/overmounted-ancestor false)
+        observe! (partial store/observe (fs/path "/mnt/store/run"))]
+    (is (nil? (fixtures/with-kernel fixture observe!)))))
+
+(deftest ^{:stratum 0} test-read-only-same-device-overmount-does-not-attest-its-hidden-child
+  (let [fixture (fixtures/overmounted-ancestor true)
+        observe! (partial store/observe (fs/path "/mnt/store/run"))]
+    (is (nil? (fixtures/with-kernel fixture observe!)))))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} test-device-identity-change-after-the-mount-snapshot-refuses
+  (let [fixture (assoc (fixtures/kernel fixtures/ahci true) :fixture/device-number 41)]
+    (is (nil? (fixtures/with-kernel fixture observe-root)))))
 
 (deftest ^{:stratum 1} test-observation-requires-a-recognized-local-controller-stack
   (doseq [topology [fixtures/ahci fixtures/nvme fixtures/virtio-scsi

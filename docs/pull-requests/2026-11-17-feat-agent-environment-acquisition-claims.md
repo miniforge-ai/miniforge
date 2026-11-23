@@ -37,8 +37,8 @@ Issue #2506 asks for submission identity and digests persisted before provider d
    1. `claim`: `{:claim/controller-id :claim/expires-at}`.
    2. `default-claim-ttl-ms`: 15 minutes, the pilot readiness target in issue #2439.
    3. `request-digest`: the content hash of the request with its expiry taken as an Instant, so a
-      `Date` and an `Instant` for one moment digest alike. It hashes through `ledger.printing`, as
-      `namespace-name` now does too, so a caller's printer settings (`*print-level*`,
+      `Date` and an `Instant` for one moment digest alike. It hashes through `ledger.printing`.
+      `namespace-name` now does too. A caller's printer settings (`*print-level*`,
       `*print-length*` and the rest) cannot make two requests digest alike or one request digest two
       ways.
    4. `claim-expired?`.
@@ -61,9 +61,9 @@ No new namespace dependencies in `src`.
 
 ## Breaking Changes
 
-Entries written before this PR carry no digest. Acquiring any of them that is not released, with
-its own request, is refused as `conflicting-request`: a provisioned one is no longer returned as a
-duplicate. Its lease still works for every call, release included. Nothing deploys, and the
+Entries written before this PR carry no digest. Acquiring an unreleased entry with its own request
+returns `conflicting-request`. A provisioned entry is no longer returned as a duplicate. Its lease still works for every
+call, release included. Nothing deploys, and the
 component is opt-in.
 
 ## Design Notes
@@ -73,8 +73,8 @@ the provision after its claim has expired. Closing that needs the provider to re
 submission, or orphan discovery to find what it created. Both are later issue #2506 work.
 
 The easy option was to keep comparing request maps. It is rejected because a reconciler compares a
-stored reservation against a replayed request, and the same moment as a `Date` and as an `Instant`
-are unequal maps.
+stored reservation against a replayed request. The same moment as a `Date` and as an `Instant`
+produces unequal maps.
 
 The claim is cleared when the reservation is provisioned. A reservation cleaned up under a cleanup
 intent keeps its claim. Only the provisioning state reads the claim.
@@ -101,7 +101,7 @@ intent keeps its claim. Only the provisioning state reads the claim.
       call, and the reservation stays provisioning.
 2. `lease_test`: `reserve` takes a claim, and a `Date` and an `Instant` for the same expiry are one
    request, a duplicate. Under `*print-level*` 0 and `*print-length*` 1, a request keeps its digest
-   and namespace, and a different request still digests differently; the test fails when the digest
+   and namespace. A different request still digests differently. The test fails when the digest
    uses the caller's printer settings.
 3. The agent-environment suite passes: 96 tests with 352 assertions, including PR #2539's review
    fixes merged in. clj-kondo and stratum-lint are clean.

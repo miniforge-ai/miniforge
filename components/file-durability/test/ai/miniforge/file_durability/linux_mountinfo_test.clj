@@ -51,4 +51,13 @@
     (is (nil? (observe path local (str/replace-first local #"^37" "38"))))
     (is (nil? (observe path local "unparseable mount")))))
 
+(deftest ^{:stratum 2} test-visible-nested-mounts-require-the-actual-parent-chain
+  (let [path "/mnt/local disk/run"
+        parent "38 36 98:1 / /mnt rw - tmpfs tmpfs rw"
+        hidden (nested "xfs" "rw" "rw")
+        attached (str/replace-first hidden "37 36" "37 38")]
+    (is (nil? (observe path parent hidden)))
+    (is (= "37" (:mount/id (observe path parent attached))))
+    (is (nil? (observe path (str/replace-first hidden "37 36" "36 36"))))))
+
 (comment (clojure.test/run-tests 'ai.miniforge.file-durability.linux-mountinfo-test))

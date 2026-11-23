@@ -25,6 +25,7 @@
    [ai.miniforge.web-dashboard.state.archive :as state-archive]
    [ai.miniforge.web-dashboard.state.core :as core]
    [ai.miniforge.web-dashboard.state.workflows :as workflows]
+   [ai.miniforge.web-dashboard.state.workflows.sources :as sources]
    [ai.miniforge.web-dashboard.server.websocket :as ws]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest testing is]]))
@@ -144,8 +145,8 @@
                                                  (:chunk/delta (nth newest 2))])
           "the archive endpoint's newest 200, newest first")
       (is (= 200 (count newest))))
-    (with-redefs [workflows/events-dir-path (str events-dir)
-                  workflows/disk-retention (merge es/bounded-retention {:max-events-per-workflow 5})]
+    (with-redefs [sources/events-dir-path (str events-dir)
+                  sources/disk-retention (merge es/bounded-retention {:max-events-per-workflow 5})]
       (is (= #{"199" "200" "201" "202" "203"}
              (->> (workflows/get-events (core/create-state {:event-stream stream}) {:limit 1000})
                   (keep :chunk/delta)
@@ -207,7 +208,7 @@
     (archive/scan-archive! (str events-dir) #(swap! found assoc (str (:id %)) %) (constantly nil))
     (is (= {:name "Seconds run" :status :completed}
            (select-keys (get @found (str wf-id)) [:name :status])))
-    (with-redefs [workflows/events-dir-path (str events-dir)]
+    (with-redefs [sources/events-dir-path (str events-dir)]
       (is (= [:workflow/started :workflow/phase-started :workflow/completed]
              (->> (workflows/get-events dashboard {:workflow-id wf-id})
                   (sort-by :event/sequence-number)
@@ -222,7 +223,7 @@
                                              "\"event/id\": \"" (random-uuid) "\", "
                                              "\"workflow/id\": \"" wf-id "\", "
                                              "\"workflow/spec\": {\"name\": \"Ingested\"}}"))
-    (with-redefs [workflows/events-dir-path (str events-dir)]
+    (with-redefs [sources/events-dir-path (str events-dir)]
       (is (= 1 (count (workflows/get-events dashboard {:workflow-id wf-id}))))
       (is (= ["Ingested"] (->> (workflows/get-workflows dashboard)
                                (filter #(= wf-id (:id %)))
@@ -244,14 +245,14 @@
     (write! 1 (envelope stream :workflow/phase-started wf-id :workflow/phase :implement))
     (run! chunk! (map str (range 20)))
     (write! 30 (envelope stream :workflow/completed wf-id :workflow/status :success))
-    (with-redefs [workflows/events-dir-path (str events-dir)
-                  workflows/disk-retention (merge es/bounded-retention {:max-events-per-workflow 5})]
+    (with-redefs [sources/events-dir-path (str events-dir)
+                  sources/disk-retention (merge es/bounded-retention {:max-events-per-workflow 5})]
       (let [events (disk-events)]
         (is (= 8 (count events)) "3 lifecycle events and the newest 5 others")
         (is (= #{"15" "16" "17" "18" "19"} (set (keep :chunk/delta events)))))
       (chunk! "20")
       (is (contains? (set (keep :chunk/delta (disk-events))) "20") "a later file is still read")
-      (is (<= (count (get-in @@#'workflows/recent-dir-reads
+      (is (<= (count (get-in @@#'sources/recent-dir-reads
                              [(str (es/workflow-dir (str events-dir) wf-id)) :tracked :names]))
               5)
           "file tracking is bounded too"))))
@@ -270,8 +271,8 @@
     (doseq [i (range 1 11)]
       (write-event! dir (legacy-name (at i) "ffffffff")
                     (envelope stream :agent/chunk wf-id :chunk/delta (str i))))
-    (with-redefs [workflows/events-dir-path (str events-dir)
-                  workflows/disk-retention (merge es/bounded-retention {:max-events-per-workflow 5})]
+    (with-redefs [sources/events-dir-path (str events-dir)
+                  sources/disk-retention (merge es/bounded-retention {:max-events-per-workflow 5})]
       (is (= #{:workflow/started "6" "7" "8" "9" "10"} (history)))
       (testing "a file in the oldest tracked millisecond whose name sorts first"
         (write-event! dir (legacy-name (at 6) "00000000")
@@ -296,8 +297,8 @@
     (write-event! dir (legacy-name snowflake-epoch-ms "ffffffff") started)
     (doseq [i (range 2 7)]
       (write-event! dir (chunk-file i) (chunks i)))
-    (with-redefs [workflows/events-dir-path (str events-dir)
-                  workflows/disk-retention (merge es/bounded-retention {:max-events-per-workflow 5})]
+    (with-redefs [sources/events-dir-path (str events-dir)
+                  sources/disk-retention (merge es/bounded-retention {:max-events-per-workflow 5})]
       (is (= #{"2" "3" "4" "5" "6"} (kept)))
       ;; Chunk 1, published first, lands last, in the same millisecond.
       (write-event! dir (chunk-file 1) (chunks 1))
@@ -312,7 +313,7 @@
     ;; A watcher rebuild hands the same event over again.
     (es/replay! stream phase)
     (es/replay! stream phase)
-    (with-redefs [workflows/events-dir-path (str (temp-events-dir))]
+    (with-redefs [sources/events-dir-path (str (temp-events-dir))]
       (is (= 40 (->> (workflows/get-workflows dashboard)
                      (filter #(= wf-id (:id %)))
                      first
@@ -360,7 +361,7 @@
         types      (fn [events] (set (map :event/type events)))]
     (publish-run! stream wf-id "Disk run")
     (write-temp-file! events-dir wf-id (wf-event :workflow/failed wf-id))
-    (with-redefs [workflows/events-dir-path (str events-dir)]
+    (with-redefs [sources/events-dir-path (str events-dir)]
       (is (= #{:workflow/started :workflow/phase-started :workflow/completed}
              (types (workflows/get-events dashboard {:workflow-id wf-id})))
           "one workflow's history, without the temp file")
@@ -393,7 +394,7 @@
         dashboard  (core/create-state {:event-stream stream})
         wf-id      (random-uuid)]
     (publish-run! stream wf-id "Persisted run")
-    (with-redefs [workflows/events-dir-path (str events-dir)]
+    (with-redefs [sources/events-dir-path (str events-dir)]
       (is (= 1 (count (filter #(= (str wf-id) (str (:id %))) (workflows/get-workflows dashboard))))
           "one card, not one per source")
       (is (= 3 (count (workflows/get-events dashboard {:workflow-id wf-id})))

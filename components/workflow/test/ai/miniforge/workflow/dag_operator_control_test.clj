@@ -343,15 +343,18 @@
         dag-result (dag-orch/execute-plan-as-dag fan-out-plan {:logger logger :control-state control})
         workflow {:workflow/id :dag-cancel :workflow/version "1.0.0"
                   :workflow/pipeline [{:phase :plan} {:phase :implement}]}
-        failed (execution-dag/apply-dag-failure (context/create-context workflow {} {})
-                                                dag-result
-                                                context/transition-to-failed)]
-    (is (= :failed (:execution/status failed)))
-    (is (= dag-result (:execution/dag-result failed)))
+        cancelled (execution-dag/apply-dag-failure (context/create-context workflow {} {})
+                                                   dag-result
+                                                   context/transition-to-failed)]
+    (is (= :cancelled (:execution/status cancelled))
+        "a stopped DAG ends the run cancelled, not failed (N2 2.2)")
+    (is (= "unknown" (get-in cancelled [:execution/cancellation :cancel/requested-by]))
+        "a cancel set with no record reports an unrecorded requester")
+    (is (= dag-result (:execution/dag-result cancelled)))
     (is (= {:type :dashboard-stop
             :message (messages/t :status/stopped-control)
             :data {:reason :dashboard-stop}}
-           (last (:execution/errors failed)))
+           (last (:execution/errors cancelled)))
         "the entry the runner writes for a stop seen at a phase boundary")))
 
 ;------------------------------------------------------------------------------ Rich Comment

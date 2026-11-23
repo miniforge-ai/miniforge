@@ -17,6 +17,18 @@
   "Only the process-local kernel mount table is substituted."
   "/proc/self/mountinfo")
 
+(def ^{:stratum 0 :private true} overmounted-mounts
+  "The hidden child XFS row still wins a textual longest-prefix lookup."
+  "36 35 8:0 / / rw - xfs /dev/root rw
+37 36 8:0 / /mnt/store rw - xfs /dev/root rw
+38 36 0:41 / /mnt rw - tmpfs tmpfs rw")
+
+(def ^{:stratum 0 :private true} read-only-overmount
+  "The covering mount shares the device, but the child is attached below the hidden parent."
+  "36 35 8:0 / / rw - xfs /dev/root rw
+37 36 8:0 / /mnt/store rw - xfs /dev/root rw
+38 36 8:0 / /mnt ro - xfs /dev/root rw")
+
 (defn- ^{:stratum 0} mount-row [device]
   (str "36 35 " device " / / rw - xfs /dev/root rw"))
 
@@ -88,6 +100,14 @@
     (action)))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} overmounted-ancestor [read-only?]
+  (let [fixture (kernel ahci true)
+        number (if read-only? 2048 41)
+        table (if read-only? read-only-overmount overmounted-mounts)]
+    (-> fixture
+        (assoc :fixture/device-number number)
+        (assoc-in [:fixture/files mounts] table))))
 
 (defn ^{:stratum 2} nvme-transport [value]
   (if (nil? value)

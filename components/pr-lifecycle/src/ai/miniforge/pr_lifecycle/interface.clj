@@ -39,6 +39,7 @@
    [ai.miniforge.pr-lifecycle.classifier :as classifier]
    [ai.miniforge.pr-lifecycle.review-monitor :as review]
    [ai.miniforge.pr-lifecycle.fix-loop :as fix]
+   [ai.miniforge.pr-lifecycle.fix-prompt :as fix-prompt]
    [ai.miniforge.pr-lifecycle.github :as github]
    [ai.miniforge.pr-lifecycle.github-conversation :as conversation]
    [ai.miniforge.pr-lifecycle.listener-registry :as listener-registry]
@@ -56,7 +57,8 @@
    [ai.miniforge.pr-lifecycle.monitor-budget :as mbudget]
    [ai.miniforge.pr-lifecycle.monitor-worklist :as mworklist]
    [ai.miniforge.pr-lifecycle.pr-poller :as poller]
-   [ai.miniforge.pr-lifecycle.responder :as responder]))
+   [ai.miniforge.pr-lifecycle.responder :as responder]
+   [ai.miniforge.pr-lifecycle.responder-fix :as responder-fix]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -610,7 +612,7 @@
 
 (def ^{:stratum 0} build-fix-prompt
   "Build a prompt for the fix agent based on failure type."
-  fix/build-fix-prompt)
+  fix-prompt/build-fix-prompt)
 
 (def ^{:stratum 0} generate-fix
   "Generate a fix using the inner loop.
@@ -980,7 +982,7 @@
 
 (def ^{:stratum 0} build-fix-spec
   "Build a workflow spec from a group of review comments on a file."
-  responder/build-fix-spec)
+  responder-fix/build-fix-spec)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

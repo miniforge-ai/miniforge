@@ -29,6 +29,7 @@
    [ai.miniforge.compliance-scanner.exceptions-as-data :as exc-data]
    [ai.miniforge.compliance-scanner.factory            :as factory]
    [ai.miniforge.compliance-scanner.scan-content        :as scan-content]
+   [ai.miniforge.compliance-scanner.scan-pack-config    :as pack-config]
    [ai.miniforge.policy-pack.interface                  :as policy-pack]
    [clojure.java.io                                     :as io]
    [clojure.string                                      :as str]))
@@ -51,6 +52,15 @@
   (.start (doto (ProcessBuilder. ^java.util.List arguments)
             (.directory (io/file repo-path))
             (.redirectError java.lang.ProcessBuilder$Redirect/DISCARD))))
+
+(defn- ^{:stratum 0} not-auto-fixable-unless-declared
+  "`violation` with `:auto-fixable-default` false unless its rule declared one.
+   `classify` reads a missing default as true, and a diff or plan violation
+   carries no suggested value or template to patch from."
+  [violation]
+  (cond-> violation
+    (not (contains? violation :auto-fixable-default))
+    (assoc :auto-fixable-default false)))
 
 (defn- ^{:stratum 0} scan-plan-rule
   "Scan plan output for violations using a plan-output rule.
@@ -127,6 +137,16 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} enrich-diff-plan-violations
+  "Diff and plan violations carrying their rule's declared `:rule/remediation`,
+   so `classify` sees the strategy and the auto-fix default."
+  [rule-cfg violations]
+  (let [remediation (get rule-cfg :rule/remediation)
+        enriched    (if remediation
+                      (mapv #(pack-config/enrich-violation % remediation) violations)
+                      (vec violations))]
+    (mapv not-auto-fixable-unless-declared enriched)))
+
 (defn ^{:stratum 1} git-diff
   "Run git diff and return the output string."
   [repo-path since-ref]
@@ -170,18 +190,20 @@
     (filterv #(= :cleanup-needed (:classification %))
              (:violations (exc-data/scan-repo repo-path changed-files)))))
 
-(defn ^{:stratum 1} scan-plan-rules
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} scan-plan-rules
   "Scan plan-output rules against terraform plan output."
   [plan-rules plan-output]
   (when plan-output
     (->> plan-rules
-         (mapcat #(scan-plan-rule % plan-output))
+         (mapcat #(enrich-diff-plan-violations % (scan-plan-rule % plan-output)))
          vec)))
 
-(defn ^{:stratum 1} scan-diff-rules
+(defn ^{:stratum 2} scan-diff-rules
   "Scan diff-analysis rules against a git diff."
   [diff-rules diff-content]
   (when diff-content
     (->> diff-rules
-         (mapcat #(scan-diff-rule % diff-content))
+         (mapcat #(enrich-diff-plan-violations % (scan-diff-rule % diff-content)))
          vec)))
