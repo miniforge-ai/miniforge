@@ -93,12 +93,14 @@
 (deftest ^{:stratum 1 :integration true} test-process-exit-does-not-imply-writer-completion
   (let [writer (atom nil)
         start! (comp (partial reset! writer) stalled-writer)]
-    (with-redefs [input/start! start!]
-      (let [reply (command/run! (deadline/after-ms fixture-budget-ms)
-                                (:output fixture-commands) oversized-input)]
-        (is (= :deadline (:reason reply)))
-        (is (= "" (:out reply)))
-        (is (future-cancelled? @writer))))))
+    (try
+      (with-redefs [input/start! start!]
+        (let [reply (command/run! (deadline/after-ms fixture-budget-ms)
+                                  (:output fixture-commands) oversized-input)]
+          (is (= :deadline (:reason reply)))
+          (is (= "" (:out reply)))
+          (is (future-cancelled? @writer))))
+      (finally (when-let [started @writer] (future-cancel started))))))
 
 (deftest ^{:stratum 1 :integration true} test-provider-failure-output-remains-a-failure-with-unfinished-input
   (with-redefs [input/start! stalled-writer]
