@@ -103,122 +103,60 @@
   "A comment-only line that contains a colon."
   #"^[ \t]*#.*:")
 
+(defn- ^{:stratum 0} frontmatter-lines
+  "Lines of `frontmatter-str` as a vector; empty when it is blank."
+  [frontmatter-str]
+  (if (str/blank? frontmatter-str)
+    []
+    (vec (str/split-lines frontmatter-str))))
+
+(defn- ^{:stratum 0} adjacent-pairs
+  "Each element of `coll` paired with the element after it, in order."
+  [coll]
+  (map vector coll (rest coll)))
+
+(defn- ^{:stratum 0} line-tails
+  "Each suffix of the `lines` vector, in order: a line followed by every
+   line below it."
+  [lines]
+  (map #(subvec lines %) (range (count lines))))
+
+(defn- ^{:stratum 0} key-over-child
+  "Key captured by `key-re` on `parent` when `child` matches `child-re`,
+   else nil."
+  [key-re child-re [parent child]]
+  (when (re-find child-re child)
+    (second (re-matches key-re parent))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} nested-block-keys
-  "Frontmatter keys written as a nested YAML mapping, which this grammar
-   cannot represent.
+(defn- ^{:stratum 1} noise-line?
+  "True when `line` is blank or comment-only."
+  [line]
+  (boolean (or (str/blank? line)
+               (re-find comment-line-re line))))
 
-   A key qualifies when it has no inline value — a trailing comment counts
-   as none — and its next line that is neither blank nor comment-only is an
-   indented `child: value`. List-valued keys (`- item` children) and keys
-   with no children at all do not qualify.
+(defn- ^{:stratum 1} list-block-line?
+  "True when `line` is blank, comment-only, or a `- item` line."
+  [line]
+  (boolean (or (str/blank? line)
+               (re-find comment-line-re line)
+               (re-find list-item-re line))))
 
-   Arguments:
-   - frontmatter-str - Raw text between --- delimiters
+(defn- ^{:stratum 1} item-below-colon-comment?
+  "True when a `- item` line comes after the first colon-bearing comment
+   in `block`."
+  [block]
+  (->> block
+       (drop-while #(not (re-find colon-comment-re %)))
+       rest
+       (some #(re-find list-item-re %))
+       boolean))
 
-   Returns:
-   - Vector of parent key names in file order, or [] when the frontmatter
-     is flat (the expected case)."
-  [frontmatter-str]
-  (if (str/blank? frontmatter-str)
-    []
-    (let [lines      (vec (str/split-lines frontmatter-str))
-          noise?     (fn [line] (or (str/blank? line)
-                                    (re-find comment-line-re line)))
-          next-child (fn [idx] (first (remove noise? (subvec lines (inc idx)))))]
-      (into []
-            (keep (fn [idx]
-                    (when-let [[_ k] (re-matches blank-valued-key-re (lines idx))]
-                      (when-let [child (next-child idx)]
-                        (when (re-find indented-kv-re child)
-                          k)))))
-            (range (count lines))))))
-
-(defn ^{:stratum 1} commented-list-keys
-  "Frontmatter keys written as `key: # comment` over a `- item` list,
-   where the comment is kept as the value and the list is discarded.
-
-   `parse-kv-line` treats the comment as a non-blank value, so it never
-   opens a list: it clears `current-key`, and every `- item` line after
-   it is dropped on the floor. A `globs: # the shell ones` over two
-   patterns compiles to `:file-globs [\"# the shell ones\"]` — a glob that
-   matches nothing, on a rule that looks scoped.
-
-   Distinct from `nested-block-keys`: a *bare* `key:` over a list is the
-   one multi-line form the grammar supports and is never reported. Only
-   the commented form loses data — in both the indented and the
-   flush-left list style, since the parser trims before testing for
-   `\"- \"`.
-
-   Arguments:
-   - frontmatter-str - Raw text between --- delimiters
-
-   Returns:
-   - Vector of key names in file order, or []."
-  [frontmatter-str]
-  (if (str/blank? frontmatter-str)
-    []
-    (let [lines      (vec (str/split-lines frontmatter-str))
-          noise?     (fn [line] (or (str/blank? line)
-                                    (re-find comment-line-re line)))
-          next-child (fn [idx] (first (remove noise? (subvec lines (inc idx)))))]
-      (into []
-            (keep (fn [idx]
-                    (when-let [[_ k] (re-matches commented-key-re (lines idx))]
-                      (when-let [child (next-child idx)]
-                        (when (re-find list-item-re child)
-                          k)))))
-            (range (count lines))))))
-
-(defn ^{:stratum 1} interrupted-list-keys
-  "Keys whose `- item` list is cut short by a comment line containing a
-   colon.
-
-   `process-frontmatter-line` trims before classifying, so an indented
-   `# note: the shell ones` is indistinguishable from a top-level
-   `key: value`. It is stored as a key named `# note`, `current-key` is
-   cleared, and every list item after it is dropped on the floor.
-
-   Position decides how much is lost, and only items BELOW the comment
-   are. Above every item, the whole list goes and the key compiles as
-   `[]`. In the middle, the list is *truncated* — the rule keeps the
-   globs written above the comment and silently loses the rest, which is
-   the harder one to notice. Trailing the last item, nothing is lost:
-   the parser has already collected them, and the comment only leaves an
-   ignored junk key. That case is NOT reported — the condition is a list
-   item somewhere after the first colon comment, not merely both in the
-   same block.
-
-   A comment without a colon is harmless and is not reported. Nor is a
-   colon-bearing comment outside a list: it leaves a junk key behind but
-   discards nothing.
-
-   Arguments:
-   - frontmatter-str - Raw text between --- delimiters
-
-   Returns:
-   - Vector of key names in file order, or []."
-  [frontmatter-str]
-  (if (str/blank? frontmatter-str)
-    []
-    (let [lines (vec (str/split-lines frontmatter-str))]
-      (into []
-            (keep (fn [idx]
-                    (when-let [[_ k] (re-matches bare-key-re (lines idx))]
-                      (let [block (take-while (fn [l] (or (str/blank? l)
-                                                          (re-find comment-line-re l)
-                                                          (re-find list-item-re l)))
-                                              (subvec lines (inc idx)))
-                            ;; Only items BELOW the first colon comment are
-                            ;; lost. A colon comment trailing the last item
-                            ;; discards nothing — the parser has already
-                            ;; collected them — so it must not be reported.
-                            after (rest (drop-while #(not (re-find colon-comment-re %))
-                                                    block))]
-                        (when (some #(re-find list-item-re %) after)
-                          k)))))
-            (range (count lines))))))
+(defn- ^{:stratum 1} bare-key
+  "Key name when `line` is a bare `key:` line, else nil."
+  [line]
+  (second (re-matches bare-key-re line)))
 
 (defn- ^{:stratum 1} process-frontmatter-line
   "Process one frontmatter line. Returns [current-key acc]."
@@ -236,6 +174,51 @@
     :else [current-key acc]))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} nested-block-keys
+  "Keys written as a nested YAML mapping, which this grammar cannot
+   represent.
+
+   A key qualifies when it has no inline value (a trailing comment counts
+   as none) and its next line that is neither blank nor comment-only is
+   an indented `child: value`. Returns a vector of key names in file
+   order, [] when none qualify."
+  [frontmatter-str]
+  (->> (frontmatter-lines frontmatter-str)
+       (remove noise-line?)
+       adjacent-pairs
+       (keep #(key-over-child blank-valued-key-re indented-kv-re %))
+       vec))
+
+(defn ^{:stratum 2} commented-list-keys
+  "Keys written as `key: # comment` over a `- item` list.
+
+   A key qualifies when its only value is a comment and its next line
+   that is neither blank nor comment-only is a `- item` line, indented or
+   flush-left. Returns a vector of key names in file order, [] when none
+   qualify."
+  [frontmatter-str]
+  (->> (frontmatter-lines frontmatter-str)
+       (remove noise-line?)
+       adjacent-pairs
+       (keep #(key-over-child commented-key-re list-item-re %))
+       vec))
+
+(defn ^{:stratum 2} interrupted-list-keys
+  "Keys whose `- item` list has items below a comment line containing a
+   colon.
+
+   A key qualifies when it is a bare `key:` line and, in the run of
+   blank, comment-only and `- item` lines directly below it, a `- item`
+   line comes after the first colon-bearing comment. A colon-bearing
+   comment below the last item does not qualify. Returns a vector of key
+   names in file order, [] when none qualify."
+  [frontmatter-str]
+  (vec (for [[opener & below] (line-tails (frontmatter-lines frontmatter-str))
+             :let  [k     (bare-key opener)
+                    block (take-while list-block-line? below)]
+             :when (and k (item-below-colon-comment? block))]
+         k)))
 
 (defn ^{:stratum 2} parse-frontmatter
   "Parse YAML-like frontmatter text into a string-keyed map.
