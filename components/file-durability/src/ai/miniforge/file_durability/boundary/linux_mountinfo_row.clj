@@ -20,24 +20,32 @@
    "\\134" "\\"})
 
 (def ^{:stratum 0} ^:private supported-filesystems
-  "Only the approved persistent Linux filesystem profiles can progress to qualification."
-  #{"ext4" "xfs"})
+  "The first profile requires single-device XFS; ext4 needs separate journal evidence."
+  #{"xfs"})
 
 (def ^{:stratum 0} ^:private unsafe-options
   "Reject known modes that defeat writes, barriers, or normal journal replay."
   #{"ro" "nobarrier" "barrier=0" "noload" "norecovery"})
 
+(def ^{:stratum 0} ^:private separate-device-options
+  "A data-device observation cannot qualify an external journal or realtime device."
+  #{"logdev" "rtdev"})
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} unsafe-option? [option]
+  (or (contains? unsafe-options option)
+      (contains? separate-device-options (first (str/split option #"=" 2)))))
 
 (defn- ^{:stratum 1} target-path [encoded]
   (fs/path (str/replace encoded #"\\(?:040|011|012|134)" path-escapes)))
 
-(defn ^{:stratum 1} writable-local-type? [{:mount/keys [type options]}]
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} writable-local-type? [{:mount/keys [type options]}]
   (and (supported-filesystems type)
        (contains? options "rw")
-       (not-any? unsafe-options options)))
-
-;------------------------------------------------------------------------------ Layer 2
+       (not-any? unsafe-option? options)))
 
 (defn ^{:stratum 2} parse [line]
   (when-let [[_ id device target options type super-options] (re-matches mount-line line)]
