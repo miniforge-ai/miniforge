@@ -1,26 +1,36 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
-(ns ai.miniforge.workflow.boundary.checkpoint-directory-policy
+(ns ai.miniforge.file-durability.boundary.directory-policy
   "POSIX directory ownership and entry-replacement protection."
-  (:require [ai.miniforge.workflow.messages :as messages]
-            [babashka.fs :as fs])
-  (:import [java.io IOException]
-           [java.nio.file.attribute PosixFilePermission]))
+  (:require [ai.miniforge.file-durability.boundary :as boundary]
+            [babashka.fs :as fs]
+            [slingshot.slingshot :refer [try+]])
+  (:import [java.nio.file.attribute PosixFilePermission]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} private-permissions "rwx------")
+(def ^{:stratum 0} private-permissions
+  "Owner-only directory access prevents other accounts replacing authority records."
+  "rwx------")
 
-(def ^{:stratum 0} ^:private root-owner "root")
+(def ^{:stratum 0} ^:private root-owner
+  "The privileged account may own trusted ancestors such as the filesystem root."
+  "root")
 
-(def ^{:stratum 0} ^:private sticky-bit 9)
+(def ^{:stratum 0} ^:private sticky-bit
+  "Unix mode bit 01000 limits entry replacement in shared ancestor directories."
+  9)
 
 (def ^{:stratum 0} ^:private other-writes
+  "These permissions let non-owners replace entries unless an ancestor is sticky."
   #{PosixFilePermission/GROUP_WRITE PosixFilePermission/OTHERS_WRITE})
 
-(defn ^{:stratum 0} refuse! [path]
-  (throw (IOException. (messages/system :checkpoint/unsafe-directory {:path (str path)}))))
+(defn ^{:stratum 0} filesystem-profile [path]
+  (try+
+    (fs/posix-file-permissions path {:nofollow-links true})
+    :posix
+    (catch UnsupportedOperationException _ :native-defaults)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -40,12 +50,12 @@
         protected? (or (not (writable-by-others? attributes))
                        (and (not leaf?) (sticky? path)))]
     (when-not (and (:isDirectory attributes) (trusted-owner? (:owner attributes)) protected?)
-      (refuse! path))
+      (boundary/refuse-directory! path))
     path))
 
 (defn ^{:stratum 2} check-link! [path]
   (let [attributes (fs/read-attributes path "posix:*" {:nofollow-links true})]
-    (when-not (trusted-owner? (:owner attributes)) (refuse! path))
+    (when-not (trusted-owner? (:owner attributes)) (boundary/refuse-directory! path))
     path))
 
-(comment ::protected-checkpoint-directories)
+(comment ::protected-storage-directories)

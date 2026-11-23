@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.dag-executor.interface
   "Public API for the DAG executor component.
 
@@ -41,42 +40,41 @@
    [ai.miniforge.dag-executor.protocols.impl.runtime.registry :as registry]
    [ai.miniforge.dag-executor.protocols.impl.runtime.selector :as selector]
    [ai.miniforge.dag-executor.protocols.impl.worktree :as worktree-impl]
+   [ai.miniforge.dag-executor.protocols.impl.worktree.registry :as worktree-registry]
    [ai.miniforge.dag-executor.scratch-gc-queue :as scratch-gc-queue]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Result helpers (re-exports)
 
-(def ok
+;; Result helpers (re-exports)
+(def ^{:stratum 0} ok
   "Create a success result.
    Example: (ok {:task-id id :status :merged})"
   result/ok)
 
-(def err
+(def ^{:stratum 0} err
   "Create an error result.
    Example: (err :task-not-found \"Task xyz not found\" {:task-id \"xyz\"})"
   result/err)
 
-(def ok?
+(def ^{:stratum 0} ok?
   "Check if a result is successful."
   result/ok?)
 
-(def err?
+(def ^{:stratum 0} err?
   "Check if a result is an error."
   result/err?)
 
-(def unwrap
+(def ^{:stratum 0} unwrap
   "Extract data from an ok result, throw if error."
   result/unwrap)
 
-(def unwrap-or
+(def ^{:stratum 0} unwrap-or
   "Extract data from an ok result, or return default if error."
   result/unwrap-or)
 
-;------------------------------------------------------------------------------ Layer 0.5
 ;; Railway-binding macro
 ;; (.cursor/rules/languages/clojure-railway-binding.mdc — dewey 211)
-
-(defmacro when-let-ok
+(defmacro ^{:stratum 0} when-let-ok
   "Sequentially bind each symbol to its expression's value. If any
    expression returns a non-ok DAG result (i.e. `(not (ok? value))`),
    short-circuit and return that value as the form's value. If every
@@ -118,18 +116,16 @@
      `(do ~@body)
      (reverse pairs))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Task workflow state
-
-(def build-state-profile
+(def ^{:stratum 0} build-state-profile
   "Build a custom state profile map."
   state-profile/build-profile)
 
-(def build-state-profile-provider
+(def ^{:stratum 0} build-state-profile-provider
   "Build a state-profile provider from profile definitions or resource-path entries."
   state-profile/build-provider)
 
-(defn resolve-state-profile
+(defn ^{:stratum 0} resolve-state-profile
   "Resolve a state profile keyword or inline map.
 
    With one argument, resolves against the kernel provider.
@@ -139,24 +135,24 @@
   ([provider profile]
    (state-profile/resolve-profile provider profile)))
 
-(defn available-state-profile-ids
+(defn ^{:stratum 0} available-state-profile-ids
   "List the state profile ids exposed by the kernel provider or a supplied provider."
   ([] (state-profile/available-profile-ids))
   ([provider] (state-profile/available-profile-ids provider)))
 
-(def task-statuses
+(def ^{:stratum 0} task-statuses
   "Valid task workflow statuses for the kernel default profile."
   state/task-statuses)
 
-(def terminal-statuses
+(def ^{:stratum 0} terminal-statuses
   "Terminal statuses for the kernel default profile."
   state/terminal-statuses)
 
-(def run-statuses
+(def ^{:stratum 0} run-statuses
   "Valid DAG run statuses: :pending :running :paused :completed :failed :partial"
   state/run-statuses)
 
-(defn create-task-state
+(defn ^{:stratum 0} create-task-state
   "Create initial task workflow state.
 
    Arguments:
@@ -174,7 +170,7 @@
   [task-id deps & opts]
   (apply state/create-task-state task-id deps opts))
 
-(defn create-run-state
+(defn ^{:stratum 0} create-run-state
   "Create initial DAG run state.
 
    Arguments:
@@ -192,22 +188,20 @@
   [dag-id tasks & opts]
   (apply state/create-run-state dag-id tasks opts))
 
-(def create-run-atom
+(def ^{:stratum 0} create-run-atom
   "Create an atom containing run state for mutable operations."
   state/create-run-atom)
 
-(def terminal?
+(def ^{:stratum 0} terminal?
   "Check if a status is terminal (no further transitions)."
   state/terminal?)
 
-(def valid-transition?
+(def ^{:stratum 0} valid-transition?
   "Check if a state transition is valid."
   state/valid-transition?)
 
-;------------------------------------------------------------------------------ Layer 2
 ;; State transitions
-
-(def transition-task!
+(def ^{:stratum 0} transition-task!
   "Atomically transition a task to a new status within a run atom.
    Returns result with updated run state or error.
 
@@ -215,43 +209,41 @@
      (transition-task! run-atom task-id :implementing logger)"
   state/transition-task!)
 
-(def mark-merged!
+(def ^{:stratum 0} mark-merged!
   "Atomically mark a task as merged in a run atom.
 
    Example:
      (mark-merged! run-atom task-id logger)"
   state/mark-merged!)
 
-(def mark-completed!
+(def ^{:stratum 0} mark-completed!
   "Atomically mark a task as completed in a run atom using the run profile's
    success terminal status."
   state/mark-completed!)
 
-(def mark-failed!
+(def ^{:stratum 0} mark-failed!
   "Atomically mark a task as failed in a run atom.
 
    Example:
      (mark-failed! run-atom task-id {:reason :ci-failed} logger)"
   state/mark-failed!)
 
-(def update-task!
+(def ^{:stratum 0} update-task!
   "Atomically update a task within a run atom.
 
    Example:
      (update-task! run-atom task-id #(assoc % :task/pr pr-info) logger)"
   state/update-task!)
 
-(def update-metrics!
+(def ^{:stratum 0} update-metrics!
   "Atomically update run metrics.
 
    Example:
      (update-metrics! run-atom {:total-tokens 1000 :total-cost-usd 0.05} logger)"
   state/update-metrics!)
 
-;------------------------------------------------------------------------------ Layer 3
 ;; State queries
-
-(def ready-tasks
+(def ^{:stratum 0} ready-tasks
   "Get all tasks that are ready to start (dependencies satisfied).
    Returns set of task IDs.
 
@@ -259,29 +251,27 @@
      (ready-tasks @run-atom)  ; => #{task-a-id task-b-id}"
   state/ready-tasks)
 
-(def running-tasks
+(def ^{:stratum 0} running-tasks
   "Get all tasks currently in progress (not pending, not terminal).
    Returns set of task IDs."
   state/running-tasks)
 
-(def blocked-tasks
+(def ^{:stratum 0} blocked-tasks
   "Get all tasks blocked on dependencies.
    Returns map of task-id -> set of blocking task IDs."
   state/blocked-tasks)
 
-(def all-terminal?
+(def ^{:stratum 0} all-terminal?
   "Check if all tasks are in terminal states."
   state/all-terminal?)
 
-(def compute-run-status
+(def ^{:stratum 0} compute-run-status
   "Compute the appropriate run status based on task states.
    Returns :completed :partial :failed or :running."
   state/compute-run-status)
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Parallelism and resource locks
-
-(def create-lock-pool
+(def ^{:stratum 0} create-lock-pool
   "Create a lock pool for managing concurrent resource access.
 
    Options:
@@ -292,7 +282,7 @@
      (create-lock-pool :max-repo-writes 1 :max-worktrees 8)"
   parallel/create-lock-pool)
 
-(def acquire-repo-write!
+(def ^{:stratum 0} acquire-repo-write!
   "Acquire exclusive repo write lock.
    Blocks until lock is available or timeout.
 
@@ -300,11 +290,11 @@
      (acquire-repo-write! lock-pool task-id 30000 logger)"
   parallel/acquire-repo-write!)
 
-(def release-repo-write!
+(def ^{:stratum 0} release-repo-write!
   "Release repo write lock."
   parallel/release-repo-write!)
 
-(def acquire-file-locks!
+(def ^{:stratum 0} acquire-file-locks!
   "Acquire locks on specific files.
    Returns error if any files are already locked by another holder.
 
@@ -312,39 +302,37 @@
      (acquire-file-locks! lock-pool task-id [\"src/foo.clj\"] logger)"
   parallel/acquire-file-locks!)
 
-(def release-file-locks!
+(def ^{:stratum 0} release-file-locks!
   "Release file locks for a holder."
   parallel/release-file-locks!)
 
-(def acquire-worktree!
+(def ^{:stratum 0} acquire-worktree!
   "Acquire a worktree slot for isolated task execution.
 
    Example:
      (acquire-worktree! lock-pool task-id 60000 logger)"
   parallel/acquire-worktree!)
 
-(def release-worktree!
+(def ^{:stratum 0} release-worktree!
   "Release a worktree slot."
   parallel/release-worktree!)
 
-(def release-all-locks!
+(def ^{:stratum 0} release-all-locks!
   "Release all locks held by a task (cleanup on completion/failure)."
   parallel/release-all-locks!)
 
-(def available-capacity
+(def ^{:stratum 0} available-capacity
   "Get available capacity for parallel execution.
    Returns {:repo-write-available n :worktree-available n :current-file-locks n}"
   parallel/available-capacity)
 
-(def select-parallel-batch
+(def ^{:stratum 0} select-parallel-batch
   "Select a batch of tasks that can run in parallel.
    Given ready tasks, returns subset that don't conflict with each other."
   parallel/select-parallel-batch)
 
-;------------------------------------------------------------------------------ Layer 5
 ;; Scheduler
-
-(def create-scheduler-context
+(def ^{:stratum 0} create-scheduler-context
   "Create context for the scheduling loop.
 
    Options:
@@ -362,7 +350,7 @@
        :execute-task-fn my-executor)"
   scheduler/create-scheduler-context)
 
-(def handle-task-event
+(def ^{:stratum 0} handle-task-event
   "Handle an event from the PR lifecycle controller.
    Updates task state based on the event type.
 
@@ -376,7 +364,7 @@
                         context)"
   scheduler/handle-task-event)
 
-(def run-scheduler
+(def ^{:stratum 0} run-scheduler
   "Run the scheduler loop until completion or pause.
 
    Arguments:
@@ -396,30 +384,28 @@
                     :on-iteration println)"
   scheduler/run-scheduler)
 
-(def pause-scheduler
+(def ^{:stratum 0} pause-scheduler
   "Signal the scheduler to pause at the next safe point."
   scheduler/pause-scheduler)
 
-(def resume-scheduler
+(def ^{:stratum 0} resume-scheduler
   "Resume a paused scheduler run."
   scheduler/resume-scheduler)
 
-(def schedule-iteration
+(def ^{:stratum 0} schedule-iteration
   "Perform one iteration of the scheduling loop.
    Useful for testing or custom scheduling logic.
 
    Returns {:continue? bool :run-state state :dispatched [task-ids]}"
   scheduler/schedule-iteration)
 
-;------------------------------------------------------------------------------ Layer 6
 ;; Execution backends (K8s, Docker, Worktree)
-
-(def TaskExecutor
+(def ^{:stratum 0} TaskExecutor
   "Protocol for pluggable task execution backends.
    Implementations: KubernetesExecutor, DockerExecutor, WorktreeExecutor"
   executor/TaskExecutor)
 
-(def create-executor-registry
+(def ^{:stratum 0} create-executor-registry
   "Create a registry of available executors.
 
    Arguments:
@@ -431,7 +417,7 @@
    Returns map of executor-type -> executor instance."
   executor/create-executor-registry)
 
-(def select-executor
+(def ^{:stratum 0} select-executor
   "Select the best available executor from a registry.
    Tries: kubernetes -> docker -> worktree (fallback).
 
@@ -439,30 +425,30 @@
    - :preferred - Preferred executor type to try first"
   executor/select-executor)
 
-(def create-kubernetes-executor
+(def ^{:stratum 0} create-kubernetes-executor
   "Create a Kubernetes executor for task isolation via K8s Jobs."
   executor/create-kubernetes-executor)
 
-(def create-docker-executor
+(def ^{:stratum 0} create-docker-executor
   "Create a Docker executor for task isolation via containers."
   executor/create-docker-executor)
 
-(def create-worktree-executor
+(def ^{:stratum 0} create-worktree-executor
   "Create a worktree executor (fallback, no container isolation)."
   executor/create-worktree-executor)
 
-(defn executor-type
+(defn ^{:stratum 0} executor-type
   "Get the type of an executor (:kubernetes, :docker, :worktree)."
   [exec]
   (executor/executor-type exec))
 
-(defn executor-available?
+(defn ^{:stratum 0} executor-available?
   "Check if an executor backend is available.
    Returns result with {:available? bool :reason string}"
   [exec]
   (executor/available? exec))
 
-(defn acquire-environment!
+(defn ^{:stratum 0} acquire-environment!
   "Acquire an isolated execution environment for a task.
 
    Arguments:
@@ -475,12 +461,12 @@
   [exec task-id config]
   (executor/acquire-environment! exec task-id config))
 
-(defn release-environment!
+(defn ^{:stratum 0} release-environment!
   "Release and cleanup an execution environment."
   [exec environment-id]
   (executor/release-environment! exec environment-id))
 
-(defn executor-execute!
+(defn ^{:stratum 0} executor-execute!
   "Execute a command in an environment.
 
    Arguments:
@@ -493,20 +479,20 @@
   [exec environment-id command opts]
   (executor/execute! exec environment-id command opts))
 
-(def execute!
+(def ^{:stratum 0} execute!
   "Execute a command in an environment (alias for executor-execute!).
    See executor-execute! for full documentation."
   executor/execute!)
 
-(def persist-workspace!
+(def ^{:stratum 0} persist-workspace!
   "Persist workspace state from an execution environment."
   executor/persist-workspace!)
 
-(def restore-workspace!
+(def ^{:stratum 0} restore-workspace!
   "Restore workspace state into an execution environment."
   executor/restore-workspace!)
 
-(def with-environment
+(def ^{:stratum 0} with-environment
   "Execute a function within an acquired environment.
    Automatically acquires and releases the environment.
 
@@ -517,11 +503,11 @@
                             \"make test\" {})))"
   executor/with-environment)
 
-(def clone-and-checkout!
+(def ^{:stratum 0} clone-and-checkout!
   "Clone a repository and checkout a branch in the environment."
   executor/clone-and-checkout!)
 
-(def prepare-runtime-executor!
+(def ^{:stratum 0} prepare-runtime-executor!
   "Create an OCI-CLI executor on the selected container runtime (explicit
    :runtime-kind, else auto-probe — Podman first). Images are ensured by
    default; :ensure-image? false skips that step. Returns
@@ -530,7 +516,7 @@
    image preparation is skipped."
   executor/prepare-runtime-executor!)
 
-(def prepare-docker-executor!
+(def ^{:stratum 0} prepare-docker-executor!
   "Create a Docker executor, ensuring images by default. This is the
    Docker-explicit variant; :ensure-image? false skips image preparation.
    Product paths should prefer the
@@ -540,19 +526,17 @@
    image preparation is skipped."
   executor/prepare-docker-executor!)
 
-(def ensure-image!
+(def ^{:stratum 0} ensure-image!
   "Ensure a task runner image exists, building if necessary.
    (ensure-image! docker-path :minimal) -> Result"
   executor/ensure-image!)
 
-(def task-runner-images
+(def ^{:stratum 0} task-runner-images
   "Pre-defined task runner images (:minimal :clojure)."
   executor/task-runner-images)
 
-;------------------------------------------------------------------------------ Layer 6.5
 ;; Runtime adapter (N11-delta) — descriptor / registry / selection
-
-(def select-runtime
+(def ^{:stratum 0} select-runtime
   "Resolve a runtime descriptor from config + host state per N11-delta §3.
 
    Returns a result map. On success, :data carries:
@@ -570,78 +554,73 @@
                                         without an explicit :runtime-kind)"
   selector/select-runtime)
 
-(def runtime-probe-order
+(def ^{:stratum 0} runtime-probe-order
   "Auto-probe order applied when :runtime-kind is not configured."
   selector/probe-order)
 
-(defn runtime-known-kinds
+(defn ^{:stratum 0} runtime-known-kinds
   "Set of all runtime kinds the registry knows about."
   []
   (registry/known-kinds))
 
-(defn runtime-supported-kinds
+(defn ^{:stratum 0} runtime-supported-kinds
   "Set of runtime kinds the executor can construct a working descriptor for."
   []
   (registry/supported-kinds))
 
-(defn runtime-info
+(defn ^{:stratum 0} runtime-info
   "Probe a descriptor for availability and version. Returns
    {:available? bool :runtime-version str | :reason str}."
   [descriptor]
   (descriptor/runtime-info descriptor))
 
-(defn runtime-executable
+(defn ^{:stratum 0} runtime-executable
   "Return the resolved CLI binary for a descriptor."
   [descriptor]
   (descriptor/executable descriptor))
 
-(defn runtime-kind
+(defn ^{:stratum 0} runtime-kind
   "Return the runtime kind keyword for a descriptor."
   [descriptor]
   (descriptor/kind descriptor))
 
-;------------------------------------------------------------------------------ Layer 7
-;; Convenience functions
-
-;------------------------------------------------------------------------------ Layer 8
 ;; Per-task branch registry — wires DAG dependency edges to scratch-worktree
 ;; bases so a task's agent sees its dependency's persisted output instead of
 ;; the spec branch. See branch_registry.clj for the design rationale.
-
-(def create-branch-registry
+(def ^{:stratum 0} create-branch-registry
   "Build an empty branch registry — `task-id → branch-info`."
   branch-registry/create-registry)
 
-(def register-branch
+(def ^{:stratum 0} register-branch
   "Pure-data: associate `branch-info` with `task-id` in a registry value.
    The atom that holds the registry lives in the orchestrator; mutation
    happens via `(swap! reg register-branch ...)` at the call site."
   branch-registry/register-branch)
 
-(def lookup-branch
+(def ^{:stratum 0} lookup-branch
   "Look up a task's persisted branch-info, or nil when unknown."
   branch-registry/lookup-branch)
 
-(def resolve-base-branch
+(def ^{:stratum 0} resolve-base-branch
   "Decide a downstream task's scratch base: the dep's branch when there's
    exactly one registered, the default branch on zero deps or unregistered
    single dep, or an `:anomalies/dag-non-forest` map on multi-dep tasks."
   branch-registry/resolve-base-branch)
 
-(def resolve-pr-base-branch
+(def ^{:stratum 0} resolve-pr-base-branch
   "Decide a downstream task's RELEASE PR base: the dep's PUSHED branch
    (`:pr-branch`), so a chained task's PR stacks on the parent's published
    branch. Falls back to the default branch for root / not-yet-released /
    multi-dep tasks. Distinct from resolve-base-branch (local worktree fork)."
   branch-registry/resolve-pr-base-branch)
 
-(def resolve-base-branch-error?
+(def ^{:stratum 0} resolve-base-branch-error?
   "True when `resolve-base-branch` returned an anomaly map rather than a
    branch string. Lets callers branch on the result without coupling to
    the anomaly shape."
   branch-registry/resolve-error?)
 
-(def validate-dag-forest
+(def ^{:stratum 0} validate-dag-forest
   "Plan-time validator: nil when every task has ≤1 dependency,
    `:anomalies/dag-non-forest` map otherwise.
 
@@ -657,24 +636,22 @@
    reporting."
   branch-registry/validate-forest)
 
-(def dag-forest?
+(def ^{:stratum 0} dag-forest?
   "Predicate form of `validate-dag-forest`. See [[validate-dag-forest]]
    for the Stage 1A vs 1B status."
   branch-registry/forest?)
 
-;------------------------------------------------------------------------------ Layer 9
 ;; Multi-parent base resolution primitives (v2)
 ;; Pure-data inputs to the orchestrator's git-using `merge-parent-branches!`.
 ;; See I-DAG-MULTI-PARENT-MERGE.md §3.2.
-
-(def multi-parent?
+(def ^{:stratum 0} multi-parent?
   "True when a task's `:task/dependencies` declares more than one entry.
    Callers gate on this before choosing between [[resolve-base-branch]]
    (single-parent fast path, returns a string) and
    [[resolve-multi-parent-base]] (returns the v2 ordered-parents shape)."
   branch-registry/multi-parent?)
 
-(def resolve-multi-parent-base
+(def ^{:stratum 0} resolve-multi-parent-base
   "Build the ordered, SHA-pinned parent list for a multi-parent task.
    Returns `{:merge/parents [{:task/id :branch :commit-sha :order}]}` in
    declaration order. The orchestrator's git layer is responsible for
@@ -683,19 +660,150 @@
    workspace/registry plumbing."
   branch-registry/resolve-multi-parent-base)
 
-(def collapse-duplicate-tips
+(def ^{:stratum 0} collapse-duplicate-tips
   "Drop later parents whose `:commit-sha` matches an earlier parent's
    `:commit-sha`. Returns
    `{:parents [...] :collapsed [{:dropped :duplicate-of}]}`."
   branch-registry/collapse-duplicate-tips)
 
-(def compute-merge-input-key
+(def ^{:stratum 0} compute-merge-input-key
   "Deterministic idempotency hash from `[task-id, strategy, ordered
    parent SHAs]`. Used to name the merge ref under
    `refs/miniforge/dag-base/<run-id>/<task-id>/<input-key>`."
   branch-registry/compute-input-key)
 
-(defn create-dag-from-tasks
+;; Scratch-commit operations — lightweight git-object-store snapshots
+(def ^{:stratum 0} scratch-ref-name
+  "Return the fully-qualified scratch ref name for a workflow.
+
+   Example:
+     (scratch-ref-name \"wf-abc123\")
+     ;=> \"refs/miniforge/scratch/wf-abc123\""
+  scratch-commit/scratch-ref-name)
+
+(def ^{:stratum 0} scratch-commit!
+  "Snapshot a single file into the workflow's scratch ref without touching
+   the parent repo's working tree or index.
+
+   Arguments:
+   - parent-repo-path  Absolute path to the parent git repository
+   - workflow-id       Workflow identifier used as the ref suffix
+   - phase             Free-form phase label (e.g. \"implement\", \"verify\")
+   - file-path         Absolute path to the file to snapshot
+
+   Returns result/ok with {:commit-sha :ref :workflow-id :phase :file-path}
+   or result/err with :code :scratch-commit/<reason>."
+  scratch-commit/scratch-commit!)
+
+(def ^{:stratum 0} list-scratch-commits
+  "Return a vector of commit-metadata maps for a workflow's scratch ref,
+   newest first.
+
+   Each map contains :commit-sha :message :timestamp-epoch :workflow-id.
+   Returns an empty vector when the ref does not exist."
+  scratch-commit/list-scratch-commits)
+
+(def ^{:stratum 0} gc-scratch-refs!
+  "Delete scratch refs whose tip commit is older than `max-age-days` days.
+
+   max-age-days=0 deletes all scratch refs immediately (useful for cleanup).
+
+   Returns result/ok {:deleted [ref-names] :retained int}."
+  scratch-commit/gc-scratch-refs!)
+
+;; Worktree lifecycle registry and file-write hook
+(def ^{:stratum 0} get-worktree-registry
+  "Return a snapshot of the current worktree lifecycle registry.
+
+   Each entry is keyed by workflow-id and contains:
+     :scratch-ref    String ref name under refs/miniforge/scratch/<workflow-id>
+     :worktree-path  Absolute path to the scratch worktree
+     :created-at     Epoch ms when the worktree was acquired
+     :status         :active (worktree present) or :released (worktree removed)
+     :released-at    Epoch ms of release (only present when :status :released)"
+  worktree-registry/get-worktree-registry)
+
+(def ^{:stratum 0} register-worktree-entry!
+  "Register a new worktree entry in the lifecycle registry.
+
+   Called automatically by the WorktreeExecutor's acquire-environment! when
+   :workflow-id is present in env-config. Also callable directly.
+
+   Arguments:
+   - workflow-id    Workflow identifier (used as registry key and scratch-ref suffix)
+   - worktree-path  Absolute path to the scratch worktree"
+  worktree-registry/register-worktree-entry!)
+
+(def ^{:stratum 0} release-worktree-entry!
+  "Mark a registry entry as :released while preserving the scratch ref.
+
+   Called automatically by the WorktreeExecutor's release-environment!.
+   Also callable directly when lifecycle management is handled outside the
+   executor (e.g. Fleet or K8s teardown paths).
+
+   The underlying git scratch ref is NOT deleted here — use gc-scratch-refs!."
+  worktree-registry/release-worktree-entry!)
+
+(def ^{:stratum 0} derive-parent-repo-path
+  "Derive the parent repository path from a linked worktree path.
+
+   Uses `git rev-parse --git-common-dir` to locate the shared .git directory,
+   then returns the directory that contains it (the parent repo root).
+
+   Returns result/ok {:parent-repo-path string} or result/err."
+  worktree-impl/derive-parent-repo-path)
+
+(def ^{:stratum 0} notify-file-written!
+  "Snapshot a file written inside a worktree into the workflow's scratch ref.
+
+   Called by the layer that processes Write tool responses from agents running
+   inside the worktree. Derives the parent repo path via git plumbing and
+   delegates to scratch-commit! without touching the worktree's index or
+   working tree.
+
+   Arguments:
+   - worktree-path  Absolute path to the scratch worktree
+   - workflow-id    Workflow identifier (used as scratch-ref suffix)
+   - phase          Current phase label (e.g. \"implement\", \"verify\")
+   - file-path      Absolute path to the file that was written
+
+   Returns result/ok with scratch-commit data or result/err."
+  worktree-impl/notify-file-written!)
+
+;; Scratch-ref GC queue — deferred, daemon-free garbage collection
+(def ^{:stratum 0} gc-queue-path
+  "Return the absolute path string for `~/.miniforge/scratch-gc-queue.edn`.
+   Creates `~/.miniforge/` when it does not exist."
+  scratch-gc-queue/gc-queue-path)
+
+(def ^{:stratum 0} gc-default-max-age-days
+  "Default scratch-ref retention period in days (7).  Reference this from CLI
+   commands instead of duplicating the magic number."
+  scratch-gc-queue/default-max-age-days)
+
+(def ^{:stratum 0} enqueue-workflow-gc!
+  "Append a GC entry for `workflow-id` to `~/.miniforge/scratch-gc-queue.edn`.
+
+   Called at workflow completion (success or failure) so the corresponding
+   scratch ref becomes eligible for GC after 7 days.
+
+   Returns result/ok `{:workflow-id str :queue-size int}` or result/err."
+  scratch-gc-queue/enqueue-workflow-gc!)
+
+(def ^{:stratum 0} run-deferred-gc!
+  "Scan the GC queue and delete stale scratch refs if any entries are overdue.
+
+   Pass `parent-repo-path` (the git repo whose `refs/miniforge/scratch/` to clean)
+   and optionally `max-age-days` (default 7).
+
+   Returns result/ok `{:pruned int :remaining int :gc-result map-or-nil}` or
+   result/err."
+  scratch-gc-queue/run-deferred-gc!)
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; Convenience functions
+(defn ^{:stratum 1} create-dag-from-tasks
   "Create a complete DAG run state from a sequence of task definitions.
 
    Arguments:
@@ -735,7 +843,9 @@
                       :state-profile state-profile
                       :state-profile-provider state-profile-provider)))
 
-(defn execute-dag
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} execute-dag
   "Execute a DAG to completion.
    Convenience wrapper around create-run-atom and run-scheduler.
 
@@ -760,140 +870,6 @@
         run-atom (create-run-atom run-state)
         context (apply create-scheduler-context (mapcat identity context-opts))]
     (apply run-scheduler run-atom context (mapcat identity run-opts))))
-
-;------------------------------------------------------------------------------ Layer 10
-;; Scratch-commit operations — lightweight git-object-store snapshots
-
-(def scratch-ref-name
-  "Return the fully-qualified scratch ref name for a workflow.
-
-   Example:
-     (scratch-ref-name \"wf-abc123\")
-     ;=> \"refs/miniforge/scratch/wf-abc123\""
-  scratch-commit/scratch-ref-name)
-
-(def scratch-commit!
-  "Snapshot a single file into the workflow's scratch ref without touching
-   the parent repo's working tree or index.
-
-   Arguments:
-   - parent-repo-path  Absolute path to the parent git repository
-   - workflow-id       Workflow identifier used as the ref suffix
-   - phase             Free-form phase label (e.g. \"implement\", \"verify\")
-   - file-path         Absolute path to the file to snapshot
-
-   Returns result/ok with {:commit-sha :ref :workflow-id :phase :file-path}
-   or result/err with :code :scratch-commit/<reason>."
-  scratch-commit/scratch-commit!)
-
-(def list-scratch-commits
-  "Return a vector of commit-metadata maps for a workflow's scratch ref,
-   newest first.
-
-   Each map contains :commit-sha :message :timestamp-epoch :workflow-id.
-   Returns an empty vector when the ref does not exist."
-  scratch-commit/list-scratch-commits)
-
-(def gc-scratch-refs!
-  "Delete scratch refs whose tip commit is older than `max-age-days` days.
-
-   max-age-days=0 deletes all scratch refs immediately (useful for cleanup).
-
-   Returns result/ok {:deleted [ref-names] :retained int}."
-  scratch-commit/gc-scratch-refs!)
-
-;------------------------------------------------------------------------------ Layer 11
-;; Worktree lifecycle registry and file-write hook
-
-(def get-worktree-registry
-  "Return a snapshot of the current worktree lifecycle registry.
-
-   Each entry is keyed by workflow-id and contains:
-     :scratch-ref    String ref name under refs/miniforge/scratch/<workflow-id>
-     :worktree-path  Absolute path to the scratch worktree
-     :created-at     Epoch ms when the worktree was acquired
-     :status         :active (worktree present) or :released (worktree removed)
-     :released-at    Epoch ms of release (only present when :status :released)"
-  worktree-impl/get-worktree-registry)
-
-(def register-worktree-entry!
-  "Register a new worktree entry in the lifecycle registry.
-
-   Called automatically by the WorktreeExecutor's acquire-environment! when
-   :workflow-id is present in env-config. Also callable directly.
-
-   Arguments:
-   - workflow-id    Workflow identifier (used as registry key and scratch-ref suffix)
-   - worktree-path  Absolute path to the scratch worktree"
-  worktree-impl/register-worktree-entry!)
-
-(def release-worktree-entry!
-  "Mark a registry entry as :released while preserving the scratch ref.
-
-   Called automatically by the WorktreeExecutor's release-environment!.
-   Also callable directly when lifecycle management is handled outside the
-   executor (e.g. Fleet or K8s teardown paths).
-
-   The underlying git scratch ref is NOT deleted here — use gc-scratch-refs!."
-  worktree-impl/release-worktree-entry!)
-
-(def derive-parent-repo-path
-  "Derive the parent repository path from a linked worktree path.
-
-   Uses `git rev-parse --git-common-dir` to locate the shared .git directory,
-   then returns the directory that contains it (the parent repo root).
-
-   Returns result/ok {:parent-repo-path string} or result/err."
-  worktree-impl/derive-parent-repo-path)
-
-(def notify-file-written!
-  "Snapshot a file written inside a worktree into the workflow's scratch ref.
-
-   Called by the layer that processes Write tool responses from agents running
-   inside the worktree. Derives the parent repo path via git plumbing and
-   delegates to scratch-commit! without touching the worktree's index or
-   working tree.
-
-   Arguments:
-   - worktree-path  Absolute path to the scratch worktree
-   - workflow-id    Workflow identifier (used as scratch-ref suffix)
-   - phase          Current phase label (e.g. \"implement\", \"verify\")
-   - file-path      Absolute path to the file that was written
-
-   Returns result/ok with scratch-commit data or result/err."
-  worktree-impl/notify-file-written!)
-
-;------------------------------------------------------------------------------ Layer 12
-;; Scratch-ref GC queue — deferred, daemon-free garbage collection
-
-(def gc-queue-path
-  "Return the absolute path string for `~/.miniforge/scratch-gc-queue.edn`.
-   Creates `~/.miniforge/` when it does not exist."
-  scratch-gc-queue/gc-queue-path)
-
-(def gc-default-max-age-days
-  "Default scratch-ref retention period in days (7).  Reference this from CLI
-   commands instead of duplicating the magic number."
-  scratch-gc-queue/default-max-age-days)
-
-(def enqueue-workflow-gc!
-  "Append a GC entry for `workflow-id` to `~/.miniforge/scratch-gc-queue.edn`.
-
-   Called at workflow completion (success or failure) so the corresponding
-   scratch ref becomes eligible for GC after 7 days.
-
-   Returns result/ok `{:workflow-id str :queue-size int}` or result/err."
-  scratch-gc-queue/enqueue-workflow-gc!)
-
-(def run-deferred-gc!
-  "Scan the GC queue and delete stale scratch refs if any entries are overdue.
-
-   Pass `parent-repo-path` (the git repo whose `refs/miniforge/scratch/` to clean)
-   and optionally `max-age-days` (default 7).
-
-   Returns result/ok `{:pruned int :remaining int :gc-result map-or-nil}` or
-   result/err."
-  scratch-gc-queue/run-deferred-gc!)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

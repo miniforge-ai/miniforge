@@ -6,8 +6,8 @@
 
 # N7 — Operational Policy Synthesis With Verification
 
-**Version:** 0.4.1-draft
-**Date:** 2026-11-06
+**Version:** 0.4.2-draft
+**Date:** 2026-11-15
 **Status:** Complete
 **Conformance:** MUST
 **Class:** Extension spec (N7+)
@@ -316,6 +316,9 @@ active experiments at the next safe boundary, and revoke their mutation grants.
 It MUST invoke verified rollback through the separately authorized recovery path and
 record the disposition in N3/N6. Safe mode MUST set effective actuation to
 `:none` per N8's A0 posture.
+An operator full stop MUST instead follow N8 §3.5: its dominant workload fence
+MUST prohibit recovery as well as forward effects. It MUST NOT invoke this
+section's rollback exception or claim baseline recovery from runtime destruction.
 
 ### 5.4 Effective actuation decision
 
@@ -369,6 +372,9 @@ authorize PR creation or leaving candidate configuration permanently applied.
 Success, failure, abort, timeout, emergency stop, and safe-mode entry MUST terminate
 load and trigger the separately authorized cleanup and baseline-recovery path.
 N8 MUST fence new forward effects without granting unrestricted recovery powers.
+An active N8 §3.5 full stop MUST supersede this compensation requirement.
+Recovery remains unresolved until separately authorized in a fresh run under
+the N2 checkpoint delta §11.
 Cleanup MUST target only proven experiment-owned resources; uncertainty MUST
 require reconciliation, never deletion of an unproven resource.
 
@@ -470,6 +476,9 @@ All changes MUST be emitted as artifacts with provenance per N6:
 MUST execute as N10-governed effects with verified rollback and postcondition
 monitoring. A failed postcondition MUST trigger the declared rollback and record
 both the apply and rollback outcomes as artifacts, events, and evidence.
+N8 §3.5 full stop MUST supersede workload rollback here, as in §5.5.
+The runtime MUST retain unresolved rollback disposition instead of executing
+or claiming recovery under the stopped run.
 
 ## 8. CLI/TUI extensions (N5 extension)
 
@@ -493,23 +502,24 @@ IDs are never reused; a withdrawn requirement is marked withdrawn.
 | ID | Level | Requirement |
 |----|-------|-------------|
 | N7.EX.1 | MUST | Record an environment fingerprint for every experiment run (§3, §4). |
-| N7.EX.2 | MUST | Abort on guardrail breach and execute the declared rollback (§5). |
+| N7.EX.2 | MUST | Abort on guardrail breach and separately authorize rollback, unless full stop requires containment without compensation (§5, N8 §3.5). |
 | N7.EX.3 | MUST | Bound convergence by the declared iteration and budget limits (§3). |
 | N7.EX.4 | MUST | Emit the §3.14 event family of N3 for every lifecycle transition. |
 | N7.EX.5 | MUST | Default temporary experiments off and require separate staging authority before each effect (§5.5, N10 §1.5). |
-| N7.EX.6 | MUST | Terminate load and separately authorize, execute, and verify cleanup and baseline recovery on every trial exit (§5.5). |
+| N7.EX.6 | MUST | Separately authorize and verify load termination, cleanup, and baseline recovery on ordinary trial exits; full stop prohibits workload compensation (§5.5, N8 §3.5). |
 | N7.VF.1 | MUST | Evaluate verification against pre-declared criteria, not criteria chosen after the run (§6). |
 | N7.VF.2 | MUST | Link every OPSV event and artifact to its evidence bundle per N6 (§4, §7.1). |
 | N7.VF.3 | MUST | Bind permitted environment differences before effects and reject unrelated drift (§6.3). |
 | N7.VF.4 | MUST | Preserve the original baseline and verify recovery against its declared invariants (§6.3). |
 | N7.AC.1 | MUST | Default effective actuation to `:recommend-only`; PR emission and direct apply require the respective §5.4 authority checks (§5.3, §7.2, §7.3, §9). |
 | N7.AC.2 | MUST | Execute apply actions as N10-governed effects with verified rollback (§7.3). |
-| N7.AC.3 | MUST | Record both apply and rollback outcomes as artifacts, events, and evidence on postcondition failure (§7.3). |
+| N7.AC.3 | MUST | Record apply and performed or unresolved rollback outcomes as artifacts, events, and evidence on postcondition failure (§7.3). |
 | N7.AC.4 | MUST | Include the evidence bundle reference and rollback instructions in every emitted PR body (§7.2). |
 
 ### 8.5.1 Test Obligations
 
-1. A guardrail breach aborts the experiment and the rollback runs, both observable
+1. A guardrail breach aborts the experiment and separately authorized rollback
+   runs, unless full stop prohibits compensation. Both outcomes are observable
    on the stream (N7.EX.2).
 2. A run's environment fingerprint is sufficient to detect drift on re-run
    (N7.EX.1).
@@ -526,8 +536,10 @@ IDs are never reused; a withdrawn requirement is marked withdrawn.
    disabled, stale, foreign-target, and changed-payload grants refuse before mutation (N7.EX.5).
 9. An admitted staging trial can precede candidate verification without enabling
    production trials, PR emission, or permanent apply (N7.EX.5).
-10. Every exit stops load and verifies owned-resource cleanup and original-baseline
-    recovery; revoking forward grants does not bypass recovery authorization (N7.EX.6).
+10. Ordinary exits stop load and verify owned-resource cleanup and original-baseline
+    recovery. Forward-grant revocation does not bypass recovery authorization.
+    Full-stop exits instead fence all workload effects and retain unresolved
+    recovery; existing recovery grants cannot bypass containment (N7.EX.6, N8 §3.5).
 11. Uncertain effect or recovery outcomes remain explicit and prevent success
     and new forward effects (N7.EX.6).
 12. A separately approved, retained bounded recovery plan precedes the trial;
@@ -558,16 +570,13 @@ A minimal compliant OPSV implementation MUST:
 
 ## Annex A — Implementation Conformance Status (informative)
 
-This annex is **informative**, recording implementation state as of 2026-09-08.
+This annex is **informative**, recording implementation state as of 2026-11-17.
 
 ### A.1 Implemented
 
-N7 is the best-served spec in the set on the dimension that has defeated the
-others: **its event family is both registered and emitted.** The nine
-`opsv.*` types of N3 §3.14 appear in N3's registry, and
-`components/event-stream/src/ai/miniforge/event_stream/opsv.clj` emits them with
-tests in `phase-opsv` and `event-stream`. Every other extension spec reviewed in
-this pass declared event types that were never registered.
+N3 §3.14's OPSV event family is registered and has tested emitters, including
+`opsv.actuation/disposition` for governed effect outcomes. The scheduled
+drift producer remains open.
 
 `components/opsv` implements canonical contracts and hashing, risk scoring,
 bounded convergence, verification, and effective-actuation decisions. The
@@ -576,35 +585,42 @@ verification, gates, capability, rollback, and postcondition prerequisites are
 all present.
 
 The `opsv` 1.0.0 workflow registers and executes all seven phases through the
-shared N2 lifecycle. Its deterministic staging MCI discovers CPU and backlog
+shared N2 lifecycle with the simulated adapter. It discovers CPU and backlog
 drivers, synthesizes an HPA/KEDA-compatible proposal, and assembles evidence.
 It emits the required lifecycle and domain events and completes in `:recommend-only`
-mode with no external effects. `components/opsv-adapter-simulated` supplies the
-simulation boundary.
+mode with no external effects.
+
+The governed PR coordinator has a GitHub adapter for exact-payload creation and
+read-only reconciliation of uncertain outcomes. Tests exercise the runtime PR
+path without creating a real PR.
+
+Native staging primitives include bounded Kubernetes reads, Prometheus
+criterion observations, inert load creation, governed replica trials and
+baseline restoration. Focused tests cover independently authorized recovery
+and observation of the original baseline. These tests do not establish
+end-to-end native staging conformance.
 
 ### A.2 Specified, Not Verified
 
-- **Guardrail rollback (N7.EX.2).** Convergence terminates on a guardrail abort,
-  and event projection preserves the declared rollback action, but no
-  end-to-end adapter test executes and verifies that rollback.
-- **External actuation (N7.AC.2–N7.AC.4).** Pure authorization decisions and
-  Ariadne correlation records exist, but OPSV has no real PR or Kubernetes
-  actuation adapter.
+- **Native staging and recovery (§3, §5.5, §6).** The native primitives still
+  need to be composed and verified across the seven-phase workflow, from load
+  and convergence through abort, authorized cleanup and baseline recovery. The
+  irreversible full-stop path and safe-checkpoint restart are not established
+  by the ordinary stop and recovery tests.
+- **Final apply (§7.3).** Governed temporary staging effects are not permanent
+  policy apply. The final apply path with verified rollback and postcondition
+  monitoring is not established.
 - **CLI/TUI and drift (§3, §8).** The six canonical commands, Fleet drill-down,
   policy-state projection, and drift producer are not implemented.
 - **Agent-budget use case.** The second OPSV domain and its pinned experiment
   fixture are not implemented.
 
-### A.3 Structural
-
-§7.3 requires apply actions to execute as N10-governed effects with verified
-rollback and postcondition monitoring. N10 Annex A records that no
-postcondition-monitoring component exists, so this requirement currently
-depends on machinery that is not there.
-
 ---
 
 **Version History:**
+
+- 0.4.2-draft (2026-11-15): Full stop supersedes the compensation exception;
+  its authority and containment contract is owned by N8 §3.5.
 
 - 0.4.1-draft (2026-11-06): Clarified operator-approved recovery timing:
   retain an independently approved bounded plan before trial.

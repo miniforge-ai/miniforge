@@ -146,7 +146,8 @@
   ;; under these directories (tasks/test_runner.clj discovers them on disk).
   ;; Not under :test: Polylith runs :test paths as project tests, so
   ;; `poly test :all` would run them a second time inside `bb test:all`.
-  :integration {:extra-paths ["test" "integration"]}
+  :integration {:extra-paths ["test" "integration"
+                              "../../components/file-durability/test"]}
   ;; Real-backend tests (claude CLI, Docker). Not run in CI; see e2e/README.md.
   ;; Carries test/ too: the e2e namespaces require its support namespaces
   ;; (ai.miniforge.workflow.isolation-support).

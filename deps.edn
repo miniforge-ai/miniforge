@@ -4,6 +4,7 @@
 
  :aliases
  {:dev  {:extra-paths ["development/src"
+                       "development/resources"
                        "components/schema/src"
                        "components/schema/resources"
                        "components/config/src"
