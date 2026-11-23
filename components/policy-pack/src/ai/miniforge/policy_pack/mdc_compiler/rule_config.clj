@@ -30,6 +30,7 @@
    having already moved in slice 5) brings the parent namespace to
    budget."
   (:require
+   [ai.miniforge.policy-pack.mdc-compiler.frontmatter-values :as frontmatter-values]
    [ai.miniforge.policy-pack.schema-types :as schema-types]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -72,7 +73,8 @@
 
 (defn ^{:stratum 1} build-remediation-config
   "Build :rule/remediation map from grouped frontmatter remediation block.
-   Returns nil if no remediation config is present."
+   Returns nil if no remediation config is present. `template` is literal
+   text, so its `\\n`, `\\t` and `\\\\` escapes are expanded; no other field's are."
   [remediation-map]
   (when (and remediation-map (get remediation-map "strategy"))
     (let [excludes (build-exclude-context remediation-map)]
@@ -83,8 +85,11 @@
         (get remediation-map "replacement")
         (assoc :replacement (get remediation-map "replacement"))
 
+        ;; Only `template` is unescaped: `replacement` carries `$1`-style
+        ;; group references and the detection patterns are regex source.
         (get remediation-map "template")
-        (assoc :template (get remediation-map "template"))
+        (assoc :template (frontmatter-values/unescape-literal-text
+                          (get remediation-map "template")))
 
         (some? (get remediation-map "autoFixable"))
         (assoc :auto-fixable-default (boolean (get remediation-map "autoFixable")))
