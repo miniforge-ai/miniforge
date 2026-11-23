@@ -102,3 +102,16 @@
       (testing "a link cycle throws instead of looping, and both links are kept"
         (is (thrown? clojure.lang.ExceptionInfo (tasks/write-file-atomically! link "new")))
         (is (= #{"link.json" "back.json"} (file-names dir)))))))
+
+(deftest ^{:stratum 1} symlink-loop-is-not-treated-as-missing-test
+  (fs/with-temp-dir [dir {}]
+    (let [link (fn [i] (str dir "/link" i ".json"))
+          hops 45]
+      (spit (link hops) "{\"mcpServers\": {\"other\": {}}}")
+      (doseq [i (range hops)]
+        (fs/create-sym-link (link i) (str "link" (inc i) ".json")))
+      (testing "a link chain past the hop bound throws instead of reading as empty"
+        (is (thrown? clojure.lang.ExceptionInfo (tasks/read-json-file (link 0))))
+        (is (thrown? clojure.lang.ExceptionInfo (tasks/write-file-atomically! (link 0) "x"))))
+      (testing "the backing config is untouched"
+        (is (= "{\"mcpServers\": {\"other\": {}}}" (slurp (link hops))))))))

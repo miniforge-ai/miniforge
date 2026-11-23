@@ -195,31 +195,6 @@
   []
   (str (fs/home) "/.codex/config.toml"))
 
-(defn- parse-single-json-object
-  "The one JSON object in text, {} for blank text (nothing to lose), else
-   throws. Consumes every root value, because cheshire's parse-string would
-   silently ignore content after the first."
-  [text]
-  (if (str/blank? text)
-    {}
-    (let [values (vec (json/parsed-seq (java.io.StringReader. text)))]
-      (if (and (= 1 (count values)) (map? (first values)))
-        (first values)
-        (throw (ex-info "Expected exactly one JSON object" {:values (count values)}))))))
-
-(defn read-json-file
-  "Read and parse a JSON config file. Returns {} for a missing or blank file.
-   A file that exists but is not exactly one JSON object throws, so a caller
-   that merges into it never rewrites (and so destroys) a config it could
-   not fully read."
-  [path]
-  (if (fs/exists? path)
-    (try (parse-single-json-object (slurp path))
-         (catch Exception e
-           (throw (ex-info (str "Cannot parse existing JSON config, leaving it untouched: " path)
-                           {:path (str path)} e))))
-    {}))
-
 (def ^:private max-symlink-hops
   "Bound on following a chain of config symlinks, so a link cycle fails
    instead of looping."
@@ -243,6 +218,42 @@
       :else
       (recur (fs/absolutize (fs/path (fs/parent current) (fs/read-link current)))
              (inc hops)))))
+
+(defn- parse-single-json-object
+  "The one JSON object in text, {} for blank text (nothing to lose), else
+   throws. Consumes every root value, because cheshire's parse-string would
+   silently ignore content after the first."
+  [text]
+  (if (str/blank? text)
+    {}
+    (let [values (vec (json/parsed-seq (java.io.StringReader. text)))]
+      (if (and (= 1 (count values)) (map? (first values)))
+        (first values)
+        (throw (ex-info "Expected exactly one JSON object" {:values (count values)}))))))
+
+(defn read-config-text
+  "The text of a config file, following symlinks exactly as
+   write-file-atomically! does. nil only when the file does not exist; any
+   other failure (a symlink loop included) throws, so a caller that merges
+   into the config never rewrites one it could not read."
+  [path]
+  (try (Files/readString (publish-target path))
+       (catch java.nio.file.NoSuchFileException _ nil)
+       (catch Exception e
+         (throw (ex-info (str "Cannot read existing config, leaving it untouched: " path)
+                         {:path (str path)} e)))))
+
+(defn read-json-file
+  "Read and parse a JSON config file. Returns {} for a missing or blank file.
+   A file that is unreadable, or is not exactly one JSON object, throws, so a
+   caller that merges into it never rewrites a config it could not fully read."
+  [path]
+  (if-let [text (read-config-text path)]
+    (try (parse-single-json-object text)
+         (catch Exception e
+           (throw (ex-info (str "Cannot parse existing JSON config, leaving it untouched: " path)
+                           {:path (str path)} e))))
+    {}))
 
 (defn write-file-atomically!
   "Write content to path via a unique sibling temp file and an atomic move, so
@@ -374,7 +385,7 @@
   (let [path (codex-config-path)
         entry (mcp-server-entry-claude-desktop)
         block (render-codex-mcp-block entry)
-        existing (if (fs/exists? path) (slurp path) "")
+        existing (or (read-config-text path) "")
         cleaned (remove-toml-block existing "mcp_servers.miniforge-lsp")
         updated (append-toml-block cleaned block)]
     (write-file-atomically! path updated)
