@@ -21,6 +21,9 @@
      :namespace namespace
      :job-uid uid}))
 
+(defn ^{:stratum 0} reply [observed]
+  (creation/provider-reply 0 (json/generate-string observed)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} pod [{:keys [namespace] :as job} pod-name]
@@ -34,16 +37,18 @@
                  "ownerReferences" [owner]}
      "status" {"phase" "Running"}}))
 
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} capture-created! [state submit! & arguments]
+(defn ^{:stratum 1} capture-created! [state submit! & arguments]
   (let [reply (apply submit! arguments)
         created (json/parse-string-strict (:out reply) true)]
     (reset! state (receipt created))
     reply))
 
+;------------------------------------------------------------------------------ Layer 2
+
 (defn ^{:stratum 2} read-pod! [state _until arguments]
   (let [observed (pod @state (last arguments))]
-    (creation/provider-reply 0 (json/generate-string observed))))
+    (reply observed)))
 
-(comment (pod {:job-name "example" :job-uid "example-job" :namespace "example"} "example-pod"))
+(comment (pod {:job-name "example"
+               :job-uid "example-job"
+               :namespace "example"} "example-pod"))
