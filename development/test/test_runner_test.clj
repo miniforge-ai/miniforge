@@ -32,8 +32,10 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0 :private true} integration-classpath-roots
-  "Keep project scenarios and their shared storage fixtures out of production builds."
-  ["test" "integration" "../../components/file-durability/test"])
+  "Keep project scenarios and their shared storage/executor fixtures out of production builds."
+  ["test" "integration"
+   "../../components/file-durability/test"
+   "../../components/dag-executor/test"])
 
 (def ^{:stratum 0} previously-unrun
   "Project tests the hand-written list never named."
@@ -174,7 +176,7 @@
     (testing "integration tests stay out of :test, which Polylith runs under poly test :all"
       (is (empty? (filter #{"test" "integration" "e2e"}
                           (get-in aliases [:test :extra-paths])))))
-    (testing "the :integration alias carries project tests and shared storage fixtures"
+    (testing "the :integration alias carries project tests and shared storage/executor fixtures"
       (is (= integration-classpath-roots
              (get-in aliases [:integration :extra-paths]))))
     (testing "the :e2e alias carries test/, whose support namespaces e2e requires"

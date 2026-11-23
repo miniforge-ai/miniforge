@@ -14,6 +14,7 @@
             [ai.miniforge.dag-executor.result :as result]
             [ai.miniforge.dag-executor.kubernetes-creation-fixtures :as fixtures]
             [ai.miniforge.dag-executor.kubernetes-pod-fixtures :as pods]
+            [ai.miniforge.dag-executor.kubernetes-native-fixtures :as native]
             [clojure.java.shell :as shell]
             [clojure.test :refer [deftest is]]
             [slingshot.slingshot :refer [try+]]))
@@ -62,8 +63,7 @@
             :cpu cpu}})
 
 (defn- ^{:stratum 0} command-reply [output]
-  {:exit 0
-   :out output})
+  (fixtures/provider-reply 0 output))
 
 (defn- ^{:stratum 0} refuse-provider! [& _]
   (throw (AssertionError.)))
@@ -78,16 +78,12 @@
   (.interrupt (Thread/currentThread))
   reply)
 
-(defn- ^{:stratum 0} ready-pod []
-  (result/ok {:pod-name "mock-capsule-pod"
-              :status :running}))
-
-;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} observe-readiness [expected _ namespace _ effective]
+(defn- ^{:stratum 0} observe-readiness [expected _ namespace _ effective]
   (is (= "default" namespace))
   (is (= expected (select-keys effective (keys expected))))
-  (ready-pod))
+  (pods/ready))
+
+;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} malformed-defaults [loader path & options]
   (if (= projection-data-resource path) {} (apply loader path options)))
@@ -138,7 +134,7 @@
 
 (deftest ^{:stratum 1} test-cancelled-observation-never-cleans-or-retains
   (doseq [observed [(result/err :pod-interrupted (messages/t :kubernetes/pod-interrupted))
-                    (ready-pod)]]
+                    (pods/ready)]]
     (try+
       (let [reply (acquisition/acquire! accepted-job (partial interrupted-observation observed)
                                          refuse-provider! refuse-provider!)
@@ -156,15 +152,15 @@
       (is interrupted?))
     (finally (Thread/interrupted))))
 
-;------------------------------------------------------------------------------ Layer 2
-
-(deftest ^{:stratum 2} test-shipped-polling-budgets-reach-acquisition
+(deftest ^{:stratum 1} test-shipped-polling-budgets-reach-acquisition
   (let [instance (kubernetes/create-kubernetes-executor {})
         created (atom nil)]
-    (with-redefs [shell/sh (partial pods/capture-created! created (partial fixtures/response identity))
-                  command/run! (partial pods/read-pod! created)
+    (with-redefs [shell/sh refuse-provider!
+                  command/run! (partial native/dispatch! created (partial fixtures/response identity) pods/read-pod!)
                   client/wait-for-pod-ready (partial observe-readiness shipped-readiness-settings)]
       (is (result/ok? (executor/acquire-environment! instance (random-uuid) {}))))))
+
+;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} test-malformed-fixed-defaults-are-refused
   (let [loader config/load-config-resource]
