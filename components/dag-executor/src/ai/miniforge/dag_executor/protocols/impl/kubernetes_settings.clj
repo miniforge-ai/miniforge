@@ -6,6 +6,7 @@
   (:require [ai.miniforge.config.interface :as config]
             [ai.miniforge.dag-executor.protocols.impl.runtime.messages :as messages]
             [ai.miniforge.dag-executor.protocols.impl.kubernetes-defaults :as defaults]
+            [ai.miniforge.dag-executor.protocols.impl.kubernetes-settings-spec :as spec]
             [ai.miniforge.dag-executor.result :as result]
             [malli.core :as m]))
 
@@ -15,39 +16,24 @@
   "Package capsule and create-request budgets separately from fixed projection data."
   "config/dag-executor/runtime/kubernetes.edn")
 
-(def ^{:stratum 0 :private true} capsule-budget-schema
-  [:map [:resources/timeout-seconds pos-int?]])
-
-(def ^{:stratum 0 :private true} millis-schema
-  [:int {:min 1
-         :max Integer/MAX_VALUE}])
-
-;------------------------------------------------------------------------------ Layer 1
-
-(def ^{:stratum 1 :private true} executor-schema
-  (conj capsule-budget-schema
-        [:kubernetes/creation-request-timeout-ms millis-schema]
-        [:kubernetes/pod-ready-timeout-ms millis-schema]
-        [:kubernetes/pod-ready-poll-interval-ms millis-schema]))
-
-(defn ^{:stratum 1} task-resources
+(defn ^{:stratum 0} task-resources
   "Use the task's explicit budget if present, otherwise inherit the executor budget."
   [settings overrides]
   (let [effective (when (or (nil? overrides) (map? overrides))
                     (merge (select-keys settings [:resources/timeout-seconds]) overrides))]
-    (if (m/validate capsule-budget-schema effective)
+    (if (m/validate spec/CapsuleBudget effective)
       (result/ok effective)
       (result/err :invalid-capsule-deadline (messages/t :kubernetes/invalid-deadline)))))
 
-;------------------------------------------------------------------------------ Layer 2
+;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 2} configure
+(defn ^{:stratum 1} configure
   "Validate packaged defaults and then effective executor settings before provider I/O."
   [overrides]
   (let [packaged (merge (defaults/data) (config/load-config-resource config-resource))
         effective (when (or (nil? overrides) (map? overrides)) (merge packaged overrides))
-        invalid (or (m/explain executor-schema packaged)
-                    (m/explain executor-schema effective))]
+        invalid (or (m/explain spec/ExecutorSettings packaged)
+                    (m/explain spec/ExecutorSettings effective))]
     (if invalid
       (let [key (-> invalid :errors first :in first)]
         (result/err :invalid-kubernetes-settings
