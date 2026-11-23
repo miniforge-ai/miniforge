@@ -9,14 +9,14 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (deftest ^{:stratum 0} a-cancelled-run-reads-as-cancelled-not-failed
-  (is (= :cancelled (sut/derive-status {:event/type :workflow/cancelled} 5))
+  (is (= :cancelled (sut/derive-status {:event/type :workflow/cancelled}))
       "N3: a cancel is reported by :workflow/cancelled, and is not a failure")
   (is (= :cancelled (sut/derive-status {:event/type :workflow/completed
-                                        :workflow/status :cancelled}
-                                       5))
+                                        :workflow/status :cancelled}))
       "an older run that folded the cancel into :workflow/completed")
-  (is (= :failed (sut/derive-status {:event/type :workflow/completed :workflow/status :failure} 5)))
-  (is (= :completed (sut/derive-status {:event/type :workflow/completed :workflow/status :success} 5))))
+  (is (= :failed (sut/derive-status {:event/type :workflow/completed :workflow/status :failure})))
+  (is (= :completed (sut/derive-status {:event/type :workflow/completed :workflow/status :success})))
+  (is (= :stale (sut/derive-status nil)) "no terminal event in the tail"))
 
 (deftest ^{:stratum 0} a-cancelled-terminal-event-ends-the-summary
   (let [workflow-id (random-uuid)

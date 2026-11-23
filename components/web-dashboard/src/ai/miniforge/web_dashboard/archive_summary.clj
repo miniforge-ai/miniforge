@@ -48,7 +48,7 @@
   (first (filter #(contains? type-set (:event/type %)) events)))
 
 (defn ^{:stratum 0} derive-status
-  [terminal-event _tail-line-count]
+  [terminal-event]
   (cond
     (= :workflow/failed (:event/type terminal-event))
     :failed
@@ -76,7 +76,7 @@
             phase-event (find-by-type #{:workflow/phase-started :workflow/phase-completed} tail-events)]
         {:id           wf-id
          :name         (extract-wf-name first-event wf-id)
-         :status       (derive-status terminal (count tail-events))
+         :status       (derive-status terminal)
          :phase        (or (:workflow/phase phase-event) (:phase phase-event)
                            (:workflow/phase first-event) (:phase first-event)
                            "unknown")
