@@ -32,36 +32,38 @@ restart, and it asks for an existing durable-store abstraction where one fits. T
 
 1. `ledger.disk`, the file mechanics. Each operation returns a result or a `ledger-unavailable`
    anomaly that names the operation and path.
-   1. Record and lock files are named by a content hash of the key's canonical EDN, which keeps
-      types apart: a UUID key and a string key that print alike name different files. A read
+   1. A content hash of the key's canonical EDN names record and lock files.
+      This keeps types apart: a UUID key and a string key that print alike name different files. A read
       also checks the stored key equals the key asked for. The hash and the record bytes
-      are printed through `ledger.printing`, which binds every printer setting (`*print-length*`,
-      `*print-readably*`, `*print-dup*` and the rest), so a caller's bindings cannot rename a file
-      or write bytes `clojure.edn` reads differently. Bytes are encoded and decoded with reporting
-      UTF-8 coders: a string with no UTF-8 form, such as an unpaired surrogate, is refused before
-      anything is written, and malformed UTF-8 on disk is `ledger-unavailable` rather than
-      replacement characters.
+      are printed through `ledger.printing`, which binds every printer setting,
+      including `*print-length*`, `*print-readably*` and `*print-dup*`.
+      A caller's bindings cannot rename files or write bytes that `clojure.edn`
+      reads differently. Reporting UTF-8 coders encode and decode the bytes.
+      A string without a UTF-8 form, such as an unpaired surrogate, is refused
+      before writing. Malformed UTF-8 on disk yields `ledger-unavailable`,
+      not replacement characters.
    2. Records are EDN. Instants are written under `#mf/instant` because `#inst` reads back as a
-      `Date`, which does not equal the stored `Instant`; after a restart every stored request
-      would look changed and be refused as conflicting.
-   3. A read decodes exactly one form (the end-of-input marker is a fresh object, so no readable
-      value can pass for it) and checks it against `StoredRecord` and against its own file
-      name. Trailing content, a malformed record, or another key's record is corrupt, and the
+      `Date`, which does not equal the stored `Instant`.
+      After restart, every stored request would look changed and be refused as conflicting.
+   3. A read decodes exactly one form, checking `StoredRecord` and the file name.
+      The end-of-input marker is a fresh object, so no readable value can pass for it.
+      Trailing content, a malformed record, or another key's record is corrupt, and the
       ledger reports itself unavailable instead of guessing. Only a missing file reads as absent,
       and only a missing directory lists as empty. Any other I/O failure is `ledger-unavailable`.
    4. A write goes to a temporary file in the same directory. `file-durability/publish-bytes!`
       forces the bytes, the atomic rename, and the directory entries before the write is
       acknowledged.
-   5. Every write to a key holds that key's file lock, which excludes other processes. It first
-      takes one of 64 striped monitors, chosen by the lock file's key-hash name so path aliases of
-      one directory share it, because a JVM that already holds a file lock throws when it asks
-      again.
+   5. Every write to a key holds that key's file lock, which excludes other processes.
+      It first takes one of 64 striped monitors, chosen by the lock file's key-hash name.
+      Path aliases of one directory share the monitor.
+      A JVM already holding a file lock throws if it asks again.
 2. `ledger.file/FileLedger`: `write-entry!` reads the stored revision under the key's lock,
-   refuses a stale one as `ledger-conflict`, encodes the record and decodes it again, refusing it
-   unless it reads back equal, and publishes revision + 1. A `Timestamp` (which EDN reads back as
-   a `Date`), a value with no EDN form, or a non-map entry is refused with nothing written, never
-   acknowledged and then unreadable. `read-entry` and `entries` read without the lock; records
-   are only renamed into place, so a reader sees an old record or a new one, never part of either.
+   refusing stale revisions as `ledger-conflict`. It encodes and decodes the record,
+   requiring an equal readback before publishing revision + 1.
+   A `Timestamp`, which EDN reads as a `Date`, is refused before writing.
+   Values without an EDN form and non-map entries are also refused, never acknowledged
+   and then unreadable. `read-entry` and `entries` read without the lock.
+   Atomic renames let readers see an old or new record, never part of either.
 3. `interface/file-ledger`, validated by `LedgerDir` (a non-blank path or a `File`).
 4. `interface.ledger/absent`: the absent-read value, now shared by both stores.
 5. Tests: the shared `controller-over` helper moves into `ledger-faults`.
@@ -83,9 +85,9 @@ The easy option was one EDN file holding the whole ledger, rewritten on every ch
 rejected because every write would contend for the same lock and rewrite every other key's lease.
 One file per key keeps writes independent and leaves the compare-and-set check local to one record.
 
-A `java.sql.Timestamp` in an entry would be written as `#inst` and read back as a `Date`, so the
-round-trip check refuses that write with `ledger-unavailable` before anything is published; the
-lease is never acknowledged. Requests built by the conformance fixtures and the pilot use `Instant`.
+A `java.sql.Timestamp` in an entry would be written as `#inst` and read back as a `Date`.
+The round-trip check refuses that write as `ledger-unavailable` before publishing.
+The lease is never acknowledged. Requests built by the conformance fixtures and the pilot use `Instant`.
 
 Lock files stay on disk after their key is released: one empty file per key.
 
@@ -101,11 +103,11 @@ Lock files stay on disk after their key is released: one empty file per key.
    4. A corrupt record makes reads, writes and listing unavailable, and so do trailing content and
       another key's record copied over this key's file.
    5. A store under a regular file is unavailable for writes, reads and listing, never empty.
-   6. Keys and a string value written under `*print-length*` 1 and `*print-readably*` false get
-      separate files and read back equal; a trailing `:...ledger.disk/eof` keyword is still trailing
-      content.
+   6. Keys and a string value written under `*print-length*` 1 and `*print-readably*` false
+      get separate files and read back equal. A trailing `:...ledger.disk/eof` keyword
+      is still trailing content.
    7. A restarted controller over a fresh store on the same directory sees the earlier lease as
-      ready, returns the same environment for the same request, and releases it. The original
+      ready. It returns the same environment for the same request, then releases it. The original
       controller then sees the lease as released.
 2. `file_ledger_process_test` (integration, about 6 s): exactly one of the two writer processes
    lands revision 1 and the other gets `ledger-conflict`. Both exit 0; a writer that has not exited
@@ -115,8 +117,9 @@ Lock files stay on disk after their key is released: one empty file per key.
 3. Each component file test runs in under 100 ms, measured locally.
 4. `file_ledger_test` also pins lossless UTF-8: an unpaired surrogate is refused with nothing
    written, and a malformed byte in a stored string is unavailable.
-5. A write that would not read back (a `Timestamp`, a `File`, a non-map entry) is refused with
-   nothing written, and a UUID key and a string key that print alike keep separate records.
+5. A write that would not read back is refused with nothing written.
+   Examples include a `Timestamp`, a `File`, and a non-map entry.
+   A UUID key and string key that print alike keep separate records.
 6. The agent-environment suite passes: 81 tests with 301 assertions. Agent-worker and opt-in
    profile pass: 9 tests with 42 assertions. clj-kondo and stratum-lint are clean.
 

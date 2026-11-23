@@ -2,6 +2,7 @@
  {:chain/started "Chain started."
   :workflow/completed "Workflow {status}"
   :workflow/failed "Workflow failed: {reason}"
+  :workflow/cancelled "Workflow cancelled by {requested-by}"
   :workflow/unknown-error "unknown error"
   :gate/decision "Phase {phase} decision: {decision}"
   :workflow/started "Workflow started"

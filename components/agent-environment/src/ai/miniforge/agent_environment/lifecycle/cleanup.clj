@@ -51,13 +51,14 @@
     entry
     (assoc entry :entry/state :state/releasing :entry/cleanup cleanup)))
 
-(defn- ^{:stratum 0} requested-for-reservation
-  "The reservation at `generation`, while still provisioning, releasing
-   `environment` under `cleanup`; any other entry unchanged."
-  [generation environment cleanup entry]
-  (if (and (= generation (:entry/generation entry)) (= :state/provisioning (:entry/state entry)))
-    (assoc entry :entry/state :state/releasing :entry/environment environment :entry/cleanup cleanup)
-    entry))
+(defn- ^{:stratum 0} releasing
+  [entry environment cleanup]
+  (assoc entry :entry/state :state/releasing :entry/environment environment :entry/cleanup cleanup))
+
+(defn- ^{:stratum 0} abandoned?
+  "True for a reservation a reconcile released with no environment."
+  [entry]
+  (and (= :state/released (:entry/state entry)) (nil? (:entry/environment entry))))
 
 (defn- ^{:stratum 0} outcome-recorded
   "The entry once `cleanup`'s deletes ran: released when they applied and
@@ -93,6 +94,22 @@
     (and (not (anomaly/anomaly? seen)) (not= uid (:observed/uid seen)))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} for-reservation
+  "Ownership for what a reservation's own provision created: the
+   reservation at `generation` while still provisioning, or after a
+   reconcile released it with no environment. Never an adopted environment
+   or a newer generation."
+  [generation environment cleanup entry]
+  (if (and (= generation (:entry/generation entry))
+           (or (= :state/provisioning (:entry/state entry)) (abandoned? entry)))
+    (releasing entry environment cleanup)
+    entry))
+
+(defn ^{:stratum 1} for-stale
+  "Ownership for a reconcile's cleanup: `stale`, while still the key's exact entry."
+  [stale environment cleanup entry]
+  (if (= stale entry) (releasing entry environment cleanup) entry))
 
 (defn- ^{:stratum 1} unowned
   "Nil when the change recorded `cleanup`, else why it did not."
@@ -132,21 +149,20 @@
             settled (or (superseded cleanup recorded) recorded)]
         (support/recorded-call settled {:call/outcome (receipt/steps-outcome steps)} steps)))))
 
-(defn ^{:stratum 2} reservation-cleaned!
-  "Delete a partial provision's `environment` under a cleanup intent on its
-   reservation. Returns `{:cleanup/receipt r :cleanup/recorded change}`;
-   when the ledger did not take the intent, nothing is deleted and the
-   receipt is nil."
-  [c subject request target environment]
+(defn ^{:stratum 2} cleaned-under!
+  "Delete `environment` under a cleanup intent `requested` records on its
+   key: `(requested environment cleanup entry)` returns the entry releasing
+   it when the caller owns the cleanup, else the entry unchanged. Returns
+   `{:cleanup/receipt r :cleanup/recorded change}`; when the intent was not
+   taken, nothing is deleted and the receipt is nil."
+  [c subject request target environment requested reason]
   (let [k (lease/request-key request)
-        generation (:target/generation target)
-        cleanup (intent (random-uuid) (:environment/uid environment) generation (support/now c))
-        changed (controller/change-entry! c k (partial requested-for-reservation generation environment cleanup))]
+        cleanup (intent (random-uuid) (:environment/uid environment) (:target/generation target) (support/now c))
+        changed (controller/change-entry! c k (partial requested environment cleanup))]
     (if (or (anomaly/anomaly? changed) (not (owns? cleanup changed)))
       {:cleanup/receipt nil :cleanup/recorded changed}
       (let [{:keys [steps applied? verified?]} (deleted c target cleanup)
             recorded (controller/change-entry! c k (partial outcome-recorded cleanup applied? verified?))
             outcome (receipt/steps-outcome steps)
-            cleaned (controller/record! c subject :environment/release outcome steps
-                                        :anomalies.agent-environment/provisioning-failed)]
+            cleaned (controller/record! c subject :environment/release outcome steps reason)]
         {:cleanup/receipt cleaned :cleanup/recorded recorded}))))
