@@ -28,8 +28,8 @@
    [ai.miniforge.cli.workflow-runner.display :as display]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.event-stream.interface.manifest :as es-manifest]
-   [ai.miniforge.phase.interface :as phase]
-   [ai.miniforge.response.interface :as response]))
+   [ai.miniforge.response.interface :as response]
+   [ai.miniforge.workflow.interface :as workflow]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -78,12 +78,23 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} publish-completion-event [event-stream workflow-id result]
-  (let [status (if (phase/succeeded? result) :success :failure)
-        duration-ms (get-in result [:execution/metrics :duration-ms])]
+(defn ^{:stratum 1} publish-completion-event
+  "Publish the run's terminal event: completed, cancelled (N3: never
+   folded into completed or failed) or failed."
+  [event-stream workflow-id result]
+  (let [outcome (workflow/run-outcome result)
+        duration-ms (get-in result [:execution/metrics :duration-ms])
+        ;; An invalid cancel record fails closed: the failed event below.
+        cancelled (when (= :cancelled outcome)
+                    (es/workflow-cancelled event-stream workflow-id
+                                           (workflow/cancellation result) duration-ms))]
     (es/publish! event-stream
-                 (if (= status :success)
-                   (es/workflow-completed event-stream workflow-id status duration-ms)
+                 (cond
+                   (= :completed outcome)
+                   (es/workflow-completed event-stream workflow-id :success duration-ms)
+                   (and cancelled (not (anomaly/any-anomaly? cancelled)))
+                   cancelled
+                   :else
                    (es/workflow-failed event-stream workflow-id
                                        {:message (failure-message result)
                                         :errors (or (seq (:execution/errors result))

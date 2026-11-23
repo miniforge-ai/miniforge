@@ -95,4 +95,6 @@
 
 (deftest ^{:stratum 1} gate-keyword-is-checked-test
   (testing "a gate named by string instead of keyword breaks check-gate's schema"
-    (is (= :malli.core/invalid-input (thrown-type #(gate/check-gate "syntax" {} {}))))))
+    ;; The wrong argument type is the point; clj-kondo's Malli types flag it.
+    (is (= :malli.core/invalid-input
+           (thrown-type #_{:clj-kondo/ignore [:type-mismatch]} #(gate/check-gate "syntax" {} {}))))))

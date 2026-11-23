@@ -23,7 +23,7 @@
    Exclusion-context matching lives in `classify-exclusion` (rule 210: a
    fourth real layer here is the signal to split it).
 
-   Layer 0: Semantic-strategy predicate
+   Layer 0: Remediation-strategy lookup and the non-mechanical strategy set
    Layer 1: Single-violation classification
    Layer 2: Top-level classify-violations entry point"
   (:require [ai.miniforge.compliance-scanner.classify-exclusion :as exclusion]
@@ -31,31 +31,45 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- ^{:stratum 0} semantic-strategy?
-  "Return true if the violation has a :semantic remediation strategy."
+(def ^{:stratum 0} ^:private non-mechanical-strategies
+  "Remediation strategies that are never applied mechanically, whatever a
+   rule's `autoFixable` default says: `:semantic` needs an LLM judgement, and
+   `:manual` declares a fix no machine can express."
+  #{:semantic :manual})
+
+(defn- ^{:stratum 0} remediation-strategy
+  "Return the violation's declared remediation strategy, or nil when it declares
+   none. `scan-pack-config/enrich-violation` supplies `:remediation-strategy`;
+   the nested `[:remediation :strategy]` form is accepted for violations built
+   directly rather than enriched from a pack rule."
   [violation]
-  (= :semantic (get-in violation [:remediation :strategy]
-                       (get violation :remediation-strategy))))
+  (get-in violation [:remediation :strategy]
+          (get violation :remediation-strategy)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} classify-one
   "Classify a single violation using pack-enriched metadata.
    Uses :auto-fixable-default and :exclude-contexts from the pack rule.
-   Violations with :semantic remediation strategy are always not auto-fixable."
+   Violations declaring a non-mechanical remediation strategy (:semantic or
+   :manual) are never auto-fixable — the declared strategy overrides the
+   rule's :auto-fixable-default rather than being weighed against it."
   [violation]
   (let [auto-default (get violation :auto-fixable-default true)
         excludes     (get violation :exclude-contexts [])
         excluded?    (boolean (some #(exclusion/matches-exclude-context? violation %) excludes))
-        semantic?    (semantic-strategy? violation)]
+        strategy     (remediation-strategy violation)
+        non-mech?    (contains? non-mechanical-strategies strategy)]
     (assoc violation
-           :auto-fixable? (and auto-default (not excluded?) (not semantic?))
+           :auto-fixable? (and auto-default (not excluded?) (not non-mech?))
+           ;; `non-mech?` catches a strategy added to the set without its own branch.
            :rationale     (cond
-                            semantic?    (msg/t :classify/semantic-review)
-                            excluded?    (msg/t :classify/json-context)
-                            auto-default (msg/t :classify/literal-default)
-                            :else        (str (get violation :rule/title "Manual review")
-                                              " — manual review required")))))
+                            (= :semantic strategy) (msg/t :classify/semantic-review)
+                            non-mech?              (msg/t :classify/manual-strategy)
+                            excluded?              (msg/t :classify/json-context)
+                            auto-default           (msg/t :classify/literal-default)
+                            :else                  (str (get violation :rule/title "Manual review")
+                                                        " — manual review required")))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

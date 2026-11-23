@@ -39,10 +39,10 @@
       lines)))
 
 (defn- ^{:stratum 0} prepend-violation?
-  "Return true if a violation is a prepend-type remediation."
+  "True when the pack rule declares `remediation.type` prepend. The declared
+   type is the only trigger; a rule id never is."
   [violation]
-  (or (= :prepend (get violation :remediation-type))
-      (= :std/header-copyright (get violation :rule/id))))
+  (= :prepend (get violation :remediation-type)))
 
 (defn- ^{:stratum 0} append-violation?
   "Return true if a violation is an append-type remediation."

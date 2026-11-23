@@ -34,6 +34,7 @@
    stripped strings so downstream code can use keyword accessors."
   (:require
    [ai.miniforge.event-stream.sinks :as sinks]
+   [ai.miniforge.event-stream.sinks.naming :as naming]
    [cheshire.core :as json]
    [clojure.java.io :as io]
    [slingshot.slingshot :refer [try+]]))
@@ -114,9 +115,8 @@
   (let [base     (io/file (str base-dir))
         archived (sinks/archived-workflow-dir base workflow-id)
         live     (sinks/live-workflow-dir base workflow-id)
-        legacy   (io/file base (if (keyword? workflow-id)
-                                 (name workflow-id)
-                                 (str workflow-id)))]
+        ;; The segment, never the raw id: "../x" must not climb out of `base`.
+        legacy   (io/file base (naming/workflow-id-segment workflow-id))]
     (cond
       (.isDirectory archived) archived
       (.isDirectory live)     live

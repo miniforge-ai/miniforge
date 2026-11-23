@@ -122,12 +122,7 @@
       (unavailable/->UnavailableExecutor (:error selection)))))
 
 (def ^{:stratum 0} create-kubernetes-executor
-  "Create a Kubernetes executor.
-
-   Config:
-   - :namespace - K8s namespace (default: 'default')
-   - :image - Container image for tasks (default: alpine:latest)
-   - :kubectl-path - Path to kubectl binary"
+  "Registry constructor; invalid budget settings remain an unavailable protocol instance."
   k8s/create-kubernetes-executor)
 
 (def ^{:stratum 0} create-worktree-executor

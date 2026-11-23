@@ -112,6 +112,22 @@
       (is (str/includes? body "files-changed: 3"))
       (is (str/includes? body "docs/pull-requests/2026-04-07-fix-210-clojure-map-access.md")))))
 
+(deftest ^{:stratum 0} prepend-honours-declared-type-for-any-rule-test
+  (testing "any rule declaring :prepend is prepended, not just header-copyright"
+    (let [content "# Doc\n"
+          v       {:rule/id              :std/some-other-rule
+                   :rule/category        "999"
+                   :line                 1
+                   :current              "(missing banner)"
+                   :suggested            nil
+                   :auto-fixable?        true
+                   :remediation-type     :prepend
+                   :remediation-template "<!-- banner -->"}
+          patched (patch/patch-file-content content [v])]
+      (is (str/starts-with? patched "<!-- banner -->")
+          "declared :prepend governs regardless of rule id")
+      (is (str/includes? patched "# Doc")))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 ;------------------------------------------------------------------------------ patch-file-content tests
@@ -166,6 +182,22 @@
           "Copyright header should contain author name")
       (is (str/includes? patched "# My Doc")
           "Original content should be preserved after the header"))))
+
+(deftest ^{:stratum 1} prepend-requires-declared-remediation-type-test
+  (testing "a header-copyright violation is NOT prepended without a declared :prepend type"
+    ;; `prepend-violation?` used to hardcode `:std/header-copyright` as a
+    ;; prepend trigger, so this rule was patched as a prepend whatever its pack
+    ;; declaration said. `project/header-copyright` (810) has since dropped
+    ;; `type: prepend` for `strategy: manual`, because MDC frontmatter cannot
+    ;; express its multi-line template (miniforge-standards#129). The rule id
+    ;; must not resurrect the prepend on its own.
+    (let [content  "# My Doc\n\nSome content.\n"
+          v        (dissoc copyright-violation :remediation-type)
+          patched  (patch/patch-file-content content [v])]
+      (is (= content patched)
+          "content must be untouched when no :prepend type is declared")
+      (is (not (str/starts-with? patched "<!--"))
+          "no header should be prepended off the rule id alone"))))
 
 (deftest ^{:stratum 1} copyright-header-before-line-edits-test
   (testing "copyright prepend does not shift line indices for line-replacement violations"

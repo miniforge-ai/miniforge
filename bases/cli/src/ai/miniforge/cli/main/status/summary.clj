@@ -7,6 +7,7 @@
             [ai.miniforge.cli.main.util :as util]
             [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.event-stream.interface :as events]
+            [ai.miniforge.workflow.interface :as workflow]
             [ai.miniforge.workflow-resume.interface :as resume]
             [slingshot.slingshot :refer [throw+]]))
 
@@ -18,6 +19,13 @@
       (throw+ context (:anomaly/message context))
       context)))
 
+(defn- ^{:stratum 0} cancelled-run?
+  "A run its checkpoint records :cancelled, or whose events end it with
+   :workflow/cancelled (N3)."
+  [context history]
+  (or (workflow/cancelled? (:machine-snapshot context))
+      (boolean (some #(= :workflow/cancelled (:event/type %)) history))))
+
 (defn- ^{:stratum 0} stale-running? [last-updated]
   (when-let [last-updated-ms (util/timestamp->epoch-ms last-updated)]
     (let [configured (:running-stale-threshold-ms (app-config/status-config))
@@ -27,9 +35,10 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} reconstructed-status [context last-updated]
+(defn- ^{:stratum 1} reconstructed-status [context history last-updated]
   (cond
     (resume/completed? context) :completed
+    (cancelled-run? context history) :cancelled
     (resume/failed? context) :failed
     (resume/paused? context) :paused
     (stale-running? last-updated) :stale
@@ -42,7 +51,7 @@
         history (events/read-workflow-events-by-id directory workflow-id)
         context (reconstruct! directory workflow-id)
         last-updated (:event/timestamp (last history))
-        status (reconstructed-status context last-updated)
+        status (reconstructed-status context history last-updated)
         spec-name (some-> context :workflow-spec :name)
         completed-task-count (count (:completed-dag-tasks context))]
     {:workflow-id workflow-id

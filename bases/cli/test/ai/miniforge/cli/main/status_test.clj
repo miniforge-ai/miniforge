@@ -37,6 +37,15 @@
         (is (nil? (:last-updated result)))
         (is (zero? (:completed-dag-task-count result)))))))
 
+(deftest ^{:stratum 1} a-cancelled-run-reads-as-cancelled
+  (doseq [[snapshot history] [[{:execution/status :cancelled} []]
+                              [nil [{:event/type :workflow/cancelled}]]]]
+    (with-redefs [events/read-workflow-events-by-id (constantly history)
+                  resume/reconstruct-context
+                  (constantly (assoc (context :event-count) :machine-snapshot snapshot))]
+      (is (= :cancelled (:status (summary/read-workflow "test-workflow")))
+          "not running, stale or failed (N2 2.2)"))))
+
 (deftest ^{:stratum 1} presentation-handles-empty-and-partial-summaries
   (is (.contains (with-out-str (presentation/print-all [])) (messages/t :status/value-none)))
   (is (.contains (with-out-str (presentation/print-workflow (row "test" nil))) "test")))

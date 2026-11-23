@@ -28,28 +28,33 @@
    The canonical job configuration is documented in:
    resources/executor/kubernetes/job-template.yaml"
   (:require
+   [ai.miniforge.dag-executor.protocols.impl.kubernetes-acquisition :as acquisition]
+   [ai.miniforge.dag-executor.protocols.impl.kubernetes-admission :as admission]
    [ai.miniforge.dag-executor.protocols.impl.kubernetes-client :as client]
-   [ai.miniforge.dag-executor.protocols.impl.kubernetes-job-creation :as job-creation]
+   [ai.miniforge.dag-executor.protocols.impl.kubernetes-defaults :as defaults]
+   [ai.miniforge.dag-executor.protocols.impl.kubernetes-job-creation :as creation]
    [ai.miniforge.dag-executor.protocols.impl.kubernetes-job-resources :as resources]
-   [ai.miniforge.dag-executor.protocols.impl.kubernetes-pod-observation :as observation]
    [ai.miniforge.dag-executor.protocols.impl.kubernetes-settings :as settings]
+   [ai.miniforge.dag-executor.protocols.impl.unavailable :as unavailable]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.messages :as messages]
    [ai.miniforge.dag-executor.result :as result]
    [ai.miniforge.dag-executor.workspace :as workspace]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
-   [clojure.java.io :as io]
-   [clojure.string :as str]))
+   [clojure.string :as str]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; ============================================================================
 ;; Configuration
 ;; ============================================================================
-(def ^{:stratum 0} default-namespace "default")
+(def ^{:stratum 0 :private true} job-prefix
+  "Preserve legacy names while server receipts distinguish Job incarnations."
+  "miniforge-task-")
 
-(def ^{:stratum 0} default-image "alpine:latest")
-
-;; Resource path for job template (for documentation/reference)
-(def ^{:stratum 0} job-template-resource "executor/kubernetes/job-template.yaml")
+(def ^{:stratum 0 :private true} task-id-width
+  "Retain the existing eight-character task suffix without changing workload names."
+  8)
 
 ;; ============================================================================
 ;; Job Spec Generation
@@ -63,8 +68,8 @@
    The spec matches the canonical template at:
    resources/executor/kubernetes/job-template.yaml"
   [job-name namespace image workdir env-map resources task-id]
-  {:apiVersion job-creation/api-version
-   :kind job-creation/resource-kind
+  {:apiVersion creation/api-version
+   :kind creation/resource-kind
    :metadata {:name job-name
               :namespace namespace
               :labels {:app "miniforge"
@@ -72,8 +77,8 @@
                        :task-id (str task-id)}
               :annotations {:miniforge.ai/task-id (str task-id)
                             :miniforge.ai/created-by "dag-executor"}}
-   :spec {:ttlSecondsAfterFinished 300  ; Cleanup completed jobs after 5 min
-          :activeDeadlineSeconds (:resources/timeout-seconds resources)
+   :spec {:activeDeadlineSeconds (:resources/timeout-seconds resources)
+          :ttlSecondsAfterFinished 300  ; Cleanup completed jobs after 5 min
           :backoffLimit 0               ; No retries - handled at DAG scheduler level
           :completions 1
           :parallelism 1
@@ -87,7 +92,7 @@
                   [{:name "task"
                     :image image
                     :imagePullPolicy "IfNotPresent"
-                    :workingDir (or workdir resources/default-workdir)
+                    :workingDir (or workdir (resources/default-workdir))
                     :command ["sh" "-c" "trap 'exit 0' TERM; sleep infinity & wait"]
                     :env (resources/build-env-vars env-map)
                     :resources (resources/build-resource-spec resources)
@@ -103,16 +108,6 @@
 ;; ============================================================================
 ;; Kubernetes Operations
 ;; ============================================================================
-(defn ^{:stratum 0} cluster-info
-  "Get Kubernetes cluster info."
-  [kubectl-path]
-  (let [result (client/run-kubectl kubectl-path "cluster-info" "--request-timeout=5s")]
-    (if (zero? (:exit result))
-      {:available? true
-       :cluster-info (subs (:out result) 0 (min 200 (count (:out result))))}
-      {:available? false
-       :reason (:err result)})))
-
 (defn ^{:stratum 0} exec-in-pod
   "Execute a command in a pod."
   [kubectl-path namespace pod-name command _opts]
@@ -173,17 +168,6 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; ============================================================================
-;; Helper Functions
-;; ============================================================================
-(defn ^{:stratum 1} load-job-template
-  "Load the job template YAML from resources.
-   Returns the template string or nil if not found.
-   Useful for documentation and debugging."
-  []
-  (when-let [resource (io/resource job-template-resource)]
-    (slurp resource)))
-
-;; ============================================================================
 ;; KubernetesExecutor Record
 ;; ============================================================================
 (defrecord ^{:stratum 1} KubernetesExecutor [config namespace image kubectl-path
@@ -194,34 +178,35 @@
   (executor-type [_this] :kubernetes)
 
   (available? [_this]
-    (try
-      (result/ok (cluster-info kubectl-path))
+    (try+
+      (result/ok (client/cluster-info kubectl-path))
       (catch Exception e
         (result/ok {:available? false :reason (.getMessage e)}))))
 
   (acquire-environment! [_this task-id env-config]
-    (result/and-then
-     (settings/task-resources config (:resources env-config))
-     (fn [task-resources]
-       (let [job-name (str "miniforge-task-" (subs (str task-id) 0 8))
-             workdir (get env-config :workdir resources/default-workdir)
-             job-spec (build-job-spec job-name namespace image workdir
-                                      (:env env-config) task-resources task-id)
-             creation (job-creation/create! kubectl-path job-spec (:kubernetes/creation-request-timeout-ms config))
-             observed (result/and-then creation
-                                       (fn [job]
-                                         (result/and-then
-                                          (client/wait-for-pod-ready kubectl-path namespace job-name config)
-                                          (partial observation/verify! kubectl-path job
-                                                   (:kubernetes/pod-observation-request-timeout-ms config)))))]
-         (result/map-ok observed
-                        (fn [pod]
-                          (swap! pod-cache assoc job-name (:pod-name pod))
-                          (proto/create-environment-record job-name :kubernetes task-id workdir
-                                                           (assoc env-config :metadata (merge (:data creation) pod)))))))))
+    (let [effective (settings/task-resources config (:resources env-config))
+          job-name (str job-prefix (subs (str task-id) 0 task-id-width))
+          workdir (get env-config :workdir (resources/default-workdir))
+          job-spec (build-job-spec job-name namespace image workdir
+                                   (:env env-config)
+                                   (:data effective)
+                                   task-id)
+          context {:job-name job-name
+                   :task-id task-id
+                   :workdir workdir
+                   :namespace namespace
+                   :options env-config}]
+      (if (result/err? effective)
+        effective
+        (acquisition/acquire! (partial creation/create! kubectl-path job-spec
+                                                     (:kubernetes/creation-request-timeout-ms config))
+                            (partial client/wait-for-pod-ready kubectl-path namespace job-name config)
+                            (constantly nil)
+                            (partial admission/retain! pod-cache context kubectl-path
+                                     (:kubernetes/pod-observation-request-timeout-ms config))))))
 
   (execute! [_this environment-id command opts]
-    (try
+    (try+
       (if-let [pod-name (get @pod-cache environment-id)]
         (exec-in-pod kubectl-path namespace pod-name command opts)
         ;; Pod name not in cache, try to look it up
@@ -235,23 +220,23 @@
         (result/err :exec-failed (.getMessage e)))))
 
   (copy-to! [_this environment-id local-path remote-path]
-    (try
+    (try+
       (if-let [pod-name (get @pod-cache environment-id)]
         (copy-to-pod kubectl-path namespace pod-name local-path remote-path)
-        (result/err :pod-not-found "Pod not in cache"))
+        (result/err :pod-not-found (messages/t :kubernetes/pod-not-cached)))
       (catch Exception e
         (result/err :copy-failed (.getMessage e)))))
 
   (copy-from! [_this environment-id remote-path local-path]
-    (try
+    (try+
       (if-let [pod-name (get @pod-cache environment-id)]
         (copy-from-pod kubectl-path namespace pod-name remote-path local-path)
-        (result/err :pod-not-found "Pod not in cache"))
+        (result/err :pod-not-found (messages/t :kubernetes/pod-not-cached)))
       (catch Exception e
         (result/err :copy-failed (.getMessage e)))))
 
   (release-environment! [_this environment-id]
-    (try
+    (try+
       ;; Remove from cache
       (swap! pod-cache dissoc environment-id)
       ;; Delete the job (will also delete pods)
@@ -260,7 +245,7 @@
         (result/err :release-failed (.getMessage e)))))
 
   (environment-status [_this environment-id]
-    (try
+    (try+
       (get-job-status kubectl-path namespace environment-id)
       (catch Exception e
         (result/ok {:status :unknown :error (.getMessage e)}))))
@@ -268,12 +253,12 @@
   ;; K8s persistence: git push (same as Docker). Fleet tier will use object store.
   (persist-workspace! [this environment-id opts]
     (let [exec! (fn [cmd] (proto/execute! this environment-id cmd
-                                          {:workdir (get opts :workdir "/workspace")}))]
+                                          {:workdir (get opts :workdir (resources/default-workdir))}))]
       (workspace/git-persist! exec! opts)))
 
   (restore-workspace! [this environment-id opts]
     (let [exec! (fn [cmd] (proto/execute! this environment-id cmd
-                                          {:workdir (get opts :workdir "/workspace")}))]
+                                          {:workdir (get opts :workdir (resources/default-workdir))}))]
       (workspace/git-restore! exec! opts))))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -282,20 +267,18 @@
 ;; Factory
 ;; ============================================================================
 (defn ^{:stratum 2} create-kubernetes-executor
-  "Create a Kubernetes executor.
-
-   Config:
-   - :namespace - K8s namespace (default: 'default')
-   - :image - Container image for tasks (default: alpine:latest)
-   - :kubectl-path - Path to kubectl binary
-   - :resources/timeout-seconds - Capsule budget; a task can override it in :resources
-   - :kubernetes/creation-request-timeout-ms - Timeout for the create request
-   - :kubernetes/pod-observation-request-timeout-ms - Timeout for Pod identity readback
-   - :kubernetes/pod-ready-timeout-ms, :kubernetes/pod-ready-poll-interval-ms - Readiness polling"
+  "Keep rejected budget settings in the registry as a non-dispatching executor."
   [config]
-  (map->KubernetesExecutor
-   {:config (settings/configure config)
-    :namespace (get config :namespace default-namespace)
-    :image (get config :image default-image)
-    :kubectl-path (:kubectl-path config)
-    :pod-cache (atom {})}))
+  (let [configured (settings/configure config)]
+    (if (result/err? configured)
+      (unavailable/->UnavailableExecutor (:error configured))
+      (let [packaged (defaults/data)
+            effective (:data configured)]
+        (map->KubernetesExecutor
+         {:config effective
+          :namespace (get config :namespace (:namespace packaged))
+          :image (get config :image (:image packaged))
+          :kubectl-path (:kubectl-path config)
+          :pod-cache (atom {})})))))
+
+(comment (create-kubernetes-executor {}))
