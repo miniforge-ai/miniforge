@@ -25,16 +25,21 @@
      (d) no-remote-url path                → shared/exit! 1
      (e) prune anomaly path                → shared/exit! 1
      (f) nil-author path                   → shared/exit! 1
-     (g) fresh --author path               → run-monitor!, no work-list load"
+     (g) fresh --author path               → run-monitor!, no work-list load
+   Both paths that start a monitor hand it a generate-fn and the
+   --trusted-authors set; the LLM client is a mock, never the host's config."
   (:require
    [clojure.test :refer [deftest is testing]]
    [babashka.process :as process]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.cli.app-config :as app-config]
+   [ai.miniforge.cli.config :as config]
    [ai.miniforge.cli.main.commands.pr-monitor :as sut]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.messages :as messages]
+   [ai.miniforge.cli.workflow-runner.context :as context]
+   [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.pr-lifecycle.interface :as pr-lifecycle]
    [ai.miniforge.schema.interface :as schema]))
 
@@ -66,6 +71,12 @@
   "Atom that mimics a monitor state atom with a populated poll-interval."
   []
   (atom {:config {:poll-interval-ms 60000}}))
+
+(defn- ^{:stratum 0} mock-llm-client
+  "context/create-llm-client stub: a mock client, so no test reads the
+   host's LLM config."
+  [& _]
+  (llm/mock-client {:output "change-request"}))
 
 (defn- ^{:stratum 0} noop-t
   "messages/t stub: returns a string embedding the key name so tests can
@@ -133,15 +144,19 @@
                                                         (reset! loop-author author)
                                                         {:comments-received 0})
                     pr-lifecycle/stop-pr-monitor-loop (fn [_] nil)
+                    context/create-llm-client         mock-llm-client
+                    config/load-config                (constantly {})
                     app-config/pr-monitor-config      (constantly cli-cfg)
                     display/print-info                (fn [_] nil)
                     display/print-error               (fn [_] nil)
                     messages/t                        noop-t]
-        (run-cmd {:author "alice" :repo "/some/repo"}))
+        (run-cmd {:author "alice" :repo "/some/repo" :trusted-authors "jane, bob"}))
       (is (false? @loaded?) "fresh --author path must NOT load a work-list")
       (is (= "alice" @loop-author) "monitors the supplied author")
       (is (= "/some/repo" (:worktree-path @monitor-opts-seen)))
-      (is (= "alice" (:self-author @monitor-opts-seen))))))
+      (is (= "alice" (:self-author @monitor-opts-seen)))
+      (is (fn? (:generate-fn @monitor-opts-seen)) "fixes need a generate-fn")
+      (is (= #{"jane" "bob"} (:trusted-authors @monitor-opts-seen))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -224,6 +239,8 @@
                                                         (reset! loop-ran true)
                                                         {:comments-received 0})
                     pr-lifecycle/stop-pr-monitor-loop (fn [_] nil)
+                    context/create-llm-client         mock-llm-client
+                    config/load-config                (constantly {})
                     ;; gh api user → return the configured default
                     process/sh                        (fn [& args]
                                                         (if (= ["gh" "api" "user" "--jq" ".login"]
@@ -238,7 +255,9 @@
       (is (some? @monitor-opts-seen) "should have called create-pr-monitor")
       (is (= "/some/repo" (:worktree-path @monitor-opts-seen)))
       (is (= (* 60 1000) (:poll-interval-ms @monitor-opts-seen))
-          "poll-interval-ms should derive from the PR entry's :pr/poll-interval (60 s)"))))
+          "poll-interval-ms should derive from the PR entry's :pr/poll-interval (60 s)")
+      (is (fn? (:generate-fn @monitor-opts-seen)) "the resume path gets a generate-fn too")
+      (is (= #{} (:trusted-authors @monitor-opts-seen))))))
 
 (comment
   (clojure.test/run-tests 'ai.miniforge.cli.main.commands.pr-monitor-test)

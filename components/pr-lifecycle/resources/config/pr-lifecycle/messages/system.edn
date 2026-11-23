@@ -19,6 +19,14 @@
   :monitor-state/invalid-budget
   "PR monitor budget file {path} does not hold a budget for PR #{pr-number}; miniforge will not overwrite it."
 
+  ;; monitor-fix-guard — no generate-fn, so no fix can be generated
+  :monitor/fix-without-generate-fn
+  "Cannot fix change-request — no generate-fn configured"
+
+  ;; monitor-fix-guard — a change-request fix needs the PR's branch checked out
+  :monitor/worktree-not-on-pr-branch
+  "Not fixing: {path} has {checked-out} at {head} checked out, not the PR branch {branch} at or after {sha}. This comment is skipped and not retried; the monitor fixes only the PR whose head it has checked out."
+
   :monitor-state/invalid-watermarks
   "PR monitor watermarks file {path} does not hold a map of PR number to watermark; miniforge will not overwrite it."
 

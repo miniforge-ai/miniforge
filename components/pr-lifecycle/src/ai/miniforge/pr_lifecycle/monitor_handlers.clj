@@ -24,6 +24,7 @@
    [ai.miniforge.pr-lifecycle.fix-loop :as fix-loop]
    [ai.miniforge.pr-lifecycle.monitor-budget :as budget]
    [ai.miniforge.pr-lifecycle.monitor-events :as mevents]
+   [ai.miniforge.pr-lifecycle.monitor-fix-guard :as fix-guard]
    [ai.miniforge.pr-lifecycle.monitor-state :as state]
    [ai.miniforge.pr-lifecycle.pr-poller :as poller]
    [ai.miniforge.redaction.interface :as redaction]))
@@ -179,19 +180,15 @@
 (defn ^{:stratum 1} handle-change-request
   "Handle a change-request comment by running one fix-loop attempt."
   [monitor pr-info classified-comment]
-  (let [{:keys [worktree-path generate-fn logger event-bus]} (:config @monitor)
+  (let [{:keys [worktree-path generate-fn logger event-bus] :as config} (:config @monitor)
         pr-number (:pr/number pr-info)
         comment (:comment classified-comment)
         comment-id (:comment/id comment)
         pr-budget (state/get-or-create-budget monitor pr-number)]
     (if-let [exhausted (budget/any-budget-exhausted? pr-budget comment-id)]
       (stop-exhausted! monitor pr-number comment-id pr-budget exhausted)
-      (if-not generate-fn
-        (do
-          (when logger
-            (log/warn logger :pr-monitor :handler/no-generate-fn
-                      {:message "Cannot fix change-request — no generate-fn configured"}))
-          {:success? false :reason :no-generate-fn})
+      (if-let [refusal (fix-guard/fix-refusal config pr-info)]
+        refusal
         ;; Checked and recorded against the budget on disk, under its lock:
         ;; another monitor may have spent attempts since this one cached it.
         (let [attempt-id (str (random-uuid))
