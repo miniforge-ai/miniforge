@@ -3,7 +3,9 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.file-durability.lock-denial-fixtures
   "Native fault peers; production marker and lock policy remains unchanged."
-  (:require [babashka.process :as process]
+  (:require [ai.miniforge.file-durability.boundary.lock-peer :as peer]
+            [ai.miniforge.file-durability.probe-resource-fixtures :as cleanup]
+            [babashka.process :as process]
             [clojure.test :refer [is]])
   (:import [java.util.concurrent TimeUnit]))
 
@@ -41,5 +43,11 @@
   (let [child (process/process ["/bin/sh" "-c" (get scenarios mode) "lock-denial-fixture" (str root)])]
     (vreset! observed [child root])
     child))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} overrides [mode observed]
+  {#'peer/launch! (partial launch! mode observed)
+   cleanup/delete-scratch (partial delete-after-death! observed @cleanup/delete-scratch)})
 
 (comment (keys scenarios))

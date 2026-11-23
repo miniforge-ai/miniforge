@@ -3,13 +3,11 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.file-durability.lock-denial-integration-test
   (:require [ai.miniforge.anomaly.interface :as anomaly]
-            [ai.miniforge.file-durability.boundary.lock-peer :as peer]
             [ai.miniforge.file-durability.boundary.lock-probe :as lock]
             [ai.miniforge.file-durability.boundary.lock-protocol :as protocol]
             [ai.miniforge.file-durability.boundary.native-process-exit :as exit]
             [ai.miniforge.file-durability.interface :as durability]
             [ai.miniforge.file-durability.lock-denial-fixtures :as denial]
-            [ai.miniforge.file-durability.probe-resource-fixtures :as cleanup]
             [ai.miniforge.file-durability.publication-support :as support]
             [ai.miniforge.file-durability.runtime-peer-fixtures :as fixtures]
             [babashka.fs :as fs]
@@ -32,11 +30,9 @@
   (when (support/posix? root)
     (let [observed (volatile! nil)
           waits (atom [])
-          launch (partial denial/launch! mode observed)
           limits (assoc fixtures/limits :lock/timeout-ms handshake-budget-ms)
-          overrides {#'peer/launch! launch
-                     cleanup/delete-scratch (partial denial/delete-after-death! observed @cleanup/delete-scratch)
-                     #'protocol/await? (partial denial/record-wait! waits protocol/await?)}]
+          overrides (assoc (denial/overrides mode observed)
+                            #'protocol/await? (partial denial/record-wait! waits protocol/await?))]
       (try+
         (is (false? (with-redefs-fn overrides
                       #(lock/check! (fs/real-path root) (fixtures/require-peer!) limits))))
@@ -51,9 +47,8 @@
 
 (defn- ^{:stratum 1} verify-interrupted-wait! [root]
   (let [observed (volatile! nil)
-        overrides {#'peer/launch! (partial denial/launch! :timeout observed)
-                   cleanup/delete-scratch (partial denial/delete-after-death! observed @cleanup/delete-scratch)
-                   (ns-resolve 'ai.miniforge.file-durability.boundary.lock-protocol 'pause!) interrupted-native-wait!}]
+        overrides (assoc (denial/overrides :timeout observed)
+                          (ns-resolve 'ai.miniforge.file-durability.boundary.lock-protocol 'pause!) interrupted-native-wait!)]
     (try+
       (let [reply (with-redefs-fn overrides
                     #(lock/check! (fs/real-path root) (fixtures/require-peer!) fixtures/limits))
@@ -73,8 +68,7 @@
   (let [observed (volatile! nil)
         limits (assoc fixtures/limits :lock/timeout-ms handshake-budget-ms)
         pause (ns-resolve 'ai.miniforge.file-durability.boundary.lock-protocol 'pause!)
-        overrides (cond-> {#'peer/launch! (partial denial/launch! :timeout observed)
-                           #'exit/stop! (constantly false)}
+        overrides (cond-> (assoc (denial/overrides :timeout observed) #'exit/stop! (constantly false))
                     interrupted? (assoc pause interrupted-native-wait!))]
     (try+
       (let [reply (with-redefs-fn overrides
