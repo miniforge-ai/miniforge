@@ -1,7 +1,9 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
-(ns ai.miniforge.file-durability.spec)
+(ns ai.miniforge.file-durability.spec
+  (:require [ai.miniforge.file-durability.lock-spec :as lock]
+            [ai.miniforge.file-durability.peer-spec :as peer]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -17,3 +19,7 @@
 (def ^{:stratum 1} ByteWrite [:tuple File bytes?])
 
 (def ^{:stratum 1} PublicationWrite [:tuple File bytes? fn?])
+
+;------------------------------------------------------------------------------ Layer 2
+
+(def ^{:stratum 2} RuntimeLockArguments [:tuple DirectoryFile peer/Peer lock/Limits])

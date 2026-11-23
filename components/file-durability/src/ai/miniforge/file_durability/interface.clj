@@ -54,6 +54,17 @@
     (core/write-new-text! file text)
     (boundary/invalid-input :write-new)))
 
+(defn ^{:stratum 0} verify-runtime-locks!
+  "Return :runtime-locks-verified or an anomaly for an existing canonical POSIX root.
+   Trusted host configuration supplies an opposite installed runtime, absolute
+   classpath and finite :lock/timeout-ms, :lock/poll-interval-ms, :lock/exit-timeout-ms.
+   One host handshake deadline covers all marker/exit waits; cleanup may follow it.
+   This disposable native proof does not qualify backend persistence or authorize effects."
+  [root peer limits]
+  (if (m/validate spec/RuntimeLockArguments [root peer limits])
+    (core/verify-runtime-locks! root peer limits)
+    (boundary/invalid-input :verify-runtime-locks)))
+
 (defn ^{:stratum 0} write-temporary-bytes!
   "Fill and force an existing fresh temporary file without following a final symlink."
   [file bytes]
@@ -84,3 +95,5 @@
   (if (m/validate spec/File file)
     (core/confirm! file)
     (boundary/invalid-input :confirm)))
+
+(comment (verify-runtime-locks! nil nil nil))

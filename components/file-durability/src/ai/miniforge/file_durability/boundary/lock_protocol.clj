@@ -25,12 +25,14 @@
 (defn- ^{:stratum 0} marker-path [root marker]
   (fs/path root (name marker)))
 
-(defn- ^{:stratum 0} wait-for-next-poll! [until poll-ms]
-  (when (deadline/live? until)
-    (Thread/sleep (min poll-ms (deadline/remaining-ms until)))
-    true))
+(defn- ^{:stratum 0} pause! [milliseconds] (Thread/sleep milliseconds))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} wait-for-next-poll! [until poll-ms]
+  (when (deadline/live? until)
+    (pause! (min poll-ms (deadline/remaining-ms until)))
+    true))
 
 (defn ^{:stratum 1} allocate! [root]
   (Files/createFile (fs/path root probe-inode) (make-array FileAttribute 0)))
@@ -46,7 +48,9 @@
       (with-open [_held lock] (f true))
       (f false))))
 
-(defn ^{:stratum 1} await? [root marker until poll-ms]
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} await? [root marker until poll-ms]
   (let [path (marker-path root marker)]
     (boolean
      (loop []
