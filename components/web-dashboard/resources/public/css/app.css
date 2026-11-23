@@ -558,6 +558,10 @@ body {
   background: var(--text-muted);
 }
 
+.status-dot.cancelled {
+  background: var(--color-status-warning);
+}
+
 /* Main content */
 /* Dashboard layout with sidebar */
 .dashboard {
@@ -1769,6 +1773,10 @@ tbody td {
   opacity: 0.7;
 }
 
+.workflow-summary-item.wf-status-cancelled {
+  border-left-color: var(--color-status-warning);
+}
+
 .wf-summary-header {
   display: flex;
   justify-content: space-between;
@@ -1891,6 +1899,11 @@ tbody td {
 .badge-stale {
   background: var(--bg-hover);
   color: var(--text-muted);
+}
+
+.badge-cancelled {
+  background: color-mix(in srgb, var(--color-status-warning) 20%, var(--bg-secondary));
+  color: var(--color-status-warning);
 }
 
 .badge-unknown {
