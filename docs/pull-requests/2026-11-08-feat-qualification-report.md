@@ -83,9 +83,8 @@ data.
     settings change neither the hashes nor the written EDN.
 16. `clean?` ignores config that hides submodule changes, and a file marked
     assume-unchanged or skip-worktree, in a submodule too, whose changes
-    `git status` hides,
-    makes the build not clean. `:build-fn` is documented: a caller passing
-    one vouches for the build it returns.
+    `git status` hides, makes the build not clean. `:build-fn` is
+    documented: a caller passing one vouches for the build it returns.
 17. The canonical EDN must also survive UTF-8, so a lone surrogate (which
     UTF-8 writes as `?`) cannot share a hash with `?`. `*print-readably*`
     joins the reset printer settings, and the EDN report is written with
