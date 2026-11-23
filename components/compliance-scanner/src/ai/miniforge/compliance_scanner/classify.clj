@@ -32,15 +32,9 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} ^:private non-mechanical-strategies
-  "Remediation strategies that must never be applied mechanically, whatever a
-   rule's `autoFixable` default says.
-
-   `:semantic` needs an LLM judgement. `:manual` declares the fix is not
-   machine-expressible at all — `project/header-copyright` (810) moved to
-   `:manual` because MDC frontmatter cannot represent its multi-line
-   `remediation.template`, and patching from the unexpressible template wrote
-   one line of literal `\\n` characters that then satisfied the rule's own
-   negative detection (miniforge-standards#129)."
+  "Remediation strategies that are never applied mechanically, whatever a
+   rule's `autoFixable` default says: `:semantic` needs an LLM judgement, and
+   `:manual` declares a fix no machine can express."
   #{:semantic :manual})
 
 (defn- ^{:stratum 0} remediation-strategy
@@ -68,10 +62,7 @@
         non-mech?    (contains? non-mechanical-strategies strategy)]
     (assoc violation
            :auto-fixable? (and auto-default (not excluded?) (not non-mech?))
-           ;; `non-mech?` is the fallback rather than an exhaustive match on
-           ;; each strategy, so a strategy added to `non-mechanical-strategies`
-           ;; without its own branch still reports "not machine-applicable"
-           ;; instead of falling through to the auto-fixable rationale.
+           ;; `non-mech?` catches a strategy added to the set without its own branch.
            :rationale     (cond
                             (= :semantic strategy) (msg/t :classify/semantic-review)
                             non-mech?              (msg/t :classify/manual-strategy)

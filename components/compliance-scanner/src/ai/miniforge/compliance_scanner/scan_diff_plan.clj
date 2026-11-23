@@ -53,26 +53,14 @@
             (.directory (io/file repo-path))
             (.redirectError java.lang.ProcessBuilder$Redirect/DISCARD))))
 
-(defn- ^{:stratum 0} enrich-diff-plan-violations
-  "Carry the rule's declared `:rule/remediation` onto diff/plan violations.
-
-   Without this, `:diff-analysis` and `:plan-output` violations reach `classify`
-   with no `:remediation-strategy` — so a rule declaring `:manual` or
-   `:semantic` is auto-fixed anyway — and with no `:auto-fixable-default`, which
-   `classify` defaults to **true**, overwriting the `false` these constructors
-   pass. Neither detection type produces a `:suggested` value or a template, so
-   there is nothing to patch from: when the rule declares no `autoFixable` of
-   its own, pin the default to false rather than letting it drift true."
-  [rule-cfg violations]
-  (let [remediation (get rule-cfg :rule/remediation)
-        enriched    (if remediation
-                      (mapv #(pack-config/enrich-violation % remediation) violations)
-                      (vec violations))]
-    (mapv (fn [v]
-            (cond-> v
-              (not (contains? v :auto-fixable-default))
-              (assoc :auto-fixable-default false)))
-          enriched)))
+(defn- ^{:stratum 0} not-auto-fixable-unless-declared
+  "`violation` with `:auto-fixable-default` false unless its rule declared one.
+   `classify` reads a missing default as true, and a diff or plan violation
+   carries no suggested value or template to patch from."
+  [violation]
+  (cond-> violation
+    (not (contains? violation :auto-fixable-default))
+    (assoc :auto-fixable-default false)))
 
 (defn- ^{:stratum 0} scan-plan-rule
   "Scan plan output for violations using a plan-output rule.
@@ -149,6 +137,16 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} enrich-diff-plan-violations
+  "Diff and plan violations carrying their rule's declared `:rule/remediation`,
+   so `classify` sees the strategy and the auto-fix default."
+  [rule-cfg violations]
+  (let [remediation (get rule-cfg :rule/remediation)
+        enriched    (if remediation
+                      (mapv #(pack-config/enrich-violation % remediation) violations)
+                      (vec violations))]
+    (mapv not-auto-fixable-unless-declared enriched)))
+
 (defn ^{:stratum 1} git-diff
   "Run git diff and return the output string."
   [repo-path since-ref]
@@ -192,7 +190,9 @@
     (filterv #(= :cleanup-needed (:classification %))
              (:violations (exc-data/scan-repo repo-path changed-files)))))
 
-(defn ^{:stratum 1} scan-plan-rules
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} scan-plan-rules
   "Scan plan-output rules against terraform plan output."
   [plan-rules plan-output]
   (when plan-output
@@ -200,7 +200,7 @@
          (mapcat #(enrich-diff-plan-violations % (scan-plan-rule % plan-output)))
          vec)))
 
-(defn ^{:stratum 1} scan-diff-rules
+(defn ^{:stratum 2} scan-diff-rules
   "Scan diff-analysis rules against a git diff."
   [diff-rules diff-content]
   (when diff-content
