@@ -49,7 +49,8 @@ Completed validation after composing merged PRs #2557 and #2560:
 
 - The combined native packet passes 43 tests / 210 assertions in each of both
   Java 21 products, source Babashka and a fresh class-stripped CLI package.
-  This includes the existing pin and cleanup suites; the peer packet is 24 / 116.
+  This includes existing native storage, pin and cleanup suites; the new
+  peer-only packet is 15 / 97 and passes the actual project integration alias.
 - Seven independent negative controls fail with zero errors on Java 21 and
   Babashka: mutual exclusion (1), owned-peer termination (4), marker expiry (1),
   runtime identity (1), shared host deadline (1), cancellation restoration (1),
