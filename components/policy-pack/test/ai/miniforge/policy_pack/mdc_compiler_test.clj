@@ -771,8 +771,8 @@
       (is (= "Key must be integer" (:error result)))
       (is (= 1 (count (:warnings result))))
       (is (str/includes? (first (:warnings result)) "'detection'"))
-      (is (str/includes? (first (:warnings result)) "symptom")
-          "the warning ties itself to the exception rather than standing alone"))))
+      (is (str/includes? (first (:warnings result)) "also failed to compile")
+          "the warning says the file failed without claiming the block caused it"))))
 
 (deftest ^{:stratum 0} compile-standards-pack-nested-block-warning-test
   (testing "a per-rule nested-block warning reaches the pack result, which is
