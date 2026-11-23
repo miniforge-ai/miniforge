@@ -14,14 +14,18 @@
     (.interrupt (Thread/currentThread))
     error))
 
+(defn- ^{:stratum 0} cleanup-failure! [cleanup! observed]
+  (cleanup!)
+  observed)
+
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} finish! [created observe! cleanup! retain!]
-  (let [observed (observe!)]
+(defn- ^{:stratum 1} finish! [observe! cleanup! retain! created]
+  (let [observed (if (.isInterrupted (Thread/currentThread)) (interrupted) (observe!))]
     (cond
       (or (.isInterrupted (Thread/currentThread))
           (= :pod-interrupted (get-in observed [:error :code]))) (interrupted)
-      (result/err? observed) (do (cleanup!) observed)
+      (result/err? observed) (cleanup-failure! cleanup! observed)
       :else (retain! created (:data observed)))))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -32,11 +36,7 @@
   (try+
     (if (.isInterrupted (Thread/currentThread))
       (interrupted)
-      (result/and-then (submit!)
-                       (fn [created]
-                         (if (.isInterrupted (Thread/currentThread))
-                           (interrupted)
-                           (finish! created observe! cleanup! retain!)))))
+      (result/and-then (submit!) (partial finish! observe! cleanup! retain!)))
     (catch InterruptedException _ (interrupted))))
 
 (comment

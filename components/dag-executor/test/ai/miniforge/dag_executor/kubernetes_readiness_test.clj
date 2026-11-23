@@ -146,6 +146,15 @@
         (is interrupted?))
       (finally (Thread/interrupted)))))
 
+(deftest ^{:stratum 1} test-cancelled-successful-submission-never-starts-observation
+  (try+
+    (let [submit! (partial interrupted-observation (accepted-job))
+          reply (acquisition/acquire! submit! refuse-provider! refuse-provider! refuse-provider!)
+          interrupted? (Thread/interrupted)]
+      (is (= :pod-interrupted (get-in reply [:error :code])))
+      (is interrupted?))
+    (finally (Thread/interrupted))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} test-shipped-polling-budgets-reach-acquisition

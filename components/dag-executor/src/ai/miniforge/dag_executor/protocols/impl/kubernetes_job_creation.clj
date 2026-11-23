@@ -4,6 +4,7 @@
 (ns ai.miniforge.dag-executor.protocols.impl.kubernetes-job-creation
   "Create a Job once, retaining only the matching server-provided identity."
   (:require [ai.miniforge.dag-executor.protocols.impl.runtime.messages :as messages]
+            [ai.miniforge.dag-executor.protocols.impl.kubernetes-defaults :as defaults]
             [ai.miniforge.dag-executor.result :as result]
             [cheshire.core :as json]
             [clojure.java.shell :as shell]
@@ -12,9 +13,13 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} api-version "batch/v1")
+(def ^{:stratum 0} api-version
+  "Only a batch/v1 reply can confirm this capsule Job request."
+  "batch/v1")
 
-(def ^{:stratum 0} resource-kind "Job")
+(def ^{:stratum 0} resource-kind
+  "A Pod or other resource is not proof of creating the requested Job."
+  "Job")
 
 (def ^{:stratum 0 :private true} provider-reasons
   [[#"\AError from server \(AlreadyExists\):" :already-exists]
@@ -57,28 +62,45 @@
                (= (get-in job [:spec :activeDeadlineSeconds])
                   (get-in response ["spec" "activeDeadlineSeconds"]))
                (every? present-text? [name namespace uid version]))
-      {:job-name name :namespace namespace :job-uid uid :job-creation-resource-version version})))
+      {:job-name name
+       :namespace namespace
+       :job-uid uid
+       :job-creation-resource-version version})))
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} create! [executable job request-timeout-ms]
+(defn ^{:stratum 2} create!
+  "Submit once, admitting only an exact receipt. The HTTP budget is not a local process deadline."
+  [executable job request-timeout-ms]
   (try+
     (let [requested (:metadata job)
-          {:keys [exit out err]} (shell/sh (or executable "kubectl")
+          {:keys [exit out err]} (shell/sh (or executable (:executable (defaults/data)))
                                       "create" "-n" (:namespace requested) "-f" "-" "-o" "json"
                                       (str "--request-timeout=" request-timeout-ms "ms")
-                                      :in (json/generate-string job))]
-      (if (= 0 exit)
-        (let [observed (parse-reply out)]
-          (if (= ::malformed-response observed)
-            (unconfirmed :malformed-response exit)
-            (if-let [created (receipt job observed)]
-              (result/ok created)
-              (unconfirmed :receipt-mismatch exit))))
-        (unconfirmed (command-reason err) exit)))
+                                      :in (json/generate-string job))
+          observed (when (= 0 exit) (parse-reply out))
+          created (receipt job observed)]
+      (cond
+        (not= 0 exit) (unconfirmed (command-reason err) exit)
+        (= ::malformed-response observed) (unconfirmed :malformed-response exit)
+        (nil? created) (unconfirmed :receipt-mismatch exit)
+        :else (result/ok created)))
     (catch InterruptedException _
       (let [failure (unconfirmed :interrupted nil)]
         (.interrupt (Thread/currentThread))
         failure))
     (catch java.io.IOException _ (unconfirmed :command-io-failed nil))
     (catch Exception _ (unconfirmed :command-failed nil))))
+
+(comment
+  ;; Inspect the external JSON contract without dispatching a provider request.
+  (receipt {:metadata {:name "capsule"
+                       :namespace "staging"}
+            :spec {:activeDeadlineSeconds 1}}
+           {"apiVersion" api-version
+            "kind" resource-kind
+            "metadata" {"name" "capsule"
+                        "namespace" "staging"
+                        "uid" "job-uid"
+                        "resourceVersion" "1"}
+            "spec" {"activeDeadlineSeconds" 1}}))
