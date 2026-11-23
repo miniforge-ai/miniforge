@@ -62,12 +62,13 @@
 
 (defn ^{:stratum 1} clean?
   "True only when git reports no changed or untracked files in `root`,
-   whatever config says about untracked files and submodules, and no file
-   is marked assume-unchanged or skip-worktree, which hides it from status."
+   whatever config says about untracked files and submodules, and no file,
+   in a submodule too, is marked assume-unchanged or skip-worktree, which
+   hides it from status."
   [root]
   (boolean
    (and (= "" (git-output root "status" "--porcelain" "--untracked-files=all" "--ignore-submodules=none"))
-        (when-let [files (git-output root "ls-files" "-v")]
+        (when-let [files (git-output root "ls-files" "-v" "--recurse-submodules")]
           (not (re-find #"(?m)^[a-zS] " files))))))
 
 (defn ^{:stratum 1} deps-hash

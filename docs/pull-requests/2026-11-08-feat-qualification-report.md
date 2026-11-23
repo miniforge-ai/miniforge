@@ -82,7 +82,8 @@ data.
     `*print-namespace-maps*` and the like) for the run, so a caller's REPL
     settings change neither the hashes nor the written EDN.
 16. `clean?` ignores config that hides submodule changes, and a file marked
-    assume-unchanged or skip-worktree, whose changes `git status` hides,
+    assume-unchanged or skip-worktree, in a submodule too, whose changes
+    `git status` hides,
     makes the build not clean. `:build-fn` is documented: a caller passing
     one vouches for the build it returns.
 17. The canonical EDN must also survive UTF-8, so a lone surrogate (which

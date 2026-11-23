@@ -70,20 +70,23 @@
                (select-keys (build/build-identity dir) [:build/git-sha :build/clean?])))))))
 
 (deftest ^{:stratum 1} test-change-hidden-from-status-is-not-clean
-  (testing "given a committed file → clean; marked assume-unchanged, then changed → status empty, not clean"
+  (testing "given a committed submodule → clean; a file in it marked assume-unchanged, then changed → status empty, not clean"
     (when (not-any? #(System/getenv %) repository-env-vars)
-      (let [dir (temp-dir)
-            git (fn [& args] (apply shell/sh "git" "-c" "user.name=t" "-c" "user.email=t@t.invalid"
-                                    "-c" "commit.gpgsign=false" (concat args [:dir dir])))]
-        (git "init" "-q")
-        (spit (io/file dir "f") "a")
-        (git "add" "f")
-        (git "commit" "-q" "-m" "c")
-        (is (true? (build/clean? dir)))
-        (git "update-index" "--assume-unchanged" "f")
-        (spit (io/file dir "f") "b")
-        (is (= "" (:out (git "status" "--porcelain"))))
-        (is (false? (build/clean? dir)))))))
+      (let [sub (temp-dir) top (temp-dir)
+            git (fn [dir & args] (apply shell/sh "git" "-c" "user.name=t" "-c" "user.email=t@t.invalid" "-c" "commit.gpgsign=false"
+                                        "-c" "protocol.file.allow=always" (concat args [:dir dir])))]
+        (git sub "init" "-q")
+        (spit (io/file sub "f") "a")
+        (git sub "add" "f")
+        (git sub "commit" "-q" "-m" "c")
+        (git top "init" "-q")
+        (git top "submodule" "add" "-q" sub "sub")
+        (git top "commit" "-q" "-m" "c")
+        (is (true? (build/clean? top)))
+        (git (str (io/file top "sub")) "update-index" "--assume-unchanged" "f")
+        (spit (io/file top "sub" "f") "b")
+        (is (= "" (:out (git top "status" "--porcelain" "--ignore-submodules=none"))))
+        (is (false? (build/clean? top)))))))
 
 (deftest ^{:stratum 1} test-deps-hash-follows-dependency-files
   (testing "given the same files → the same hash; a changed deps.edn → a different hash"
