@@ -26,7 +26,8 @@
 (defn ^{:stratum 0} run!
   "Run a command through `babashka.process/sh`, which captures stdout and
    stderr rather than inheriting them. Throws ex-info on non-zero exit, with
-   :exit, :cmd and -- when stderr was captured -- :err in the ex-data.
+   :exit and :cmd in the ex-data. :err is added only when stderr was
+   captured as a string and is not blank; long output keeps its tail.
    Accepts an optional opts map as the first arg, including stdio overrides."
   [& args]
   (apply core/run! args))
