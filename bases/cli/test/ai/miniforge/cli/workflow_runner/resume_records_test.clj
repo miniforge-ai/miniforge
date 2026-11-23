@@ -40,6 +40,20 @@
 
 (def ^{:stratum 0} this-pid (.pid (java.lang.ProcessHandle/current)))
 
+(def ^{:stratum 0} concurrent-writer-count
+  "Writers racing on one record. More than the two a launcher and a
+   restarted process make, so a shared temp file is contended every run."
+  16)
+
+(defn- ^{:stratum 0} write-failure
+  "The exception a writer future ended with, or nil."
+  [writer]
+  (try @writer nil (catch java.util.concurrent.ExecutionException e e)))
+
+(defn- ^{:stratum 0} file-names
+  [^java.io.File dir]
+  (mapv #(.getName ^java.io.File %) (.listFiles dir)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} origin-test
@@ -240,11 +254,18 @@
   (with-temp-home
     (fn []
       (let [f (io/file (es/default-events-dir) "concurrent" "record.edn")
-            write! #'sut/write-edn!
-            writers (doall (for [n (range 16)]
-                             (future (write! f {:writer n}))))]
-        (is (every? #(not (instance? Throwable (try @% (catch Throwable t t)))) writers)
-            "no writer loses its temp file to another")
+            writers (doall (for [n (range concurrent-writer-count)]
+                             (future (#'sut/write-edn! f {:writer n}))))]
+        (is (empty? (keep write-failure writers)) "no writer loses its temp file to another")
         (is (integer? (:writer (edn/read-string (slurp f)))) "the record is whole")
-        (is (= ["record.edn"] (mapv #(.getName ^java.io.File %) (.listFiles (.getParentFile f))))
-            "no temp file is left behind")))))
+        (is (= ["record.edn"] (file-names (.getParentFile f))) "no temp file is left behind")))))
+
+(deftest ^{:stratum 1} write-edn-failed-write-removes-its-temp-file-test
+  (with-temp-home
+    (fn []
+      (let [f (doto (io/file (es/default-events-dir) "blocked" "record.edn") io/make-parents)]
+        (.mkdir f)
+        (spit (io/file f "occupant") "")
+        (is (thrown? java.io.IOException (#'sut/write-edn! f {:writer 0}))
+            "a non-empty directory cannot be replaced by the record")
+        (is (= ["record.edn"] (file-names (.getParentFile f))) "the failed write's temp file is gone")))))

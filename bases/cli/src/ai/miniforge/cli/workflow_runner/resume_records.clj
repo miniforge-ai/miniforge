@@ -80,14 +80,17 @@
 (defn- ^{:stratum 0} write-edn!
   "Write `data` whole: a temp file, then an atomic rename. The temp name
    is unique per call so concurrent writers to one record cannot share,
-   interleave into, or rename away each other's temp file."
+   interleave into, or rename away each other's temp file. A write that
+   fails removes its own temp file."
   [^java.io.File f data]
   (let [tmp (io/file (.getParentFile f) (str (.getName f) "." (random-uuid) ".tmp"))]
     (io/make-parents f)
-    (spit tmp (pr-str data))
-    (Files/move (.toPath tmp) (.toPath f)
-                (into-array java.nio.file.CopyOption [StandardCopyOption/ATOMIC_MOVE
-                                                      StandardCopyOption/REPLACE_EXISTING]))))
+    (try
+      (spit tmp (pr-str data))
+      (Files/move (.toPath tmp) (.toPath f)
+                  (into-array java.nio.file.CopyOption [StandardCopyOption/ATOMIC_MOVE
+                                                        StandardCopyOption/REPLACE_EXISTING]))
+      (finally (io/delete-file tmp true)))))
 
 (defn- ^{:stratum 0} read-json
   [^java.io.File f]
