@@ -34,6 +34,8 @@ An unresolved cleanup never acknowledges native death or deletes scratch.
 The dependency DAG is probe-resources → native-process-exit → native-exit-wait;
 ownership policy also imports the existing resource-cleanup interface.
 No domain or other component imports a new internal namespace.
+The opt-in agent-environments and deliberation-lab products explicitly include
+resource-cleanup to preserve valid Polylith composition.
 
 ## Testing plan
 
@@ -49,6 +51,8 @@ return without a later grace period. Five independent fault controls fail with
 4 / 5 / 1 / 1 / 2 assertions and zero errors in both Java 21 and Babashka:
 false death acknowledgement, ignored unresolved termination, discarded interruption,
 renewed retry deadline, and masked fatal operation respectively.
+The final split suites also pass through the actual project integration alias.
+Five exact safe examples pass on Java 21 and Babashka.
 
 ## Deployment plan
 
@@ -63,5 +67,5 @@ Merged PR #2557 supplies the existing private-directory infrastructure.
 
 ## Checklist
 
-- [ ] Implementation, native proof and owner standards/adversarial review.
+- [x] Implementation, native proof and owner standards/adversarial review.
 - [ ] Current-head CI, automatic and full reviews, all threads resolved.
