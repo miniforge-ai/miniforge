@@ -58,13 +58,4 @@
       (with-open [_held lock] (f true))
       (f false))))
 
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} peer! [root]
-  (and (with-attempt root false?)
-       (signal! root :peer-excluded)
-       (await? root :host-released)
-       (with-attempt root
-         #(and %
-               (signal! root :peer-holding)
-               (await? root :host-observed-exclusion)))))
+(comment (runtime-kind))
