@@ -25,9 +25,11 @@
            [java.nio.file.attribute FileAttribute PosixFilePermissions]))
 
 (defn- ^{:stratum 0} posix?
-  "True when the filesystem holding `path` supports POSIX permissions."
+  "True when the store holding `path` supports POSIX permissions. The store is
+   checked, not the default filesystem, because a mount can lack what the
+   filesystem advertises."
   [^Path path]
-  (contains? (.supportedFileAttributeViews (.getFileSystem path)) "posix"))
+  (.supportsFileAttributeView (Files/getFileStore path) "posix"))
 
 (defn- ^{:stratum 0} create-temp-like!
   "Create the empty temp file at `tmp`. When `target` exists and the filesystem
@@ -35,7 +37,8 @@
    so the atomic replace neither loosens an owner-only file nor exposes its
    records while they are being written."
   [^Path tmp ^Path target]
-  (if (and (posix? tmp) (Files/exists target (into-array java.nio.file.LinkOption [])))
+  (if (and (Files/exists target (into-array java.nio.file.LinkOption []))
+           (posix? target))
     (let [perms (Files/getPosixFilePermissions target (into-array java.nio.file.LinkOption []))]
       (Files/createFile tmp (into-array FileAttribute [(PosixFilePermissions/asFileAttribute perms)]))
       (Files/setPosixFilePermissions tmp perms))
@@ -52,8 +55,10 @@
         target (if (.exists given)
                  (.toFile (.toRealPath (.toPath given) (into-array java.nio.file.LinkOption [])))
                  given)
+        ;; The name does not embed the target's, so a long valid output name
+        ;; cannot push the temp name past the filesystem's component limit.
         tmp    (io/file (.getParentFile target)
-                        (str (.getName target) "." (random-uuid) ".tmp"))]
+                        (str "." (random-uuid) ".tmp"))]
     (io/make-parents target)
     (try
       (create-temp-like! (.toPath tmp) (.toPath target))

@@ -20,10 +20,13 @@ lost.
 
 ## Changes in detail
 
-- `write-atomically!` writes `<target>.<uuid>.tmp` beside the target,
+- `write-atomically!` writes `.<uuid>.tmp` beside the target (the name
+  does not embed the target's, so a long output name stays within the
+  filesystem's component limit),
   moves it over the target with `ATOMIC_MOVE`, and deletes the temp
   file in a `finally`.
-- `create-temp-like!` gives the temp file the target's POSIX
+- `create-temp-like!` checks the target's `FileStore` for POSIX support
+  and gives the temp file the target's POSIX
   permissions before any record is written. Replacing an owner-only
   file does not loosen it, and the records are never readable more
   widely while they are written.
