@@ -52,7 +52,7 @@ the run cannot answer a prompt. With `--head`, gh skips this lookup;
       as a mirror beside the repository, give the bare branch.
 2. `git.clj` and `sandbox.clj`, `create-pr!`:
    1. Read the checked-out branch (`git branch --show-current`) and origin's
-      push URL, then pass `--head` from `head-ref`.
+      push URLs, then pass `--head` from `head-ref`.
    2. A detached HEAD prints no branch; gh then runs without `--head`, as
       before.
    3. A branch name the existing guard rejects returns that failure without
