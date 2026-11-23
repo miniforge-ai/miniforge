@@ -18,9 +18,13 @@
 
 (defn ^{:stratum 0} provider-reply [exit output]
   {:exit exit
-   :out output})
+   :out output
+   :err ""})
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} provider-error [exit output diagnostic]
+  (assoc (provider-reply exit output) :err diagnostic))
 
 (defn ^{:stratum 1} created-job [job]
   (update job :metadata merge identity-metadata))

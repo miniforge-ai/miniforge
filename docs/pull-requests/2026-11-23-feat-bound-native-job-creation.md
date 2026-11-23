@@ -22,6 +22,8 @@ deadline, without adopting or deleting an uncertain Job by reusable name.
 Keep transport separate from receipt policy. Preserve the HTTP request flag,
 create-only command and historical UID/resourceVersion. Reject failed input,
 expired work and cancellation without retaining provider text. No retries.
+Shared factories mirror complete native command replies and the actual Running
+readiness result instead of duplicating partial fixture maps.
 
 ## Testing plan
 
@@ -43,7 +45,7 @@ Validation completed:
   Babashka: post-receipt admission (2), native payload integrity (2), historical
   Job identity and downstream ownership (6), input completion (1), and native
   I/O classification (1).
-- Eight exact safe REPL examples pass on Java 21 and Babashka.
+- Nine exact safe REPL examples pass on Java 21 and Babashka.
 
 Encoding consumes the original deadline; expiry and cancellation are checked
 again after receipt parsing. Synchronous encoding/parsing is not preempted, and
