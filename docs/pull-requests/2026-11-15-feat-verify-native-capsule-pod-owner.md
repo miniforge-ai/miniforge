@@ -33,6 +33,8 @@ cooperative admission fences, not an atomic run-wide full-stop guarantee.
 The same bound stops an uncooperative local readback process, not just
 the provider request. An interrupted readback remains a refusal and
 preserves cancellation.
+Pure identity projection is separate from bounded readback and the cache handoff;
+each namespace remains within three actual dependency strata.
 
 ## Testing plan
 
@@ -49,7 +51,7 @@ Omitting controller validation fails three targeted assertions. Ignoring the fin
 deadline, restoring name-only failure cleanup, or dropping typed cancellation each
 fails one. Every targeted control has zero runtime errors on JVM and Babashka.
 The cleanup control refuses to run unless the native shell fixture is installed.
-Four safe, exact namespace examples pass on both runtimes; legacy examples that
+Five safe, exact namespace examples pass on both runtimes; legacy examples that
 contact providers are not evaluated. Strict lint, genuine namespace depths of at
 most three strata, Polylith and normal commit gates pass.
 
