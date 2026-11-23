@@ -24,6 +24,9 @@ create-only command and historical UID/resourceVersion. Reject failed input,
 expired work and cancellation without retaining provider text. No retries.
 Shared factories mirror complete native command replies and the actual Running
 readiness result instead of duplicating partial fixture maps.
+The public executor contract states the shared deadline and synchronous encoding/
+parsing limit, and describes the actual Job/Pod identity snapshots without
+claiming full-stop containment.
 
 ## Testing plan
 
