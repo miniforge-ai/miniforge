@@ -23,15 +23,11 @@
     (when (and (= expected actual) (= ids (identity/read-identity actual)))
       (macos-acl/check! actual))))
 
-(defn ^{:stratum 0} qualify! [root profile peer]
-  (anomaly/let-ok [observation (store/observe profile root)
-                  published (publication/check! (:storage/root observation))]
-    (if (and (= :publication-verified published) (lock/check! (:storage/root observation) peer))
-      (anomaly/let-ok [current (store/observe profile root)]
-        (if (= observation current)
-          (do (macos-acl/check! (:storage/root observation))
-              (QualifiedRoot. observation))
-          (boundary/unqualified-store root profile)))
+(defn- ^{:stratum 0} confirmed-root [root profile observation]
+  (anomaly/let-ok [current (store/observe profile root)]
+    (if (= observation current)
+      (let [protected (macos-acl/check! (:storage/root current))]
+        (QualifiedRoot. (assoc current :storage/root protected)))
       (boundary/unqualified-store root profile))))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -44,3 +40,12 @@
         root (:storage/root observation)]
     (or (revalidate observation)
         (boundary/unqualified-store root (:storage/backend observation)))))
+
+(defn ^{:stratum 1} qualify! [root profile peer]
+  (anomaly/let-ok [observation (store/observe profile root)
+                  published (publication/check! (:storage/root observation))]
+    (if (and (= :publication-verified published) (lock/check! (:storage/root observation) peer))
+      (confirmed-root root profile observation)
+      (boundary/unqualified-store root profile))))
+
+(comment (qualified? {}))
