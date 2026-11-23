@@ -73,37 +73,14 @@
       [k (assoc acc k [])]
       [nil (assoc acc k (frontmatter-values/parse-frontmatter-value v))])))
 
-;; ── Nested-block detection ──────────────────────────────────────────────────
-;; The grammar below is flat. An author writing a nested YAML mapping gets no
-;; parse error: `process-frontmatter-line` trims each line before deciding what
-;; it is, so an indented `child: value` is indistinguishable from a top-level
-;; one. The children land as separate top-level keys and the parent is left
-;; holding `[]`, which `group-dotted-keys` then finds nothing to group. The rule
-;; compiles to its defaults and reports success. `nested-block-keys` is the only
-;; thing standing between that and a silent downgrade, so it belongs here beside
-;; the grammar it guards rather than in the caller.
 (def ^{:stratum 0} ^:private blank-valued-key-re
-  "A `key:` line with no value — the opening of either a legitimate
-   `- item` list or an (unsupported) nested mapping.
-
-   A trailing `# comment` counts as no value, because that is what it is
-   in YAML and because the `## Core Structure` template in
-   `meta/rule-format` writes frontmatter comments. (`parse-kv-line` below
-   disagrees — it captures `# comment` as the value — but a parent whose
-   value is a comment string resolves no `key.*` entries either way, so
-   the detector and the parser land on the same silent fallback.)"
+  "A `key:` line with no inline value. A trailing `# comment` counts as
+   no value."
   #"^([A-Za-z][A-Za-z0-9._-]*)[ \t]*:[ \t]*(?:#.*)?$")
 
 (def ^{:stratum 0} ^:private indented-kv-re
-  "An indented `child: ...` line. This is the nested-mapping signature.
-   An indented `- item` line does NOT match, so list-valued keys —
-   `globs:` and friends — are not reported.
-
-   A dotted child (`  detection.mode: positive`) matches too. That shape
-   does not fall back silently — `group-dotted-keys` throws \"Key must be
-   integer\" trying to `assoc` onto the parent's `[]` — but the exception
-   names nothing an author can act on, so the key is still worth
-   reporting alongside it."
+  "An indented `child: ...` line, dotted children included. An indented
+   `- item` line does not match."
   #"^[ \t]+[A-Za-z][A-Za-z0-9._-]*[ \t]*:")
 
 (def ^{:stratum 0} ^:private commented-key-re
@@ -111,35 +88,19 @@
   #"^([A-Za-z][A-Za-z0-9._-]*)[ \t]*:[ \t]*#.*$")
 
 (def ^{:stratum 0} ^:private list-item-re
-  "A `- item` line, indented or not. Indentation is NOT required:
-   `process-frontmatter-line` trims every line before testing for `\"- \"`,
-   so a flush-left list is a supported form and loses its items to a
-   commented parent exactly the same way.
-
-   This is the one place indentation does not matter. `indented-kv-re`
-   above still requires it, because an unindented `key: value` is a
-   legitimate top-level key rather than a nested child."
+  "A `- item` line, indented or flush-left."
   #"^[ \t]*-[ \t]")
 
 (def ^{:stratum 0} ^:private comment-line-re
-  "A line carrying only a comment, at any indentation. Skipped when
-   looking for a parent's first child, so a comment between the two does
-   not hide the nesting."
+  "A comment-only line, at any indentation."
   #"^[ \t]*#")
 
 (def ^{:stratum 0} ^:private bare-key-re
-  "A `key:` line with no value and NO trailing comment — the opening of
-   a list the parser will actually collect. `blank-valued-key-re` above
-   also admits the commented form; this one does not, because a
-   commented parent never opens a list at all and is reported separately
-   by `commented-list-keys`."
+  "A `key:` line with no value and no trailing comment."
   #"^([A-Za-z][A-Za-z0-9._-]*)[ \t]*:[ \t]*$")
 
 (def ^{:stratum 0} ^:private colon-comment-re
-  "A comment line that contains a colon. Inside a list this is
-   destructive: `process-frontmatter-line` trims the line, sees the
-   colon, and routes it to `parse-kv-line`, which stores it as a key and
-   clears `current-key`. Every `- item` after it is dropped."
+  "A comment-only line that contains a colon."
   #"^[ \t]*#.*:")
 
 ;------------------------------------------------------------------------------ Layer 1
