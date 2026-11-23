@@ -56,7 +56,8 @@
    [ai.miniforge.pr-lifecycle.monitor-budget :as mbudget]
    [ai.miniforge.pr-lifecycle.monitor-worklist :as mworklist]
    [ai.miniforge.pr-lifecycle.pr-poller :as poller]
-   [ai.miniforge.pr-lifecycle.responder :as responder]))
+   [ai.miniforge.pr-lifecycle.responder :as responder]
+   [ai.miniforge.pr-lifecycle.responder-fix :as responder-fix]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -980,7 +981,7 @@
 
 (def ^{:stratum 0} build-fix-spec
   "Build a workflow spec from a group of review comments on a file."
-  responder/build-fix-spec)
+  responder-fix/build-fix-spec)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

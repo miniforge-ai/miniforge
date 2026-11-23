@@ -27,6 +27,7 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.schema.interface :as schema]
+            [ai.miniforge.workflow.context :as context]
             [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
             [ai.miniforge.workflow.execution-dag-sync :as dag-sync]
             [ai.miniforge.workflow.execution-events :as exec-events]
@@ -104,13 +105,15 @@
               :else nil))))
 
 (defn ^{:stratum 1} apply-dag-failure
-  "Apply a failed DAG result to the execution context."
+  "Apply a failed DAG result to the execution context. A DAG the operator
+   stopped ends the run :cancelled (N2 §2.2)."
   [ctx dag-result transition-to-failed-fn]
-  (transition-to-failed-fn
-   (-> ctx
-       (assoc :execution/dag-result dag-result)
-       (roll-dag-metrics-into-execution dag-result)
-       (update :execution/errors conj (dag-failure-error dag-result)))))
+  (let [transition (if (:cancelled? dag-result) context/transition-to-cancelled transition-to-failed-fn)]
+    (transition
+     (-> ctx
+         (assoc :execution/dag-result dag-result)
+         (roll-dag-metrics-into-execution dag-result)
+         (update :execution/errors conj (dag-failure-error dag-result))))))
 
 (defn ^{:stratum 1} dag-skip-diagnostic
   "Produce a structured snapshot of phase-result for :no-plan-id / :no-tasks

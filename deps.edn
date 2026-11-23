@@ -4,6 +4,7 @@
 
  :aliases
  {:dev  {:extra-paths ["development/src"
+                       "development/resources"
                        "components/schema/src"
                        "components/schema/resources"
                        "components/config/src"
@@ -40,6 +41,8 @@
                        "components/progress-detector/src"
                        "components/progress-detector/resources"
                        "components/clock/src"
+                       "components/subprocess/src"
+                       "components/subprocess/resources"
                        "components/codex/src"
                        "components/codex/resources"
                        "components/codex-gap/src"
@@ -54,6 +57,8 @@
                        "components/decision/src"
                        "components/agent-environment/src"
                        "components/agent-environment/resources"
+                       "components/agent-worker/src"
+                       "components/agent-worker/resources"
                        "components/deliberation-workspace/src"
                        "components/deliberation-workspace/resources"
                        "components/deliberation-harness/src"
@@ -278,6 +283,7 @@
                       ai.miniforge/anomaly {:local/root "components/anomaly"}
                       ai.miniforge/progress-detector {:local/root "components/progress-detector"}
                       ai.miniforge/clock {:local/root "components/clock"}
+                      ai.miniforge/subprocess {:local/root "components/subprocess"}
                       ai.miniforge/codex {:local/root "components/codex"}
                       ai.miniforge/codex-gap {:local/root "components/codex-gap"}
                       ai.miniforge/coerce {:local/root "components/coerce"}
@@ -422,6 +428,7 @@
                        "components/anomaly/test"
                        "components/progress-detector/test"
                        "components/clock/test"
+                       "components/subprocess/test"
                        "components/codex/test"
                        "components/codex/test-resources"
                        "components/codex-gap/test"
@@ -497,6 +504,7 @@
                        "components/governance-provenance/test"
                        "components/context-pack/test"
                        "components/agent-environment/test"
+                       "components/agent-worker/test"
                        "components/deliberation-workspace/test"
                        "components/deliberation-harness/test"
                        "bases/deliberation-lab/test"
@@ -579,6 +587,7 @@
                       ai.miniforge/anomaly {:local/root "components/anomaly"}
                       ai.miniforge/progress-detector {:local/root "components/progress-detector"}
                       ai.miniforge/clock {:local/root "components/clock"}
+                      ai.miniforge/subprocess {:local/root "components/subprocess"}
                       ai.miniforge/codex {:local/root "components/codex"}
                       ai.miniforge/codex-gap {:local/root "components/codex-gap"}
                       ai.miniforge/coerce {:local/root "components/coerce"}

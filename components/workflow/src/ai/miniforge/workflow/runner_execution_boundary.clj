@@ -17,12 +17,12 @@
 (defn- ^{:stratum 0} exception-message [error]
   (if (instance? Throwable error) (ex-message error) (str error)))
 
-;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} stopped [ctx message exception-vol]
+(defn- ^{:stratum 0} stopped [ctx message exception-vol]
   (let [error (outcome/make-execution-error :dashboard-stop message)]
     (vreset! exception-vol error)
-    (failed ctx error)))
+    (-> ctx (update :execution/errors conj error) context/transition-to-cancelled)))
+
+;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} crashed [ctx error throwable exception-vol]
   (when-let [fatal (resources/fatal-cause throwable)]

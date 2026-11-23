@@ -19,6 +19,9 @@
 (defn ^{:stratum 0} begin-publication [output]
   (assoc output :opsv/phase-produced-artifact-refs []))
 
+(defn ^{:stratum 0} recorded-output [output [_kind _type content-key] value]
+  (assoc output content-key (:artifact/content value)))
+
 (def ^{:stratum 0} phase-materials
   {:opsv/discover [[:experiment-pack :manifest :opsv/experiment-pack]]
    :opsv/execute [[:metric-snapshot :telemetry :opsv/ramp-steps]]

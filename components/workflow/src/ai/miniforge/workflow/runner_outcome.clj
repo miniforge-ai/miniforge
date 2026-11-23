@@ -18,9 +18,10 @@
     extra (merge extra)))
 
 (defn ^{:stratum 0} terminal-state?
-  "Check if workflow is in terminal state."
+  "Check if workflow is in terminal state: completed, failed or cancelled."
   [context]
-  (or (phase/succeeded? context) (phase/failed? context)))
+  (or (phase/succeeded? context) (phase/failed? context)
+      (ctx/cancelled? context)))
 
 (defn- ^{:stratum 0} resolve-runtime-class
   "Return a TaskExecutor runtime class; absent or unsupported values have no class."

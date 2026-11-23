@@ -36,6 +36,11 @@
    [ai.miniforge.phase-opsv.boundary.kubernetes-controller-configuration :as controller-configuration]
    [ai.miniforge.phase-opsv.boundary.kubernetes-environment-fingerprint :as native-fingerprint]
    [ai.miniforge.phase-opsv.boundary.kubernetes-verification-preparation :as native-preparation]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-baseline-recovery :as baseline-recovery]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-replica-trial :as native-replica-trial]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-replica-trial-execution :as native-replica-trial-execution]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-baseline-restoration-execution :as native-restoration-execution]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-recovery-identity :as recovery-identity]
    [ai.miniforge.phase-opsv.kubernetes-preparation-schema :as native-preparation-schema]
    [ai.miniforge.phase-opsv.boundary.kubernetes-replica-request :as native-replica-request]
    [ai.miniforge.phase-opsv.boundary.kubernetes-replica-provider :as native-replica-provider]
@@ -43,7 +48,25 @@
    [ai.miniforge.phase-opsv.boundary.retained-preparation :as retained-preparation]
    [ai.miniforge.phase-opsv.boundary.governed-replica-proposal :as governed-replica-proposal]
    [ai.miniforge.phase-opsv.boundary.governed-load-proposal :as governed-load-proposal]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-recovery-plan :as recovery-plan]
+   [ai.miniforge.phase-opsv.boundary.recovery-plan-admission :as recovery-admission]
+   [ai.miniforge.phase-opsv.boundary.recovery-plan-retention :as recovery-retention]
+   [ai.miniforge.phase-opsv.boundary.retained-recovery-plan :as retained-recovery]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-provider :as native-load-provider]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-effect-audit :as native-effect-audit]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-load-ownership :as load-ownership]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-load-absence :as load-absence]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-load-quiescence :as load-quiescence]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-load-stop :as load-stop]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-load-start :as load-start]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-baseline-restoration :as baseline-restoration]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-baseline-restoration-provider :as native-baseline-restoration]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-load-cleanup :as load-cleanup]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-load-cleanup-provider :as native-load-cleanup-provider]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-load-stop-provider :as native-load-stop-provider]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-load-start-provider :as native-load-start-provider]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-load-start-execution :as native-load-start-execution]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-load-creation-execution :as native-load-creation-execution]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
    [ai.miniforge.phase-opsv.environment-comparison-request-schema :as environment-request-schema]
@@ -55,6 +78,7 @@
    [ai.miniforge.phase-opsv.boundary.prometheus-client :as prometheus]
    [ai.miniforge.phase-opsv.boundary.prometheus-criteria :as prometheus-criteria]
    [ai.miniforge.phase-opsv.run-control :as run-control]
+   [ai.miniforge.phase-opsv.run-control-boundary :as control-boundary]
    [ai.miniforge.phase-opsv.run-control-state :as control-state]
    [ai.miniforge.phase-opsv.protocol :as protocol]
    [ai.miniforge.phase-opsv.verification-preparation :as preparation]
@@ -67,7 +91,169 @@
 
 (def ^{:stratum 0} OPSVAdapter protocol/OPSVAdapter)
 
+(def ^{:stratum 0} prepare-kubernetes-replica-trial-proposal!
+  "Construct one exact bounded replica-trial intent from fresh unchanged-original native state.
+   Input is the closed retained recovery reference, explicit trial/provider, replica count and distinct effect ID.
+   Re-admit the independent recovery plan and original; do not accept caller current-state snapshots.
+   Return the canonical UID/resource-version conditional proposal or an anomaly, without authority or cluster mutation.
+   Comparison refusals retain protected observations and linked drift evidence before returning.
+   Construction is not baseline adoption, trial activation, SLO success or permission to execute."
+  native-replica-trial/prepare!)
+
+(def ^{:stratum 0} execute-kubernetes-replica-trial!
+  "Execute one bounded staging replica candidate with current N4/N8 checks and exact independent authority.
+   Runtime uses trusted directories, current-context/clock readers and matching opaque control/fence handles.
+   Input is the closed retained recovery reference, explicit trial/provider, replica count and distinct effect ID.
+   Return the durable transaction or an anomaly retaining failed/uncertain disposition; do not retry uncertain effects.
+   The candidate remains applied; the host must run independently authorized recovery on every trial exit.
+   Does not enable experiments by default, create load, prove SLOs, restore baseline or authorize permanent apply."
+  native-replica-trial-execution/apply!)
+
+(def ^{:stratum 0} recovery-effect-id
+  "Return the stable effect UUID for an approved recovery-plan hash and one recovery operation.
+   Only stop-load, cleanup-load and restore-baseline are accepted; invalid arguments return an anomaly.
+   Reusing a plan and operation reuses its durable slot, not permission to retry an uncertain effect."
+  recovery-identity/identity-for)
+
+(def ^{:stratum 0} execute-kubernetes-baseline-restoration!
+  "Execute exact staging compensation using independently current N4 admission and recovery authority.
+   Runtime policy/context :opsv/recovery-effect-operations must permit :restore-baseline separately from plan approval.
+   Use the original trusted host runtime and closed restoration input; effect/id must equal recovery-effect-id.
+   Running, paused, blocked, failed and cancelled status is preserved; safe mode does not enable forward writes.
+   The forward fence stays closed, and the recovery grant is outside the stopped forward registration bag.
+   Refuse until forward effects settle. Return the durable transaction or an anomaly; do not retry unknown outcomes.
+   The host must retain unresolved preflight failures as well as the durable effect disposition.
+   An acknowledgement is not verified recovery: the host must separately stop load, prove cleanup and verify baseline."
+  native-restoration-execution/apply!)
+
+(def ^{:stratum 0} verify-kubernetes-baseline-recovery!
+  "Compare fresh native configuration and replica invariants to the acknowledged original in rollback mode.
+   Input is the closed retained recovery reference and restoration/provider contract, without an effect ID.
+   Return protected, acknowledged :opsv/baseline-recovery report output, or an admission/publication anomaly.
+   A false :verification/passed? preserves the failed observation/comparison; no candidate state is adopted.
+   Proves neither load termination nor owned-resource absence, candidate SLOs, or authority to mutate."
+  baseline-recovery/verify!)
+
+(def ^{:stratum 0} observe-kubernetes-load-absence!
+  "Read owned Pod presence between fresh original-cluster and namespace identity checks.
+   Input is the closed retained recovery reference/runtime contract, without an effect ID.
+   Returns explicit :absent, :present or :unresolved resource state, or an admission anomaly.
+   Absence proves neither container termination nor original-baseline recovery; no effects are authorized."
+  load-absence/observe!)
+
+(def ^{:stratum 0} record-kubernetes-experiment-disposition!
+  "Read one durable native effect and retain its exact allowing-decision join in protected N6 material.
+   Arguments: runtime context, effect directory, effect UUID and the actual allowing DecisionEnvelope.
+   Publish and acknowledge the existing N3 disposition event; return the record or an audit anomaly.
+   Preserves uncertain outcomes. This API grants no authority, performs no provider mutation and proves no recovery."
+  native-effect-audit/record!)
+
+(def ^{:stratum 0} execute-kubernetes-load-start!
+  "Trusted-host orchestration of one retained, exact load start with live N4/N8 checks and independent authority.
+   Runtime is closed directories/clock/current-context reader plus matching opaque run-control and fence handles.
+   Input is the existing closed retained recovery reference/ownership runtime/new effect-ID contract.
+   Returns durable transaction or anomaly. Failed or uncertain commits fence forward effects and retain audit data.
+   This API neither enables experiments by default nor proves traffic, SLOs, termination or recovery."
+  native-load-start-execution/start!)
+
+(def ^{:stratum 0} execute-kubernetes-load-creation!
+  "Execute one exact inert Pod creation through current N4, N8, root authority and durable audit.
+   Input is the closed recovery reference plus creation/provider; the admitted load ID must match the retained plan.
+   Runtime handles and current-context/clock readers must come from the trusted host, never serialized input.
+   Return the actual succeeded transaction or an anomaly retaining failure/uncertainty; never retry or release traffic.
+   Default-off, staging-only, and independently approved recovery-plan admission remain required."
+  native-load-creation-execution/create!)
+
+(def ^{:stratum 0} prepare-kubernetes-load-stop-proposal!
+  "Prepare an exact conditional stop proposal from current retained recovery approval and fresh owned identity.
+   This read-only API does not issue authority, execute a patch or prove termination."
+  load-stop/prepare!)
+
+(def ^{:stratum 0} prepare-kubernetes-load-start-proposal!
+  "Prepare exact UID/revision/gate-pinned forward start from retained recovery readiness and unchanged owned creation.
+   Input uses the closed recovery-reference/runtime/new effect-id contract; forward load bounds remain original.
+   Requires a never-started worker. Returns proposal or anomaly, never permission, mutation or traffic proof.
+   Native execution still requires current N4/N8 admission, exact forward authority and a pinned commit."
+  load-start/prepare!)
+
+(def ^{:stratum 0} prepare-kubernetes-baseline-restoration-proposal!
+  "Prepare original-baseline replica restoration after current retained recovery admission and complete native reads.
+   Input: closed recovery reference/input, restoration/provider settings and distinct effect/id; no count or capture.
+   Bind the original desired count and freshly observed UID/resource version, preserving bounded recovery limits.
+   Returns proposal or anomaly, never permission, mutation or proof of restored runtime invariants."
+  baseline-restoration/prepare!)
+
+(def ^{:stratum 0} restore-kubernetes-baseline-replicas!
+  "Submit original-baseline desired replicas after current retained recovery admission and complete native capture.
+   Runtime is closed context/restoration input; record must be a granted committing restore-baseline transaction.
+   Requires current N4/N8 recovery admission, exact independent authority, an issued pin and synchronous dispatch.
+   Returns outcome or anomaly. An acknowledged replica patch does not prove restored runtime invariants."
+  native-baseline-restoration/restore!)
+
+(def ^{:stratum 0} prepare-kubernetes-load-cleanup-proposal!
+  "Prepare an exact UID/revision-pinned deletion request from current retained recovery intent.
+   Input is the closed recovery reference/runtime/new effect-id contract used for load stopping.
+   Requires durable creation ownership and fresh not-started or physically terminated observation.
+   Returns a proposal or anomaly, never authority, provider mutation or proof of completed cleanup."
+  load-cleanup/prepare!)
+
+(def ^{:stratum 0} cleanup-kubernetes-load-pod!
+  "Submit one exact noncascading cleanup through a required trusted synchronous dispatch callback.
+   Runtime carries context/recovery input; record must be granted and committing. Returns outcome or anomaly.
+   Requires current effect admission, separate exact recovery authority and a six-argument pinned commit.
+   An acknowledgement proves neither resource absence nor baseline recovery."
+  native-load-cleanup-provider/delete!)
+
+(def ^{:stratum 0} start-kubernetes-load-pod!
+  "Submit one UID/revision/gate-pinned forward start through required synchronous provider dispatch.
+   Runtime carries context and the retained recovery-reference input; record must be granted and committing.
+   Requires current N4/N8 effect admission, separate exact forward authority and an independently pinned commit.
+   Returns outcome or anomaly. Gate-release acknowledgement proves neither actual traffic nor verified SLOs."
+  native-load-start-provider/patch!)
+
+(def ^{:stratum 0} stop-kubernetes-load-pod!
+  "Execute one exact deadline patch through a required trusted synchronous dispatch callback.
+   Runtime carries context/recovery input; record must be granted and committing. Returns outcome or anomaly.
+   Requires independently admitted current authority and a six-argument pinned durable commit.
+   A confirmed deadline patch does not establish actual worker termination or recovered baseline."
+  native-load-stop-provider/patch!)
+
+(def ^{:stratum 0} read-kubernetes-load-ownership!
+  "Read the plan's durable granted creation record and fresh Pod with its provider-assigned UID.
+   Runtime supplies effects-directory and explicit provider settings. Never adopt by name/labels.
+   Returns creation record and native Pod, not plan approval, lifecycle admission,
+   termination proof or permission to release, stop or delete the worker."
+  load-ownership/read!)
+
+(def ^{:stratum 0} read-kubernetes-load-quiescence!
+  "Read fresh owned Pod state as :not-started, :terminated, or :unresolved.
+   Neither an observation nor a terminal phase authorizes cleanup or proves baseline recovery."
+  load-quiescence/read!)
+
+(def ^{:stratum 0} prepare-kubernetes-recovery-plan!
+  "Construct bounded recovery intent from an acknowledged original and an exact planned load.
+   Requires a rollback comparison contract containing the original replica count.
+   Plan approval/retention, fresh provider identity and preconditions, exact grants,
+   execution, and verified termination/restoration remain separate obligations."
+  recovery-plan/prepare!)
+
+(def ^{:stratum 0} admit-kubernetes-recovery-plan!
+  "Rebuild bounded recovery intent from retained originals and obtain independent runtime N4 admission.
+   Requires exact plan-hash approval and an independently declared staging target.
+   Does not retain the decision, enable experiments, grant effects or call providers."
+  recovery-admission/admit!)
+
 (def ^{:stratum 0} VerificationAdapter protocol/VerificationAdapter)
+
+(def ^{:stratum 0} retain-kubernetes-recovery-plan!
+  "Retain the actual independent plan admission as a protected, acknowledged verification report.
+   Denials remain failure evidence, not approved recovery plans. No effect authority or provider calls."
+  recovery-retention/retain!)
+
+(def ^{:stratum 0} read-retained-kubernetes-recovery-plan!
+  "Read an acknowledged approved plan uncached and require fresh independent admission at the same policy revision.
+   Returns plan intent and its retained reference, never a decision or grant for an effect."
+  retained-recovery/read!)
 
 (def ^{:stratum 0} VerificationPreparationAdapter
   "Read-only target acquisition before verification effects; not admission or authority."
@@ -325,6 +511,16 @@
 (defn ^{:stratum 0} retire-run-control!
   "Stop and clean up a completed run. Retain it while cleanup or admitted effects remain."
   [handle now] (run-control/retire! handle now))
+
+(defn ^{:stratum 0} stop-run-control!
+  "Fence one opaque run, request its abort and revoke tracked forward grants; never forget its registration.
+   Accept the original control handle and current Instant. Return cleanup/mutation status or an input anomaly.
+   Siblings and parent admission remain unchanged. An abort acknowledgement does not prove recovery.
+   Keep failed recovery registered and fenced; only explicitly retire after independently verified recovery."
+  [handle now]
+  (if (and (run-control/run? handle) (instance? java.time.Instant now))
+    (run-control/stop-child! handle now)
+    (control-boundary/failure :invalid-input :invalid-run)))
 
 (def ^{:stratum 0} phase-keys
   [:opsv/discover :opsv/plan :opsv/execute :opsv/converge

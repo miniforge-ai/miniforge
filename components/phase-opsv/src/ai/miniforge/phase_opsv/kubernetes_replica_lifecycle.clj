@@ -5,7 +5,7 @@
   "Lifecycle invariants for Pods whose native controller membership is already proven."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.artifact.interface :as artifact]
-            [ai.miniforge.phase-opsv.kubernetes-controller-reference :as ownership]
+            [ai.miniforge.kubernetes-target.interface :as ownership]
             [ai.miniforge.phase-opsv.kubernetes-metadata-projection :as metadata]
             [ai.miniforge.phase-opsv.kubernetes-resource :as resource]))
 

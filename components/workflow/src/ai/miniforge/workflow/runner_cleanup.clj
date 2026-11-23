@@ -27,6 +27,7 @@
    [ai.miniforge.workflow.boundary.cleanup-attempt :as attempt]
    [ai.miniforge.workflow.cleanup-knowledge :as knowledge]
    [ai.miniforge.workflow.cleanup-signals :as signals]
+   [ai.miniforge.workflow.context :as context]
    [ai.miniforge.workflow.runner-environment :as env]
    [ai.miniforge.workflow.runner-events :as events]))
 
@@ -43,13 +44,17 @@
   knowledge/synthesize-patterns!)
 
 (defn ^{:stratum 0} observe-workflow-signal!
-  "Feed workflow completion/failure signal to the operator for pattern analysis."
+  "Feed workflow completion/failure signal to the operator for pattern
+   analysis. A cancelled run sends none: it neither completed nor failed,
+   and the operator mines failure signals (N3: a cancel is not counted as
+   a failure)."
   [opts output-ctx workflow exception]
   (when-let [observe-fn (:observe-signal-fn opts)]
-    (let [signal (if output-ctx
-                   (signals/completion output-ctx)
-                   (signals/failure workflow exception))]
-      (observe-fn signal))))
+    (when-not (context/cancelled? output-ctx)
+      (let [signal (if output-ctx
+                     (signals/completion output-ctx)
+                     (signals/failure workflow exception))]
+        (observe-fn signal)))))
 
 (defn- ^{:stratum 0} observer-failure! [event-stream workflow-id error]
   (when event-stream

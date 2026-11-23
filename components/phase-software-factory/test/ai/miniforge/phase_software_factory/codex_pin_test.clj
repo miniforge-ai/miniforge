@@ -196,6 +196,8 @@
         (let [out (codex-pin/pin-outcome :implement nil "/codex")]
           (is (= :pinned (:status out)))
           (is (= "PRIMARY\n\nSECONDARY" (get-in out [:entry :content])))
+          (is (true? (get-in out [:entry :keep-inline?]))
+              "the planner keeps the pin's body when it sheds file bodies")
           (is (= [{:id "p1"} {:id "s1"}] (:pegs out)))
           (is (= "changing-one-side-of-a-boundary" (:situation out))
               "the ledger's situation stays the primary"))))

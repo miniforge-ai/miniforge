@@ -11,7 +11,8 @@
             [ai.miniforge.workflow.runner-defaults :as defaults]
             [ai.miniforge.workflow.runner-environment :as env]
             [ai.miniforge.workflow.runner-events :as events]
-            [ai.miniforge.workflow.runner-outcome :as outcome]))
+            [ai.miniforge.workflow.runner-outcome :as outcome]
+            [ai.miniforge.workflow.stop-signal :as stop-signal]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -67,20 +68,23 @@
                  (resilience/rate-limit-in-text? s)))))
 
 (defn- ^{:stratum 1} apply-backoff-if-retrying!
-  "Sleep with exponential backoff when a phase is being retried."
-  [phase-ctx _context]
+  "Sleep with exponential backoff when a phase is being retried. A cancel
+   before or during the backoff ends it at once (`stop-signal/sleep!`)."
+  [phase-ctx control-state]
   (let [current-phase (:execution/current-phase phase-ctx)
         retrying? (phase/retrying?
                    (get-in phase-ctx [:execution/phase-results current-phase]))
         retry-count (get-in phase-ctx [:phase :iterations] 1)]
     (when (and retrying? (> retry-count 1))
-      (Thread/sleep (backoff-ms retry-count)))))
+      (stop-signal/sleep! control-state (backoff-ms retry-count)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} execute-phase
-  "Execute one phase; persist workspace before applying retry or health policy."
-  [pipeline context callbacks]
+  "Execute one phase; persist workspace before applying retry or health policy.
+   A cancel (`control-state` stopped) before or during the retry backoff
+   ends the backoff at once."
+  [pipeline context callbacks control-state]
   (let [stepped (-> (exec/execute-phase-step pipeline context callbacks
                                            ctx/merge-metrics
                                            ctx/transition-to-completed
@@ -94,7 +98,7 @@
                                :error :message] "")]
     (if (rate-limited? error-message)
       (apply-rate-limit-failure phase-context error-message)
-      (do (apply-backoff-if-retrying! phase-context context)
+      (do (apply-backoff-if-retrying! phase-context control-state)
           (apply-health-switch phase-context)))))
 
 (comment ::phase-boundary-policy)

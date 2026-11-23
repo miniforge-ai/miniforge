@@ -6,6 +6,7 @@
             [ai.miniforge.content-hash.interface :as hash]
             [ai.miniforge.phase-opsv.kubernetes-preparation :as preparation]
             [ai.miniforge.phase-opsv.kubernetes-replica-payload :as wire]
+            [ai.miniforge.phase-opsv.kubernetes-resource :as resource]
             [ai.miniforge.phase-opsv.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -22,15 +23,23 @@
 (defn- ^{:stratum 0} within? [bounds count]
   (<= (:replicas/min-count bounds) count (:replicas/max-count bounds)))
 
-(defn- ^{:stratum 0} request-bound? [declaration request baseline current]
+(defn- ^{:stratum 0} same-cluster? [baseline current]
+  (let [original (get-in baseline [:environment/raw-observations :kubernetes/verification
+                                   :kubernetes/source :kubernetes/cluster])
+        original-uid (resource/uid original)
+        current-uid (resource/uid (:kubernetes/cluster current))]
+    (and (some? original-uid) (= original-uid current-uid))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} request-bound? [declaration request baseline current]
   (and (preparation/correlated? declaration request)
+       (same-cluster? baseline current)
        (= (:runtime/target declaration) (:runtime/target baseline))
        (= (get-in request [:comparison/pin :comparison/contract :comparison/baseline])
           (:environment-fingerprint baseline))
        (preparation/target-bound? declaration (get-in baseline [:environment/raw-observations :kubernetes/verification :kubernetes/source]))
        (preparation/target-bound? declaration current)))
-
-;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} count-bounded? [request original current desired operation]
   (let [original-count (get-in original ["spec" "replicas"])
@@ -68,4 +77,5 @@
        :kubernetes/request payload}
       (anomaly/anomaly :conflict (msg/ts :replicas/request-mismatch) {}))))
 
-(comment ::canonical-data-only-no-retention-authority-provider-or-recovery-proof)
+(comment
+  (desired-count {"spec" {"replicas" 2}} {:opsv/operation :restore-baseline}))

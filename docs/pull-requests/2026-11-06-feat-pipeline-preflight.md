@@ -47,9 +47,9 @@ read their sources.
 2. A pipeline whose connector is missing is refused before any stage runs.
    Before, earlier stages ran and the run failed at that stage, with a
    `:pipeline-run`.
-3. The shipped `risk-data` pack is refused by preflight until the stacked ETL
-   PR lands: the ETL runner supplies neither the built-in transforms nor a
-   rule registry. On `main` the same pack already fails at run time, when its
+3. The shipped `risk-data` pack is refused by preflight until the stacked ETL PR lands.
+   The ETL runner supplies neither the built-in transforms nor a rule registry.
+   On `main` the same pack already fails at run time, when its
    validate stage calls the nil rules the resolver produced.
 
 ## Review fixes
@@ -58,15 +58,14 @@ read their sources.
    the base `Connector` protocol is refused (it would fail at `connect`).
 2. Pass-through declared beside a transform is a conflict on a validate stage
    too, not only beside a quality pack.
-3. The ETL wiring (built-in transforms and rules, `validate-pack` preflight,
-   the `risk-data` pass-through declaration) moved to its own PR to keep this
-   one under the PR budget.
+3. The ETL wiring moved to its own PR to keep this one under the PR budget.
+   This includes built-in transforms and rules, `validate-pack` preflight and the `risk-data` pass-through declaration.
 
 Second round (findings Copilot reported as previously missed):
 
-1. A transform, spawn fn or rule check fn may be a fn, a multimethod, or a
-   bound Var holding one; `fn?` had refused Vars and multimethods the
-   executor can call. An unbound Var, or one holding data, is refused.
+1. A transform, spawn fn or rule check fn may be a fn, a multimethod, or a bound Var holding one.
+   `fn?` had refused Vars and multimethods the executor can call.
+   An unbound Var, or one holding data, is refused.
 2. Pass-through beside any `:stage/transform` declaration is a conflict, even
    one without a `:transform/type`.
 3. A quality pack whose `:pack/rules` is not a list is reported as
@@ -75,19 +74,20 @@ Second round (findings Copilot reported as previously missed):
 ## Not in this PR
 
 1. ETL wiring: the stacked ETL PR.
-2. Stages spawned mid-run are not preflighted; the executor change that
-   refuses them and records a pass-through receipt is a later PR, as is naming
-   unresolved rules.
+2. Stages spawned mid-run are not preflighted.
+   The executor change that refuses them and records a pass-through receipt is a later PR.
+   Naming unresolved rules is also deferred.
 3. A rule that throws or returns a malformed verdict becoming an execution
    error, and the #2422 gate report.
 
 ## Testing Plan
 
-1. `preflight_test`: one fixture per problem kind (unresolved transform, spawn
-   fn, quality rule, validator without pack, empty pack, conflict on transform
-   and validate stages, a source-only connector or a sink without `Connector`
-   bound to publish), each asserting zero source and sink connector calls; all
-   problems reported together; declared pass-through runs both connectors.
+1. `preflight_test` has one fixture per problem kind.
+   These include unresolved transform, spawn fn, quality rule, validator without pack and empty pack.
+   Other cases cover conflicts on transform and validate stages, plus a source-only connector or a sink without
+   `Connector` bound to publish.
+   Each asserts zero source and sink connector calls.
+   All problems are reported together; declared pass-through runs both connectors.
 2. `interface_test`: fixtures declare pass-through; the tests that asserted
    silent pass-through or a mid-run missing-connector failure now assert the
    preflight refusal.

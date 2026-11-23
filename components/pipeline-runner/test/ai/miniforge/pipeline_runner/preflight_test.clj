@@ -19,7 +19,11 @@
   "Preflight rejects unresolved required behavior before any connector opens:
    an ingest → middle → publish pipeline where the middle stage (or the ingest
    stage's spawn fn) names something that does not resolve. Every refusal
-   leaves both connectors uncalled."
+   leaves both connectors uncalled. A stage spawned mid-run is not
+   preflighted, so the executor refuses it when it declares no processing.
+   A declared pass-through leaves a receipt on its stage run. A quality rule
+   that throws or returns a malformed verdict fails its stage as an execution
+   error."
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.connector.interface :as conn]
             [ai.miniforge.data-quality.interface :as dq]
@@ -108,6 +112,17 @@
    :pipeline/created-at (java.time.Instant/now)
    :pipeline/updated-at (java.time.Instant/now)})
 
+(def ^{:stratum 0} ^:private unprocessed-child-name "Unprocessed child")
+
+(defn- ^{:stratum 0} stage-runs [outcome]
+  (get-in outcome [:result :pipeline-run :pipeline-run/stage-runs]))
+
+(defn- ^{:stratum 0} quality-config-with-check
+  "Stage config for a validate stage whose single rule runs `check-fn`."
+  [check-fn]
+  {:stage/quality-pack {:pack/id :fixture-pack
+                        :pack/rules [(dq/custom-rule :fixture-rule check-fn)]}})
+
 (defmulti ^{:stratum 0} ^:private fixture-multimethod
   "A multimethod transform: preflight must accept it as callable."
   (fn [_records _config] :default))
@@ -123,6 +138,12 @@
   42)
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} child-spawn
+  "Spawn fn factory: one child of `family` with stage config `config`."
+  [family config]
+  (fn [_records _config]
+    [{:spawn/name unprocessed-child-name :spawn/family family :spawn/config config}]))
 
 (defn- ^{:stratum 1} ingest-stage [config]
   {:stage/id ingest-id
@@ -167,6 +188,9 @@
      {:result       result
       :source-calls @source-calls
       :sink-calls   @sink-calls})))
+
+(defn- ^{:stratum 1} stage-run [outcome stage-id]
+  (first (filter #(= stage-id (:stage/id %)) (stage-runs outcome))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -245,12 +269,39 @@
              (set (map :preflight/problem (:preflight/problems (:result outcome))))))
       (is (string? (:error (:result outcome)))))))
 
-(deftest ^{:stratum 2} test-declared-pass-through-runs
-  (testing "given an explicit pass-through → preflight passes and both connectors run"
-    (let [outcome (run-fixture (pipeline [(ingest-stage {}) (middle-stage :normalize pass-through) publish-stage]) {})]
-      (is (:success? (:result outcome)))
-      (is (= [:connect :extract] (:source-calls outcome)))
-      (is (= [:connect :publish] (:sink-calls outcome))))))
+(deftest ^{:stratum 2} test-declared-pass-through-runs-with-receipt
+  (testing "given an explicit pass-through → both connectors run and the stage run records it"
+    (doseq [family [:normalize :validate]]
+      (let [middle     (middle-stage family pass-through)
+            outcome    (run-fixture (pipeline [(ingest-stage {}) middle publish-stage]) {})
+            middle-run (stage-run outcome middle-id)]
+        (is (:success? (:result outcome)) (str family))
+        (is (= [:connect :extract] (:source-calls outcome)))
+        (is (= [:connect :publish] (:sink-calls outcome)))
+        (is (= :completed (:status middle-run)))
+        (is (true? (:pass-through? middle-run)) (str family))))))
+
+(deftest ^{:stratum 2} test-spawned-stage-that-cannot-run-fails
+  (testing "given a spawned child with no processing, a missing transform beside pass-through, a transform registered as data, or an empty, malformed or unbuilt pack → the child fails, nothing publishes"
+    (doseq [[family config] [[:transform nil]
+                             [:transform {:stage/pass-through? true
+                                          :stage/transform     {:transform/type :no-such-transform}}]
+                             [:transform {:stage/transform {:transform/type :not-a-fn}}]
+                             [:validate {:stage/quality-pack {:pack/id :empty-pack :pack/rules []}}]
+                             [:validate {:stage/quality-pack {:pack/id :bad-pack :pack/rules 42}}]
+                             [:validate {:stage/quality-pack {:pack/id :unbuilt-pack
+                                                              :pack/rules [{:rule/type :custom :rule/id :missing}]}}]]]
+      (let [ingest    (ingest-stage {:stage/spawn-fn :child})
+            middle    (middle-stage :normalize pass-through)
+            outcome   (run-fixture (pipeline [ingest middle publish-stage])
+                                   {:spawn-fns  {:child (child-spawn family config)}
+                                    :transforms {:not-a-fn {}}})
+            child-run (first (filter #(= unprocessed-child-name (:stage/name %))
+                                     (stage-runs outcome)))]
+        (is (false? (:success? (:result outcome))) (pr-str config))
+        (is (= :failed (:status child-run)) (pr-str config))
+        (is (= :configuration (:error-kind child-run)) (pr-str config))
+        (is (empty? (:sink-calls outcome)) (pr-str config))))))
 
 (deftest ^{:stratum 2} test-preflight-accepts-resolved-pipeline
   (testing "given every named behavior resolves, as a fn, a Var or a multimethod → preflight succeeds with no problems"
@@ -263,6 +314,19 @@
                                          {:transforms {:double transform}})]
         (is (:success? result) (str transform))
         (is (= [] (get-in result [:preflight :preflight/problems])))))))
+
+(deftest ^{:stratum 2} test-broken-quality-rule-fails-the-stage
+  (testing "given a rule that throws or returns a malformed verdict → the validate stage fails as an execution error, nothing publishes"
+    (doseq [[check-fn kind] [[(fn [_] (throw (ex-info "boom" {}))) :rule/threw]
+                             [(fn [_] (assert false "boom"))         :rule/threw]
+                             [(constantly {:valid? "yes"})          :rule/malformed-verdict]]]
+      (let [outcome    (run-fixture (pipeline [(ingest-stage {}) (middle-stage :validate (quality-config-with-check check-fn)) publish-stage]) {})
+            middle-run (stage-run outcome middle-id)]
+        (is (false? (:success? (:result outcome))))
+        (is (= :failed (:status middle-run)))
+        (is (= :execution (:error-kind middle-run)))
+        (is (= #{kind} (set (map :error/kind (:quality/rule-errors middle-run)))))
+        (is (empty? (:sink-calls outcome)))))))
 
 (deftest ^{:stratum 2} test-non-callable-var-refused-before-io
   (testing "given a transform registered as a Var holding data, or as an unbound Var → refused before any connector call"

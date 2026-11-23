@@ -53,7 +53,8 @@
         fail (:fail ports)]
     (or (dag/try-dag-execution context phase result pipeline complete fail)
         (transition/apply-phase-transition
-          context (transition/determine-phase-event (:config interceptor) result)
+          context (transition/stop-aware-event
+                   context (transition/determine-phase-event (:config interceptor) result))
           pipeline complete fail))))
 
 ;------------------------------------------------------------------------------ Layer 1

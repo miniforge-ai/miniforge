@@ -16,12 +16,9 @@
 (defn ^{:stratum 0} matches? [settings record input]
   (let [proposal (:effect/proposal record)
         scope (:opsv/experiment proposal)
-        target (:runtime/target scope)
         expected (pod/request input)]
     (and (= (:effect/id record) (:effect/id proposal))
-         (= (:kubernetes/cluster-id settings) (:cluster target))
-         (= (:kubernetes/namespace settings) (:namespace target))
-         (= (:kubernetes/context settings) (:kubernetes/context scope))
+         (native/configured-target? settings scope)
          (= [(pod/resource-reference input)] (:opsv/resources scope))
          (= expected (native/request record))
          (= (hash/content-hash expected) (:opsv/payload-hash scope)))))

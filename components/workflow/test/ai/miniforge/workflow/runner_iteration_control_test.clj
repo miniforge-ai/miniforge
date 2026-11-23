@@ -71,7 +71,7 @@
             (is (not= ::still-waiting result)
                 "the wait ends on :stopped while :paused is still true")
             (when (map? result)
-              (is (= :failed (:execution/status result)))
+              (is (= :cancelled (:execution/status result)))
               (is (some #(= :dashboard-stop (:type %))
                         (:execution/errors result)))))
           (finally
@@ -90,7 +90,7 @@
                                                   (let [result (f)]
                                                     (swap! seen conj (cancelled?))
                                                     result))
-                    phase-step/execute-phase (fn [_ context _]
+                    phase-step/execute-phase (fn [_ context _ _control-state]
                                                (swap! control-state assoc :stopped true)
                                                context)]
         (runner/execute-single-iteration [] (test-context) {} 1 control-state)

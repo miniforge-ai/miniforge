@@ -26,7 +26,6 @@
    [clojure.string :as str]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.cli.messages :as messages]
-   [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.workflow.interface :as workflow]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -36,6 +35,12 @@
   {:in-progress "work/in-progress"
    :done        "work/done"
    :failed      "work/failed"})
+
+(defn- ^{:stratum 0} completion-folder
+  "The kanban folder a finished run's spec moves to; nil for a cancelled
+   run, whose spec stays where it is."
+  [result]
+  (get {:completed :done :failed :failed} (workflow/run-outcome result)))
 
 (defn- ^{:stratum 0} work-spec?
   "True when the spec provenance points to a file under work/."
@@ -70,11 +75,11 @@
     provenance))
 
 (defn ^{:stratum 2} move-spec-on-completion!
-  "Move a work spec to done or failed based on workflow result."
+  "Move a work spec to done or failed based on workflow result. A cancelled
+   run's spec stays in in-progress: it neither finished nor failed."
   [provenance result]
-  (if (phase/succeeded? result)
-    (move-spec! provenance :done)
-    (move-spec! provenance :failed)))
+  (when-let [target (completion-folder result)]
+    (move-spec! provenance target)))
 
 (defn ^{:stratum 2} start-spec!
   "`move-spec-to-in-progress!` for a run's input, keeping its spec
@@ -108,7 +113,7 @@
    checkpoint lock staying busy) is warned about on stderr: a later resume
    would look for the spec at its old place."
   [provenance result]
-  (when-let [new-path (move-spec! provenance (if (phase/succeeded? result) :done :failed))]
+  (when-let [new-path (some->> (completion-folder result) (move-spec! provenance))]
     (when-let [run-id (:execution/id result)]
       ;; Under the root the run checkpointed to, which a per-execution
       ;; :checkpoint/root moves away from the default.

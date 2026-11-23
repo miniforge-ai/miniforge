@@ -31,11 +31,21 @@
      can satisfy `request` now.")
   (provision! [provider target request]
     "Create the environment named by `target` (`:target/namespace`,
-     `:target/generation`). Returns `{:provision/uid s :provision/steps
-     [Step]}`; a failed step leaves earlier steps applied and later ones
-     unattempted.")
+     `:target/generation`), recording the generation on what it creates.
+     Returns `{:provision/uid s :provision/steps [Step]}`; a failed step
+     leaves earlier steps applied and later ones unattempted.")
   (observe [provider target]
-    "`{:observed/uid s-or-nil :observed/ready? bool}` for `target`.")
+    "`{:observed/uid s-or-nil :observed/generation n-or-nil :observed/ready?
+     bool}` for `target`; the generation is the one recorded at provision.")
+  (exec! [provider target command]
+    "Run `{:exec/argv [s] :exec/timeout-ms n}`. Returns `{:exec/exit n
+     :exec/stdout s :exec/stderr s}`. Refuses a target whose UID differs.")
+  (write-file! [provider target path text]
+    "Write UTF-8 `text` at `path` inside the environment.")
+  (read-file [provider target path]
+    "The UTF-8 text at `path` inside the environment, or an anomaly.")
+  (cancel! [provider target]
+    "Stop running work; returns `{:cancel/steps [Step]}`.")
   (deprovision! [provider target]
     "Delete everything `provision!` created. Returns `{:deprovision/steps
      [Step]}`; a delete accepted but not confirmed gone is

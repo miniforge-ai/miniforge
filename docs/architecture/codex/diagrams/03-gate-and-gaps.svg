@@ -19,9 +19,10 @@
 <text x="64" y="452" font-size="16" fill="#333">consultation-skipped.</text>
 <rect x="48" y="528" width="552" height="168" rx="8" fill="#fff2cc" stroke="#d6b656" stroke-width="1.5"/>
 <text x="64" y="556" font-size="19" fill="#333" font-weight="bold">Pinned, never fetched: pass + warning</text>
-<text x="64" y="582" font-size="16" fill="#333">:codex-pin-not-fetched. With the body inlined, the agent saw it</text>
-<text x="64" y="605" font-size="16" fill="#333">anyway. When the planner sheds bodies to a manifest (N12 §6), it means</text>
-<text x="64" y="628" font-size="16" fill="#333">the landings were never seen, and the gate still only warns.</text>
+<text x="64" y="582" font-size="16" fill="#333">:codex-pin-not-fetched. Informational: the pin&#x27;s body is in the</text>
+<text x="64" y="605" font-size="16" fill="#333">prompt, even when the planner sheds other bodies to a manifest (N12</text>
+<text x="64" y="628" font-size="16" fill="#333">§6). Only a pin too big for the window on its own drops to the</text>
+<text x="64" y="651" font-size="16" fill="#333">manifest.</text>
 <rect x="48" y="712" width="552" height="288" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
 <text x="64" y="740" font-size="19" fill="#333" font-weight="bold">Warnings are kept</text>
 <text x="64" y="766" font-size="16" fill="#333">A warning never changes the decision, so the decision envelope cannot</text>
