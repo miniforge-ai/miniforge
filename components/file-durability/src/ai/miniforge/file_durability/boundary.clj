@@ -52,7 +52,7 @@
                        {:durability/path (str path)
                         :durability/cleanup :unresolved}))
 
-(defn- ^{:stratum 1} failure [operation file]
+(defn ^{:stratum 1} io-failure [operation file]
   (anomaly/anomaly :fault (t :file/io-failed)
                    {:durability/operation operation
                     :durability/path (str file)}))
@@ -66,11 +66,11 @@
    (try+
      (completed-value (action))
      (catch InterruptedException _
-       (let [result (failure operation file)]
+       (let [result (io-failure operation file)]
          (.interrupt (Thread/currentThread))
          result))
      (catch anomaly/anomaly? result result)
-     (catch Exception _ (failure operation file)))))
+     (catch Exception _ (io-failure operation file)))))
 
 (comment
-  (failure :confirm nil))
+  (io-failure :confirm nil))

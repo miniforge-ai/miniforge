@@ -23,6 +23,11 @@
 (defn- ^{:stratum 0} interrupted-native-wait! [_]
   (throw (InterruptedException.)))
 
+(defn- ^{:stratum 0} fail-host-release! [signal! root marker]
+  (if (= :host-released marker)
+    (throw (java.io.IOException.))
+    (signal! root marker)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} verify-denial! [mode root]
@@ -64,22 +69,27 @@
         (Thread/interrupted)
         (denial/dispose! observed)))))
 
-(defn- ^{:stratum 1} verify-unconfirmed-exit! [interrupted? root]
+(defn- ^{:stratum 1} verify-unconfirmed-exit! [mode root]
   (let [observed (volatile! nil)
         limits (assoc fixtures/limits :lock/timeout-ms handshake-budget-ms)
         pause (ns-resolve 'ai.miniforge.file-durability.boundary.lock-protocol 'pause!)
-        overrides (cond-> (assoc (denial/overrides :timeout observed) #'exit/stop! (constantly false))
-                    interrupted? (assoc pause interrupted-native-wait!))]
+        peer-mode (if (= :io mode) :false-lock :timeout)
+        overrides (cond-> (assoc (denial/overrides peer-mode observed) #'exit/stop! (constantly false))
+                    (= :interrupted mode) (assoc pause interrupted-native-wait!)
+                    (= :io mode) (assoc #'protocol/signal! (partial fail-host-release! protocol/signal!)))]
     (try+
       (let [reply (with-redefs-fn overrides
                     #(durability/verify-runtime-locks! (fs/file (fs/real-path root)) (fixtures/require-peer!) limits))
             flagged? (Thread/interrupted)
             [child scratch] @observed]
         (is (= :anomalies.file-durability/unreaped-peer (anomaly/subtype reply)))
-        (is (= interrupted? flagged?))
+        (is (= (= :interrupted mode) flagged?))
         (is (= (str scratch) (get-in reply [:anomaly/data :durability/path])))
         (is (.isAlive ^Process (:proc child)))
-        (is (fs/exists? scratch)))
+        (is (fs/exists? scratch))
+        (when (= :io mode)
+          (is (= :fault (get-in reply [:anomaly/data :durability/primary-failure :anomaly/type])))
+          (is (= :native-probe (get-in reply [:anomaly/data :durability/primary-failure :anomaly/data :durability/operation])))))
       (finally (denial/dispose! observed)))))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -92,7 +102,7 @@
   (support/with-root verify-interrupted-wait!))
 
 (deftest ^{:stratum 2 :integration true} test-unconfirmed-exit-never-qualifies-even-after-interruption
-  (doseq [interrupted? [false true]]
-    (support/with-root (partial verify-unconfirmed-exit! interrupted?))))
+  (doseq [mode [:timeout :interrupted :io]]
+    (support/with-root (partial verify-unconfirmed-exit! mode))))
 
 (comment (clojure.test/run-tests 'ai.miniforge.file-durability.lock-denial-integration-test))

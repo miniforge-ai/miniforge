@@ -29,10 +29,12 @@
                        ai.miniforge.file-durability.lock-qualification-integration-test
                        ai.miniforge.file-durability.directory-pin-scan-test
                        ai.miniforge.file-durability.owned-resource-integration-test
+                       ai.miniforge.file-durability.owned-resource-failure-test
                        ai.miniforge.file-durability.directory-pin-integration-test
                        ai.miniforge.file-durability.attached-directory-integration-test
                        ai.miniforge.file-durability.native-process-exit-integration-test
-                       ai.miniforge.file-durability.probe-cleanup-integration-test]]
+                       ai.miniforge.file-durability.probe-cleanup-integration-test
+                       ai.miniforge.file-durability.probe-failure-context-integration-test]]
           (clojure.core/run! require suites)
           (let [{:keys [fail error]} (apply clojure.test/run-tests suites)]
             (when-not (zero? (+ fail error))

@@ -35,6 +35,10 @@ if death cannot be confirmed. This refusal also propagates after interruption;
 it never becomes successful proof. Tests observe death at deletion and return,
 without a later grace wait. Independent fixture teardown waits only after those
 assertions and cannot turn a failed readiness assertion green.
+Merged PR #2563 preserves the explicit retained-scratch diagnostic and sanitized
+primary failure when handshake I/O fails before cleanup. Public-API regressions
+cover timeout, interruption and an actual host-release publication failure;
+existing cancellation behavior and all prior coverage remain intact.
 Bounds govern cooperative marker and exit waits; native filesystem and process
 launch calls are not preempted by those clocks.
 
@@ -45,16 +49,16 @@ only peer launch for deliberately faulty disposable peers. Check both Java 21
 products, source Babashka and a fresh package; prove negative controls and safe
 REPL examples. Include the native proof in the Darwin CI packet.
 
-Completed validation after composing merged PRs #2557 and #2560:
+Completed validation after composing merged PRs #2557, #2560, #2562 and #2563:
 
-- The combined native packet passes 43 tests / 210 assertions in each of both
+- The combined native packet passes 49 tests / 249 assertions in each of both
   Java 21 products, source Babashka and a fresh class-stripped CLI package.
   This includes existing native storage, pin and cleanup suites; the new
-  peer-only packet is 15 / 97 and passes the actual project integration alias.
+  peer-only packet is 15 / 105 and passes the actual project integration alias.
 - Seven independent negative controls fail with zero errors on Java 21 and
   Babashka: mutual exclusion (1), owned-peer termination (4), marker expiry (1),
   runtime identity (1), shared host deadline (1), cancellation restoration (1),
-  and the explicit unresolved-termination diagnostic (4).
+  and the explicit unresolved-termination diagnostic (8).
 - Fourteen exact safe examples from thirteen namespaces pass on both runtimes.
 - The task classpath regression passes 1 test / 1 assertion. The native peer
   subset also passes the real project integration alias, without extra paths.
@@ -74,6 +78,8 @@ in PR #2555.
 Merged PR #2533 supplies protected directories and publication checks. The pin
 prerequisite PR #2557 is independent; both precede qualification in PR #2555.
 Merged PR #2560 supplies acknowledged native process cleanup.
+Merged PR #2562 supplies trusted peer configuration types; #2563 preserves
+cleanup failure provenance through the public exception-to-anomaly boundary.
 
 ## Checklist
 

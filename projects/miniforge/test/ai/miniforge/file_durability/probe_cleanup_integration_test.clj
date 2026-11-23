@@ -24,28 +24,22 @@
     (is (not (fs/exists? @observed)))))
 
 (defn- ^{:stratum 0} verify-retained! [parent child _handles]
-  (let [observed (volatile! nil)
-        operation (partial ownership/register! observed child :complete)
-        actual (with-redefs-fn {ownership/signal-native (constantly nil)}
-                 #(ownership/capture! parent fixtures/refusal-ms operation))
-        failure (:object actual)]
+  (let [observation (ownership/capture-retained! parent child :complete)
+        failure (get-in observation [:actual :object])]
     (is (anomaly/anomaly? failure))
     (is (= :unavailable (:anomaly/type failure)))
     (is (= :unresolved (get-in failure [:anomaly/data :durability/cleanup])))
-    (is (= (str @observed) (get-in failure [:anomaly/data :durability/path])))
+    (is (= (str (:root observation)) (get-in failure [:anomaly/data :durability/path])))
     (is (.isAlive ^Process (:proc child)))
-    (is (fs/exists? @observed))))
+    (is (fs/exists? (:root observation)))))
 
 (defn- ^{:stratum 0} verify-fatal-retained! [parent child _handles]
-  (let [observed (volatile! nil)
-        failure (Error.)
-        operation (partial ownership/register! observed child failure)
-        actual (with-redefs-fn {ownership/signal-native (constantly nil)}
-                 #(ownership/capture! parent fixtures/refusal-ms operation))]
-    (is (identical? failure (:thrown actual)))
+  (let [failure (Error.)
+        observation (ownership/capture-retained! parent child failure)]
+    (is (identical? failure (get-in observation [:actual :thrown])))
     (is (= 1 (count (.getSuppressed failure))))
     (is (.isAlive ^Process (:proc child)))
-    (is (fs/exists? @observed))))
+    (is (fs/exists? (:root observation)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
