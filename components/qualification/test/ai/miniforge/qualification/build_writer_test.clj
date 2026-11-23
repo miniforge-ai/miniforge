@@ -122,7 +122,7 @@
       (is (.startsWith (.getCanonicalPath (io/file json)) (str base "/"))))))
 
 (deftest ^{:stratum 1} test-writer-refuses-escapes-and-merged-keys
-  (testing "given a symlinked gate directory, two keys one JSON property, or EDN that would not read back → an anomaly; an existing JSON file → java.nio throws; no new file"
+  (testing "given a symlinked gate directory, two keys one JSON property (also inside a Java map), or EDN that would not read back → an anomaly; an existing JSON file → java.nio throws; no new file"
     (let [dir     (temp-dir)
           outside (temp-dir)]
       (Files/createSymbolicLink (.toPath (io/file dir "fixture.gate")) (.toPath (io/file outside))
@@ -132,7 +132,8 @@
     (let [dir (temp-dir)]
       (is (anomaly/anomaly? (writer/write-report! dir (assoc report :report/extra {:sink/calls 0 "sink/calls" 1}))))
       (is (empty? (.list (io/file dir)))))
-    (doseq [unreadable [(assoc report :report/gate-title "\uD800") (assoc report :report/extra (keyword "a b"))]]
+    (doseq [unreadable [(assoc report :report/gate-title "\uD800") (assoc report :report/extra (keyword "a b"))
+                        (assoc report :report/extra [(java.util.HashMap. {:a/b 1 "a/b" 2})])]]
       (let [dir (temp-dir)]
         (is (anomaly/anomaly? (writer/write-report! dir unreadable)))
         (is (empty? (.list (io/file dir))))))

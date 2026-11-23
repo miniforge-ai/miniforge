@@ -21,6 +21,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.qualification.messages :as msg]
+   [ai.miniforge.qualification.vocabulary :as vocab]
    [cheshire.core :as json]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
@@ -126,7 +127,8 @@
 (defn ^{:stratum 2} write-report!
   "Write `report` under `out-dir` as EDN and JSON; returns the paths. Returns
    an `:invalid-input` anomaly, writing nothing, when a path leaves `out-dir`
-   (as written or through a symlink), when JSON would merge two keys, or when
+   (as written or through a symlink), when JSON would merge two keys or the
+   report holds a Java collection the key check cannot see into, or when
    the EDN would not read back as `report`. java.nio's own exceptions (a file
    exists, a write fails) reach the caller, leaving no new file."
   [out-dir report]
@@ -136,6 +138,7 @@
     (or (cond
           (not (and (inside? out-dir edn) (inside? out-dir json))) (refusal :write/path-leaves-out-dir out-dir paths)
           (not json-body)                     (refusal :write/json-key-collision out-dir paths)
+          (some vocab/java-collection? (tree-seq coll? seq report)) (refusal :write/java-collection out-dir paths)
           (not (reads-back? edn-body report)) (refusal :write/edn-does-not-read-back out-dir paths))
         (do (io/make-parents edn)
             (if-not (and (real-inside? out-dir edn) (real-inside? out-dir json))

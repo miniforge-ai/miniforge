@@ -68,7 +68,7 @@
   (try+
    (let [text (content-hash/canonical-edn x)]
      (and (not-any? #(or (and (map? %) (some coll? (keys %)))
-                         (and (or (instance? java.util.Map %) (instance? java.util.Collection %)) (not (coll? %))))
+                         (vocab/java-collection? %))
                     (tree-seq coll? seq x))
           (= text (String. (.getBytes ^String text "UTF-8") "UTF-8"))
           (= x (edn/read-string text) (edn/read-string (pr-str x)))))

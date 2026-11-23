@@ -16,6 +16,7 @@
   :write/json-key-collision         "two keys in one map would write the same JSON property"
   :write/directory-resolves-outside "report directory resolves outside the output directory"
   :write/edn-does-not-read-back     "the report's EDN would not read back as the report"
+  :write/java-collection           "the report holds a Java collection, whose keys the JSON check cannot see"
 
   ;; Summary (run.clj)
   :summary/verdict          "Qualification {gate}: {verdict}, {passed} of {total} criteria passed"
