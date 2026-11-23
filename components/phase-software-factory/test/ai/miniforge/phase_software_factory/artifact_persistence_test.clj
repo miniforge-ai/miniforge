@@ -26,6 +26,7 @@
   (:require
    [clojure.test :refer [deftest testing is use-fixtures]]
    [clojure.java.io :as io]
+   [clojure.java.shell :as shell]
    [babashka.fs :as fs]
    ;; Required for defmethod side effects (register phase handlers)
    #_{:clj-kondo/ignore [:unused-namespace]}
@@ -49,10 +50,17 @@
 (def ^{:stratum 0} phase-test-config-resource
   "config/phase/test-support-namespaces.edn")
 
-(defn ^{:stratum 0} create-temp-worktree []
+(defn ^{:stratum 0} create-temp-worktree
+  "A temp dir initialized as a git repository. Release scans the worktree
+   with `git status`, and a directory that is not a repo is a scan failure,
+   not a clean worktree."
+  []
   (let [temp-dir (io/file (System/getProperty "java.io.tmpdir")
-                          (str "artifact-persist-test-" (random-uuid)))]
-    (.mkdirs temp-dir)
+                          (str "artifact-persist-test-" (random-uuid)))
+        _        (.mkdirs temp-dir)
+        {:keys [exit err]} (shell/sh "git" "init" "-q" :dir (.getPath temp-dir))]
+    (when-not (zero? exit)
+      (throw (ex-info "git init failed in test fixture" {:exit exit :err err})))
     (.getPath temp-dir)))
 
 (defn ^{:stratum 0} cleanup-temp-worktree [dir-path]

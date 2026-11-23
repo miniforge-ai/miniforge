@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.chain-events-test
   "Tests for chain lifecycle event emission."
   (:require
@@ -25,39 +24,40 @@
    [ai.miniforge.workflow.runner :as runner]
    [ai.miniforge.event-stream.interface :as event-stream]))
 
-;------------------------------------------------------------------------------ Helpers
+;------------------------------------------------------------------------------ Layer 0
 
-(defn create-test-stream
+;------------------------------------------------------------------------------ Helpers
+(defn ^{:stratum 0} create-test-stream
   "Create a minimal event stream with no sinks for testing."
   []
   (event-stream/create-event-stream {:sinks []}))
 
-(defn event-types
+(defn ^{:stratum 0} event-types
   "Extract ordered event types from a stream."
   [stream]
   (mapv :event/type (:events @stream)))
 
-(defn mock-load-workflow
+(defn ^{:stratum 0} mock-load-workflow
   "Mock load-workflow that returns a stub workflow."
   [_wf-id _version _opts]
   {:workflow {:workflow/id :mock
               :workflow/pipeline [{:phase :plan}]}
    :source :mock})
 
-(defn mock-pipeline-success
+(defn ^{:stratum 0} mock-pipeline-success
   "Mock run-pipeline that always succeeds."
-  [_workflow _input _opts]
-  {:execution/id (random-uuid)
+  [_workflow _input opts]
+  {:execution/id (:workflow-id opts)
    :execution/status :completed
    :execution/output {:artifacts []
                       :phase-results {}
                       :last-phase-result {:plan "the-plan"}
                       :status :completed}})
 
-(defn mock-pipeline-failure
+(defn ^{:stratum 0} mock-pipeline-failure
   "Mock run-pipeline that always fails."
-  [_workflow _input _opts]
-  {:execution/id (random-uuid)
+  [_workflow _input opts]
+  {:execution/id (:workflow-id opts)
    :execution/status :failed
    :execution/output {:artifacts []
                       :phase-results {}
@@ -65,17 +65,19 @@
                       :status :failed}
    :execution/error "LLM timeout"})
 
-(defmacro with-chain-mocks
+;------------------------------------------------------------------------------ Layer 1
+
+(defmacro ^{:stratum 1} with-chain-mocks
   "Run body with load-workflow and run-pipeline mocked."
   [pipeline-fn & body]
   `(with-redefs [runner/run-pipeline ~pipeline-fn
                  loader/load-workflow mock-load-workflow]
      ~@body))
 
-;------------------------------------------------------------------------------ Layer 0
-;; Success path event emission
+;------------------------------------------------------------------------------ Layer 2
 
-(deftest chain-events-success-test
+;; Success path event emission
+(deftest ^{:stratum 2} chain-events-success-test
   (testing "successful 2-step chain emits correct event sequence"
     (let [stream (create-test-stream)
           chain-def {:chain/id :test-chain
@@ -113,10 +115,8 @@
             (is (= 2 (:chain/step-count completed)))
             (is (nat-int? (:chain/duration-ms completed)))))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Failure path event emission
-
-(deftest chain-events-failure-test
+(deftest ^{:stratum 2} chain-events-failure-test
   (testing "failed step emits step-failed and chain-failed events"
     (let [stream (create-test-stream)
           chain-def {:chain/id :fail-chain
@@ -148,10 +148,8 @@
             (is (= :step-1 (:chain/failed-step chain-failed)))
             (is (= "LLM timeout" (:chain/error chain-failed)))))))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; No event-stream — silent execution
-
-(deftest chain-no-event-stream-test
+(deftest ^{:stratum 2} chain-no-event-stream-test
   (testing "chain runs silently when no event-stream in opts"
     (with-chain-mocks mock-pipeline-success
       (let [result (chain/run-chain

@@ -11,6 +11,10 @@
   :selector/none-available            "No OCI-compatible container runtime is available."
   :selector/executable-requires-kind  "An :executable/:docker-path override requires an explicit :runtime-kind."
 
+  :kubernetes/invalid-deadline "Kubernetes capsule :resources/timeout-seconds must be a positive integer within the signed 64-bit range."
+  :kubernetes/invalid-setting "Invalid Kubernetes executor setting: {key}."
+  :kubernetes/job-creation-unconfirmed "Kubernetes did not confirm creation of the exact Job. Reconcile its identity before retrying."
+
   ;; OCI runtime adapter diagnostics
   :oci/acquire-failed        "OCI runtime acquire failed"
   :oci/acquire-deadline      "[oci-cli] acquire-environment! deadline {ms}ms exceeded; cancelling runtime subprocess."
@@ -18,9 +22,22 @@
   :oci/command-interrupted   "Runtime command interrupted"
   :oci/command-timeout       "Runtime command exceeded {ms}ms deadline — process destroyed"
   :oci/command-timeout-log   "[oci-cli] runtime command timeout {ms}ms exceeded; destroying process tree."
+  :oci/output-limit          "Runtime command output passed the {bytes}-byte capture limit — process stopped"
   :oci/command-failed        "Command failed"
   :oci/command-failed-detail "{prefix}: {command}{stderr}"
   :oci/bootstrap-failed      "Workspace bootstrap failed"
+  :oci/git-too-old           "The task image's git ({version}) is older than 2.31, which per-command git credentials need"
+  :oci/image-env-unreadable  "Cannot read the ENV of image {image}, so an untrusted capsule cannot clear the secrets it sets"
+  :oci/env-line-break        "Container env entries whose name is not a plain identifier or whose value has a line break cannot be passed safely: {names}"
+  :oci/env-name-refused      "Container env names must be plain identifiers ([A-Za-z_][A-Za-z0-9_]*) and not DOCKER_CUSTOM_HEADERS; refused: {names}"
+
+  ;; Kubernetes observations
+  :kubernetes/pod-not-found "No pod found for job"
+  :kubernetes/pod-not-cached "Pod not in cache"
+  :kubernetes/pod-timeout "Timed out waiting for pod to be ready"
+  :kubernetes/pod-interrupted "Pod readiness was interrupted"
+  :kubernetes/pod-ended "Pod ended with status: {phase}"
+  :kubernetes/invalid-defaults "Invalid packaged Kubernetes projection defaults"
 
   ;; State management
   :state/task-not-found          "Task {task-id} not found"

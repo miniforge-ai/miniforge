@@ -22,7 +22,8 @@
    - :check  (fn [artifact ctx] -> {:passed? bool :errors [...]})
    - :repair (fn [artifact errors ctx] -> {:success? bool :artifact ...})
 
-   Pattern borrowed from Ixi's interceptor registry.")
+   Pattern borrowed from Ixi's interceptor registry."
+  (:require [ai.miniforge.gate.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -50,18 +51,17 @@
 (defmethod ^{:stratum 0} get-gate :default
   [gate-kw]
   {:name gate-kw
-   :description "Unknown gate (fail-closed)"
+   :description (messages/t :registry/unknown-description)
    :check (fn [_artifact _ctx]
             {:passed? false
              :errors [{:type :unknown-gate
-                       :message (str "Unknown gate: " gate-kw
-                                     " — no registered implementation")}]})
+                       :message (messages/t :registry/unknown-gate {:gate gate-kw})}]})
    :repair nil})
 
 (defmethod ^{:stratum 0} get-gate :noop
   [_]
   {:name :noop
-   :description "Intentional pass-through (no gate)"
+   :description (messages/t :registry/noop-description)
    :check (fn [_artifact _ctx] {:passed? true})
    :repair nil})
 

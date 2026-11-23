@@ -7,9 +7,15 @@
         ai.miniforge/logging {:local/root "../logging"}
         ai.miniforge/messages {:local/root "../messages"}
         ai.miniforge/schema {:local/root "../schema"}
+        ai.miniforge/subprocess {:local/root "../subprocess"}
         ai.miniforge/agent {:local/root "../agent"}
+        ai.miniforge/llm {:local/root "../llm"}
+        ai.miniforge/redaction {:local/root "../redaction"}
         ai.miniforge/artifact {:local/root "../artifact"}
-        ai.miniforge/event-stream {:local/root "../event-stream"}}
+        ai.miniforge/event-stream {:local/root "../event-stream"}
+        cheshire/cheshire {:mvn/version "5.13.0"}
+        metosin/malli {:mvn/version "0.16.4"}
+        slingshot/slingshot {:mvn/version "0.12.2"}}
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps {io.github.cognitect-labs/test-runner
                                {:git/tag "v0.5.1" :git/sha "dfb30dd"}}}}}

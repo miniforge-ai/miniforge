@@ -14,6 +14,10 @@
   {:commit! commit!
    :close! close!})
 
+(defn- ^{:stratum 0} recovered-records [store]
+  (->> @(get-in store [:journal :state]) :committed vals
+       (sort-by (comp :event/sequence-number :event)) vec))
+
 (defn- ^{:stratum 0} memory-receipt [_ event] event)
 
 (defn- ^{:stratum 0} no-close! [] nil)
@@ -27,7 +31,8 @@
 (defn ^{:stratum 1} durable-store [directory]
   (let [store (storage/open! directory)]
     (if (anomaly/anomaly? store) store
-        (ports (partial storage/commit! store) (partial storage/close! store)))))
+        (assoc (ports (partial storage/commit! store) (partial storage/close! store))
+               :recovered-records (recovered-records store)))))
 
 (comment
   ::publication-storage-ports)

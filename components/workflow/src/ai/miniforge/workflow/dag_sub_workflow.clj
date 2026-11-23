@@ -32,11 +32,33 @@
    multi-parent base-branch resolution."
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
+   [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.workflow.dag-merge :as dag-merge]
    [ai.miniforge.workflow.dag-merge-anomaly :as merge-anomaly]
-   [ai.miniforge.workflow.dag-plan :as dag-plan]))
+   [ai.miniforge.workflow.dag-plan :as dag-plan]
+   [ai.miniforge.workflow.stop-signal :as stop-signal]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} merge-parents
+  "merge-parent-branches! for a multi-parent task, unless the run is
+   stopped. The merge runs before the task's sub-workflow, so the run's
+   cancel is bound here for the resolution agent's LLM calls
+   (`llm/call-with-cancel-signal`). Git steps run to their end. A merge
+   that ends under a stopped run is the task's stop: the cancel may have
+   cut its resolution short."
+  [context task-def]
+  (let [control-state (:control-state context)
+        stopped #(when (stop-signal/stopped? control-state)
+                   (merge-anomaly/merge-stopped-anomaly (:task/id task-def)))]
+    (or (stopped)
+        (let [merged (llm/call-with-cancel-signal
+                      #(stop-signal/stopped? control-state)
+                      #(dag-merge/merge-parent-branches! context task-def))]
+          (if-let [stop (stopped)]
+            ;; The merge's own failure, if any, is kept for the operator.
+            (cond-> stop (merge-anomaly/merge-error? merged) (assoc :merge/failure merged))
+            merged)))))
 
 (defn ^{:stratum 0} task-sub-workflow
   "Build a sub-workflow config for a single DAG task.
@@ -91,7 +113,11 @@
      (get-in context [:execution/input :spec/path])
      (assoc :spec/path (get-in context [:execution/input :spec/path]))
      (get context :execution/id)
-     (assoc :workflow/parent-id (get context :execution/id)))))
+     (assoc :workflow/parent-id (get context :execution/id))
+     ;; The parent's lineage, which outlives its attempt ids: the task's
+     ;; release branch and PR are keyed on it.
+     (get context :execution/origin-id)
+     (assoc :workflow/origin-id (get context :execution/origin-id)))))
 
 (defn- ^{:stratum 0} resolve-task-base-branch
   "Look up the branch task-def's scratch worktree should be forked from.
@@ -136,6 +162,12 @@
    Disables DAG execution to prevent recursion and skips lifecycle events
    (parent workflow owns those).
 
+   Carries the parent run's `:control-state` (installed on context by
+   `execute-dag-loop`), so a pause or cancel aimed at the parent reaches
+   the sub-workflow's runner at its next phase boundary. Without it the
+   runner session creates a fresh control atom nothing can reach, and
+   the task runs through release and opens its PR after a cancel.
+
    When `task-def` is supplied, resolves its dependency to a persisted
    branch and passes it as `:branch` so the sub-workflow's
    `acquire-environment!` forks off that branch instead of the spec
@@ -146,8 +178,9 @@
    - Multi-dep (v2), merge succeeds → the merged ref produced by
      `merge-parent-branches!` (`:branch` set).
    - Multi-dep (v2), merge produces a typed anomaly (conflict /
-     unrelated histories / branch unresolvable / strategy unsupported)
-     → `:branch` is OMITTED and the anomaly is surfaced via
+     unrelated histories / branch unresolvable / strategy unsupported,
+     or `:anomalies/dag-merge-stopped` for a run cancelled before or
+     during the merge) → `:branch` is OMITTED and the anomaly is surfaced via
      `:dag/merge-anomaly` on opts. `run-mini-workflow` checks for this
      and short-circuits with a structured failure rather than running a
      doomed sub-workflow against a stale base.
@@ -171,7 +204,7 @@
                        nil
 
                        (dag/multi-parent? deps)
-                       (dag-merge/merge-parent-branches! context task-def)
+                       (merge-parents context task-def)
 
                        :else
                        ;; v1 single-parent path returns a branch string for
@@ -213,6 +246,7 @@
        (:event-stream context)     (assoc :event-stream (:event-stream context))
        (get-in context [:execution/opts :event-stream])
        (assoc :event-stream (get-in context [:execution/opts :event-stream]))
+       (:control-state context) (assoc :control-state (:control-state context))
        resolved-branch (assoc :branch resolved-branch)
        pr-base-branch  (assoc :release/base-branch pr-base-branch)
        merge-anomaly  (assoc :dag/merge-anomaly merge-anomaly)))))

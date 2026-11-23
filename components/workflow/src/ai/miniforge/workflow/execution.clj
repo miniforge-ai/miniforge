@@ -16,86 +16,56 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.workflow.execution
-  "Phase step execution: pick the active phase's interceptor, run it
-   through enter -> gates -> leave, then either hand a plan to the DAG
-   executor or apply the phase's transition.
-
-   The pieces live in sibling namespaces, split out because this file
-   held six strata (rule 210 allows three):
-   - `execution-lifecycle`: enter -> gates -> leave, and recording the result
-   - `execution-transition`: gate validation, result -> event, event -> machine
-   - `execution-dag`: DAG activation after the plan phase
-   - `execution-dag-sync`: copying sub-worktree changes into the parent
-   - `execution-result-summary`: keys-only result summaries for events
-   - `execution-events`: event publishing that never breaks execution"
-  (:require [ai.miniforge.workflow.execution-dag :as execution-dag]
-            [ai.miniforge.workflow.execution-lifecycle :as lifecycle]
-            [ai.miniforge.workflow.execution-transition :as transition]
+  "Select the active interceptor, then delegate its guarded lifecycle and transition."
+  (:require [ai.miniforge.workflow.execution-step :as step]
             [ai.miniforge.workflow.fsm :as workflow-fsm]
-            [ai.miniforge.workflow.messages :as messages]))
+            [ai.miniforge.workflow.messages :as messages]
+            [ai.miniforge.workflow.runner-outcome :as outcome]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Phase step execution
-(defn ^{:stratum 0} execute-phase-step
-  "Execute a single phase step and return updated context.
+(defn- ^{:stratum 0} active-entry [context]
+  (when-let [machine (:execution/fsm-machine context)]
+    (workflow-fsm/machine-active-phase-entry machine (:execution/fsm-state context))))
 
-   Arguments:
-   - pipeline: Vector of interceptors
-   - ctx: Current execution context
-   - callbacks: Map with :on-phase-start, :on-phase-complete
-   - merge-metrics-fn: Function to merge phase metrics
-   - transition-to-completed-fn: Function to transition to completed state
-   - transition-to-failed-fn: Function to transition to failed state
+(defn- ^{:stratum 0} matching-interceptor [phase interceptor]
+  (when (= phase (get-in interceptor [:config :phase])) interceptor))
 
-   Returns updated context."
-  [pipeline ctx callbacks merge-metrics-fn transition-to-completed-fn transition-to-failed-fn]
-  (let [machine-entry (when-let [machine (:execution/fsm-machine ctx)]
-                        (workflow-fsm/machine-active-phase-entry machine
-                                                                 (:execution/fsm-state ctx)))
-        current-phase (:execution/current-phase ctx)
-        interceptor (cond
-                      machine-entry (get pipeline (:index machine-entry))
-                      current-phase (some #(when (= current-phase
-                                                   (get-in % [:config :phase]))
-                                         %)
-                                          pipeline)
-                      :else nil)
-        phase-name (get-in interceptor [:config :phase])
-        {:keys [on-phase-start on-phase-complete]} callbacks
-        ctx-with-phase (assoc ctx :execution/current-phase phase-name)]
-    (if-not interceptor
-      (let [phase-label (or current-phase
-                            (:phase machine-entry)
-                            :unknown)]
-        (-> ctx
-            (update :execution/errors conj
-                    {:type :missing-current-phase
-                     :phase phase-label
-                     :message (messages/t :status/no-transition-defined
-                                          {:state phase-label
-                                           :event :phase/execute})})
-            (transition-to-failed-fn)))
-      (do
-        ;; Notify phase start
-        (when on-phase-start
-          (on-phase-start ctx-with-phase interceptor))
+(defn- ^{:stratum 0} missing-phase [context entry]
+  (cond
+    (:execution/current-phase context) (:execution/current-phase context)
+    (:phase entry) (:phase entry)
+    :else :unknown))
 
-        ;; Execute phase lifecycle: enter -> gates -> leave
-        (let [[ctx-after-lifecycle phase-result] (lifecycle/execute-phase-lifecycle interceptor ctx-with-phase)
-              ;; Process result: response chain + metrics + files + artifacts
-              ctx-processed (lifecycle/process-phase-result ctx-after-lifecycle phase-name phase-result merge-metrics-fn)]
+;------------------------------------------------------------------------------ Layer 1
 
-          ;; Notify phase complete
-          (when on-phase-complete
-            (on-phase-complete ctx-processed interceptor phase-result))
+(defn- ^{:stratum 1} select-interceptor [pipeline context entry]
+  (cond
+    entry (get pipeline (:index entry))
+    (:execution/current-phase context)
+    (some (partial matching-interceptor (:execution/current-phase context)) pipeline)
+    :else nil))
 
-          ;; After plan phase, attempt DAG parallelization before normal transition
-          (or (execution-dag/try-dag-execution ctx-processed phase-name phase-result pipeline
-                                               transition-to-completed-fn transition-to-failed-fn)
-              ;; Normal transition (non-plan phases, or plan not parallelizable)
-              (let [event (transition/determine-phase-event (:config interceptor)
-                                                            phase-result)]
-                (transition/apply-phase-transition ctx-processed event pipeline
-                                                   transition-to-completed-fn
-                                                   transition-to-failed-fn))))))))
+(defn- ^{:stratum 1} fail-missing-phase [context entry fail]
+  (let [phase (missing-phase context entry)
+        message (messages/t :status/no-transition-defined {:state phase :event :phase/execute})
+        error (outcome/make-execution-error :missing-current-phase message {:phase phase})]
+    (-> context (update :execution/errors conj error) fail)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} execute-phase-step
+  "Run the active phase only when boundary callbacks accept it.
+   Callback anomalies fail execution before phase effects or subsequent transitions.
+   The public arity and legacy nil-returning observer callbacks remain supported."
+  [pipeline context callbacks merge-metrics-fn transition-to-completed-fn transition-to-failed-fn]
+  (let [entry (active-entry context)
+        interceptor (select-interceptor pipeline context entry)
+        ports {:merge-metrics merge-metrics-fn
+               :complete transition-to-completed-fn
+               :fail transition-to-failed-fn}]
+    (if interceptor
+      (step/execute-selected pipeline context callbacks interceptor ports)
+      (fail-missing-phase context entry transition-to-failed-fn))))
+
+(comment ::guarded-phase-execution)

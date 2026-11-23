@@ -37,16 +37,14 @@
 
    Arguments:
    - rule - Rule with :rule/applies-to
-   - artifact - Artifact with :artifact/path
+   - artifact - Artifact with :artifact/path, or :artifact/paths when it
+     spans several files (the rule applies when any path matches)
 
    Returns:
    - true if rule applies, false otherwise"
   [rule artifact]
-  (let [file-globs (get-in rule [:rule/applies-to :file-globs])
-        path (:artifact/path artifact "")]
-    (or (nil? file-globs)
-        (empty? file-globs)
-        (some #(registry-support/glob-matches? % path) file-globs))))
+  (registry-support/artifact-matches-globs?
+   (get-in rule [:rule/applies-to :file-globs]) artifact))
 
 (defn ^{:stratum 0} rule-applies-to-task?
   "Check if a rule applies to a task type.

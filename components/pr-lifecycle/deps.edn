@@ -7,6 +7,7 @@
         ai.miniforge/dag-executor {:local/root "../dag-executor"}
         ai.miniforge/fsm {:local/root "../fsm"}
         ai.miniforge/messages {:local/root "../messages"}
+        ai.miniforge/redaction {:local/root "../redaction"}
         ai.miniforge/release-executor {:local/root "../release-executor"}
         ai.miniforge/response {:local/root "../response"}
         ai.miniforge/loop {:local/root "../loop"}

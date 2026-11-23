@@ -39,7 +39,29 @@
                            :environments ["staging"]}}
    :opsv/risk-result {:score 0.1 :level :low :factors []}})
 
+(defn- ^{:stratum 0} recommendation-output []
+  {:opsv/actuation-events []
+   :opsv/actuation-record {:requested-actuation-mode :pr-only
+                           :effective-actuation-mode :recommend-only
+                           :governed-effects [] :pr-refs [] :apply-refs []}})
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} output-cannot-suppress-events-outside-host-owned-recovery
+  (let [stream (event-stream/create-event-stream {:sinks []})
+        ctx (event-context stream)]
+    (is (nil? (events/emit-phase-events! ctx :opsv/actuate (recommendation-output))))
+    (is (= [:opsv.actuation/emitted] (mapv :event/type (event-stream/get-events stream))))))
+
+(deftest ^{:stratum 1} retained-occurrences-do-not-reserve-new-legacy-positions
+  (let [stream (event-stream/create-event-stream {:sinks []})
+        ctx (assoc-in (event-context stream) [:execution/opts :opsv/evidence-base] {})
+        output (events/retain-actuation-events ctx (recommendation-output))
+        before (:sequence-numbers @stream)]
+    (is (= 1 (count (:opsv/actuation-events output))))
+    (dotimes [_ 2] (is (nil? (events/emit-phase-events! ctx :opsv/actuate output))))
+    (is (= before (:sequence-numbers @stream)))
+    (is (= [0] (mapv :event/sequence-number (event-stream/get-events stream))))))
 
 (defn- ^{:stratum 1} leave-planned-phase
   [ctx]
@@ -50,7 +72,7 @@
                    :result {:status :success :output planned-output}}))))
 
 (deftest ^{:stratum 1} test-policy-confidence-degrades-safely
-  (let [stream (event-stream/create-event-stream)
+  (let [stream (event-stream/create-event-stream {:sinks []})
         refs [(random-uuid)]
         ctx (assoc-in (event-context stream) [:execution/input :opsv/policy-diff-artifact-refs] refs)]
     (events/emit-phase-events!
@@ -63,7 +85,7 @@
     (is (= refs (:opsv/diff-artifact-refs (first (event-stream/get-events stream)))))))
 
 (deftest ^{:stratum 1} test-guardrail-abort-projection
-  (let [stream (event-stream/create-event-stream)
+  (let [stream (event-stream/create-event-stream {:sinks []})
         abort {:trigger :tail-latency
                :threshold {:milliseconds 500}
                :rollback-action :restore-previous-policy}]
@@ -94,7 +116,7 @@
                (:opsv/rollback-action abort-event)))))))
 
 (deftest ^{:stratum 1} test-invalid-projection-is-not-published
-  (let [stream (event-stream/create-event-stream)
+  (let [stream (event-stream/create-event-stream {:sinks []})
         result (events/emit-phase-events!
                 (event-context stream) :opsv/plan
                 (dissoc planned-output :opsv/experiment-pack-hash))]
@@ -104,7 +126,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} test-publication-rejection-fails-the-phase
-  (let [stream (event-stream/create-event-stream)
+  (let [stream (event-stream/create-event-stream {:sinks []})
         ctx (event-context stream)
         workflow-id (:execution/id ctx)
         _ (event-stream/quiesce! stream {:workflow-id workflow-id})
@@ -117,7 +139,7 @@
                   (get-in completed [:execution :phases-completed])))))
 
 (deftest ^{:stratum 2} test-evidence-accumulation-failure-fails-the-phase
-  (let [stream (event-stream/create-event-stream)
+  (let [stream (event-stream/create-event-stream {:sinks []})
         ctx (assoc (event-context stream)
                    :opsv/evidence-assembly-store
                    (evidence/create-opsv-assembly-store))

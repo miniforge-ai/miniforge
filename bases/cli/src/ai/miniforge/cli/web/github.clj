@@ -18,9 +18,11 @@
 (ns ai.miniforge.cli.web.github
   "GitHub CLI operations."
   (:require
+   [babashka.fs :as fs]
    [babashka.process :as process]
    [clojure.string :as str]
    [cheshire.core :as json]
+   [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.messages.interface :as messages]
    [ai.miniforge.cli.web.risk :as risk]
    [slingshot.slingshot :refer [try+]]))
@@ -40,15 +42,32 @@
 (defn ^{:stratum 0} sh-error-msg [result default]
   (str/trim (or (:err result) (:out result) default)))
 
+(defn ^{:stratum 0} check-claude-cli
+  "True when the claude CLI is on PATH. `fs/which` resolves it on every OS
+   (with PATHEXT on Windows, which has no `which` binary)."
+  []
+  (some? (fs/which "claude")))
+
+(defn ^{:stratum 0} ask-claude
+  "One text completion from the Claude CLI through the llm client:
+   {:success true :text <answer>} or {:success false :text <error>}. The
+   client runs a call outside an artifact session with no tools and none
+   of the operator's Claude Code settings, hooks or plugins, so a PR
+   title, body or diff in the prompt cannot get a tool run."
+  [prompt]
+  (let [result  (llm/complete (llm/create-client {:backend :claude}) {:prompt prompt})
+        error   (llm/get-error result)
+        message (str (if (map? error) (:message error) error))]
+    (if (llm/success? result)
+      {:success true :text (str/trim (str (llm/get-content result)))}
+      {:success false :text (if (str/blank? message) "Unknown" message)})))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} check-auth []
   (let [result (process/sh "gh" "auth" "status")]
     {:available (sh-success? result)
      :message (if (sh-success? result) "Authenticated" "Not authenticated")}))
-
-(defn ^{:stratum 1} check-claude-cli []
-  (sh-success? (process/sh "which" "claude")))
 
 (defn ^{:stratum 1} check-repo [repo]
   {:accessible (sh-success? (process/sh "gh" "repo" "view" repo "--json" "name"))
@@ -129,6 +148,18 @@
                 (str "❌ Failed to request changes: "
                      (sh-error-msg result "Unknown error. Check gh CLI authentication.")))}))
 
+(defn ^{:stratum 1} chat-about-pr [repo number question diff-context]
+  (if-not (check-claude-cli)
+    {:success false :response "❌ Claude CLI not available."}
+    (let [prompt (str "You are reviewing PR #" number " in " repo ".\n\n"
+                      "Here is the diff:\n```\n" (subs diff-context 0 (min 8000 (count diff-context))) "\n```\n\n"
+                      "User question: " question "\n\n"
+                      "Please provide a concise, helpful answer focused on the code changes.")
+          {:keys [success text]} (ask-claude prompt)]
+      (if success
+        {:success true :response text}
+        {:success false :response (str "❌ Claude CLI error: " text)}))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} fetch-all-prs [repos]
@@ -151,19 +182,7 @@
                           "PR Description: " (get pr-info :body "(none)") "\n\n"
                           "Diff preview:\n```\n" (subs diff 0 (min 6000 (count diff))) "\n```\n\n"
                           "Provide a 2-3 sentence summary covering what it does, concerns, and recommendation.")
-              result (process/sh "claude" "-p" prompt)]
-          (if (sh-success? result)
-            {:success true :summary (str/trim (:out result))}
-            {:success false :summary (str "Claude CLI error: " (sh-error-msg result "Unknown"))}))))))
-
-(defn ^{:stratum 2} chat-about-pr [repo number question diff-context]
-  (if-not (check-claude-cli)
-    {:success false :response "❌ Claude CLI not available."}
-    (let [prompt (str "You are reviewing PR #" number " in " repo ".\n\n"
-                      "Here is the diff:\n```\n" (subs diff-context 0 (min 8000 (count diff-context))) "\n```\n\n"
-                      "User question: " question "\n\n"
-                      "Please provide a concise, helpful answer focused on the code changes.")
-          result (process/sh "claude" "-p" prompt)]
-      (if (sh-success? result)
-        {:success true :response (str/trim (:out result))}
-        {:success false :response (str "❌ Claude CLI error: " (sh-error-msg result "Unknown"))}))))
+              {:keys [success text]} (ask-claude prompt)]
+          (if success
+            {:success true :summary text}
+            {:success false :summary (str "Claude CLI error: " text)}))))))

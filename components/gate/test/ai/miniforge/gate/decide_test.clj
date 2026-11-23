@@ -20,7 +20,8 @@
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.gate.decide :as decide]
-   [ai.miniforge.policy-pack.interface :as policy-pack]))
+   [ai.miniforge.policy-pack.interface :as policy-pack]
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -233,6 +234,20 @@
     (let [phase-env (decide/gates->envelope
                      {:results [{:passed? true :gate :lint}]} false)]
       (is (= :allow (:envelope/decision phase-env)))))
+  (testing "a canonical response/success result passes, as gate/passed?
+            says: no :passed? key is not a failure (#2376)"
+    (let [ok (assoc (response/success {:formattable-files []}) :gate :format)
+          phase-env (decide/gates->envelope {:passed? true :results [ok]} false)]
+      (is (= :allow (:envelope/decision phase-env)))
+      (is (empty? (:envelope/reasons phase-env)))))
+  (testing "a canonical response/error result denies, with its own message"
+    (let [bad (assoc (response/error "src/a.clj needs formatting") :gate :format)
+          phase-env (decide/gates->envelope {:passed? false :results [bad]} false)]
+      (is (= :deny (:envelope/decision phase-env)))
+      (is (= [:reason/gate-check-failed]
+             (mapv :reason/code (:envelope/reasons phase-env))))
+      (is (str/includes? (:reason/detail (first (:envelope/reasons phase-env)))
+                         "src/a.clj needs formatting"))))
   (testing "a passing policy gate's warn obligations survive to the phase envelope"
     (let [pol (classify+decide [(v :warn)])
           phase-env (decide/gates->envelope

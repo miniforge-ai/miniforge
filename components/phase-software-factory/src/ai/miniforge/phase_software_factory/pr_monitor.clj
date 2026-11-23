@@ -24,6 +24,7 @@
    Agent: none (orchestration only)
    Default gates: none"
   (:require [ai.miniforge.phase.interface :as phase]
+            [ai.miniforge.phase.interface.gate :as phase-gate]
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.workflow.interface.dag-prs :as dag-prs]))
 
@@ -72,6 +73,7 @@
             monitor-result (dag-prs/monitor-dag-prs
                             train-state pr-infos
                             {:worktree-path worktree-path
+                             :control-state (get-in ctx [:execution/opts :control-state])
                              :logger logger
                              :generate-fn (get-in ctx [:execution/generate-fn])
                              :event-bus (get-in ctx [:execution/event-bus])})
@@ -89,7 +91,11 @@
                       (if (:success? monitor-result)
                         (response/success result-data)
                         (response/failure "PR monitoring failed"
-                                          {:data {:failed-prs (:failed-prs monitor-result [])}})))
+                                          {:data (cond-> {:failed-prs (:failed-prs monitor-result [])}
+                                                   ;; A cancel ended monitoring: name what merged first.
+                                                   (:stopped? monitor-result)
+                                                   (assoc :stopped? true
+                                                          :merged-prs (:merged-prs monitor-result [])))})))
             (assoc :execution/train train-state))))))
 
 (defn ^{:stratum 0} leave-pr-monitor
@@ -97,12 +103,15 @@
   [ctx]
   (let [start-time (get-in ctx [:phase :started-at] (System/currentTimeMillis))
         end-time (System/currentTimeMillis)
-        duration-ms (- end-time start-time)]
+        duration-ms (- end-time start-time)
+        gate-failed? (phase-gate/gate-failed? (:phase ctx))]
     (-> ctx
         (assoc-in [:phase :ended-at] end-time)
         (assoc-in [:phase :duration-ms] duration-ms)
         (assoc-in [:metrics :pr-monitor :duration-ms] duration-ms)
-        (update-in [:execution :phases-completed] (fnil conj []) :pr-monitor)
+        (cond-> gate-failed? (assoc-in [:phase :status] :failed))
+        (cond-> (not gate-failed?)
+          (update-in [:execution :phases-completed] (fnil conj []) :pr-monitor))
         (update-in [:execution/metrics :duration-ms] (fnil + 0) duration-ms))))
 
 (defn ^{:stratum 0} error-pr-monitor

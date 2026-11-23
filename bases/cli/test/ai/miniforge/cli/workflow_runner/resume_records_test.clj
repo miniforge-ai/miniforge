@@ -22,7 +22,9 @@
    [ai.miniforge.cli.workflow-runner.resume-records :as sut]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.operator.interface :as operator]
+   [ai.miniforge.workflow.interface :as workflow]
    [cheshire.core :as json]
+   [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]))
 
@@ -37,6 +39,20 @@
       (f))))
 
 (def ^{:stratum 0} this-pid (.pid (java.lang.ProcessHandle/current)))
+
+(def ^{:stratum 0} concurrent-writer-count
+  "Writers racing on one record. More than the two a launcher and a
+   restarted process make, so a shared temp file is contended every run."
+  16)
+
+(defn- ^{:stratum 0} write-failure
+  "The exception a writer future ended with, or nil."
+  [writer]
+  (try @writer nil (catch java.util.concurrent.ExecutionException e e)))
+
+(defn- ^{:stratum 0} file-names
+  [^java.io.File dir]
+  (mapv #(.getName ^java.io.File %) (.listFiles dir)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -136,6 +152,8 @@
         (is (not (sut/target-live? workflow-id)))
         (with-redefs [operator/live-runner? (constantly true)]
           (is (sut/target-live? workflow-id) "a runner in this process"))
+        (with-redefs [workflow/run-owner (constantly {:owner/pid 1})]
+          (is (sut/target-live? workflow-id) "a process holding the run's owner lock"))
         (manifest! "active")
         (is (sut/target-live? workflow-id) "an active manifest whose owner is alive")
         (manifest! "active" (.minusSeconds (java.time.Instant/now) 120))
@@ -231,3 +249,23 @@
           (is (:resume/exited? (sut/with-child-pid record)) "a process older than the launch is not its child")
           (is (not (sut/launch-running? record 60000)))
           (finally (.destroy child)))))))
+
+(deftest ^{:stratum 1} write-edn-concurrent-writers-test
+  (with-temp-home
+    (fn []
+      (let [f (io/file (es/default-events-dir) "concurrent" "record.edn")
+            writers (doall (for [n (range concurrent-writer-count)]
+                             (future (#'sut/write-edn! f {:writer n}))))]
+        (is (empty? (keep write-failure writers)) "no writer loses its temp file to another")
+        (is (integer? (:writer (edn/read-string (slurp f)))) "the record is whole")
+        (is (= ["record.edn"] (file-names (.getParentFile f))) "no temp file is left behind")))))
+
+(deftest ^{:stratum 1} write-edn-failed-write-removes-its-temp-file-test
+  (with-temp-home
+    (fn []
+      (let [f (doto (io/file (es/default-events-dir) "blocked" "record.edn") io/make-parents)]
+        (.mkdir f)
+        (spit (io/file f "occupant") "")
+        (is (thrown? java.io.IOException (#'sut/write-edn! f {:writer 0}))
+            "a non-empty directory cannot be replaced by the record")
+        (is (= ["record.edn"] (file-names (.getParentFile f))) "the failed write's temp file is gone")))))

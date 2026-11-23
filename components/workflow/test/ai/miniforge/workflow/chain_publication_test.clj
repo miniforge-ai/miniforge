@@ -1,0 +1,172 @@
+;; Title: Miniforge.ai
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;; Licensed under the Apache License, Version 2.0.
+(ns ai.miniforge.workflow.chain-publication-test
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.event-stream.interface :as events]
+            [ai.miniforge.workflow.chain-event-legacy :as legacy]
+            [ai.miniforge.workflow.chain-execution-test-support :as support]
+            [ai.miniforge.workflow.chain-publication :as publication]
+            [ai.miniforge.workflow.interface :as workflow]
+            [ai.miniforge.workflow.loader :as loader]
+            [ai.miniforge.workflow.runner :as runner]
+            [clojure.test :refer [deftest is]]))
+
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} execute [calls status _definition _input opts]
+  (swap! calls conj (:workflow-id opts))
+  {:execution/id (:workflow-id opts) :execution/status status})
+
+(defn- ^{:stratum 0} emit [attempts failures _stream event]
+  (swap! attempts conj event)
+  (get failures (:event/type event) event))
+
+(def ^{:stratum 0} ^:private completed-events
+  [:chain/started :chain/step-started :chain/step-completed
+   :chain/step-started :chain/step-completed :chain/completed])
+
+(deftest ^{:stratum 0} real-quiesced-child-publication-is-a-failure
+  (let [stream (events/create-event-stream {:sinks []}) id (random-uuid)]
+    (events/quiesce! stream {:workflow-id id})
+    (is (= :unavailable
+           (:anomaly/type (publication/emit-step! {:event-stream stream :workflow-id id :chain/definition-id :chain}
+                                                  :chain/step-started {:step/id :only :step/workflow-id :workflow} 0 {}))))
+    (is (empty? (events/get-events stream)))))
+
+(deftest ^{:stratum 0} missing-or-mismatched-receipts-are-not-acknowledgments
+  (let [stream (events/create-event-stream {:sinks []})
+        event (events/chain-started stream :chain 1)]
+    (doseq [receipt [nil {} {:rejected? true} (assoc event :event/id (random-uuid))
+                     (dissoc event :event/sequence-number) (assoc event :event/type :chain/completed)
+                     (assoc event :event/version "unexpected")
+                     (assoc event :workflow/id (random-uuid))
+                     (update event :event/sequence-number inc)]]
+      (with-redefs [events/publish! (constantly receipt) legacy/draft (constantly event)]
+        (is (= :unavailable (:anomaly/type (publication/emit! {:event-stream stream} :chain/started {}))))))))
+
+(deftest ^{:stratum 0} failed-construction-never-reaches-publication
+  (let [calls (atom []) failure (anomaly/anomaly :invalid-input "Constructor refused" {})]
+    (with-redefs [events/publish! (fn [& args] (swap! calls conj args)) legacy/draft (constantly failure)]
+      (is (= failure (publication/emit! {:event-stream :unused} :chain/started {})))
+      (is (empty? @calls)))))
+
+(deftest ^{:stratum 0} current-receipts-must-preserve-authoritative-identity
+  (let [event {:event/id (random-uuid) :event/type :chain/started :event/version "2.0.0"
+               :scope/type :chain :chain/run-id (random-uuid)
+               :chain/definition-id :fixture :chain/definition-version "1.0.0"}
+        receipt (assoc event :event/sequence-number 0)
+        opts {:chain/event-stream :fixture}]
+    (with-redefs [events/create-chain-event-draft (constantly event)]
+      (with-redefs [events/publish! (constantly receipt)]
+        (is (= receipt (publication/emit! opts :chain/started {}))))
+      (doseq [field [:scope/type :chain/run-id :chain/definition-id :chain/definition-version]]
+        (with-redefs [events/publish! (constantly (dissoc receipt field))]
+          (is (= :unavailable (:anomaly/type (publication/emit! opts :chain/started {})))))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} redacted-failure-receipts-remain-valid
+  (let [stream (events/create-event-stream {:sinks []}) calls (atom [])
+        failing (comp #(assoc % :execution/error "Bearer abcdefghijklmnopqrstuvwxyz0123456789")
+                       (partial execute calls :failed))]
+    (with-redefs [loader/load-workflow support/loaded-workflow runner/run-pipeline failing]
+      (is (= :failed (:chain/status (workflow/run-chain (support/definition) {} {:event-stream stream}))))
+      (is (= 1 (count @calls))))))
+
+(defn- ^{:stratum 1} observed [failures status]
+  (let [calls (atom []) attempts (atom []) stream (events/create-event-stream {:sinks []})]
+    (with-redefs [loader/load-workflow support/loaded-workflow
+                  runner/run-pipeline (partial execute calls status)
+                  events/publish! (partial emit attempts failures)]
+      {:result (workflow/run-chain (support/definition) {} {:event-stream stream})
+       :calls @calls :attempts @attempts})))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} each-publication-failure-stops-dependent-execution
+  (let [failure (anomaly/anomaly :unavailable "Publication failed" {})]
+    (doseq [[type expected-count expected]
+            [[:chain/started 0 [:chain/started :chain/failed]]
+             [:chain/step-started 0 [:chain/started :chain/step-started :chain/failed]]
+             [:chain/step-completed 1 [:chain/started :chain/step-started :chain/step-completed :chain/step-failed :chain/failed]]
+             [:chain/completed 2 (conj completed-events :chain/failed)]]]
+      (let [{:keys [result calls attempts]} (observed {type failure} :completed)]
+        (is (= failure (update result :anomaly/data dissoc :workflow/id)))
+        (is (= expected-count (count calls)))
+        (is (= expected (mapv :event/type attempts)))
+        (is (= (when (#{:chain/step-started :chain/step-completed} type) :first)
+               (:chain/failed-step (peek attempts))))))))
+
+(deftest ^{:stratum 2} failure-path-publication-cannot-mask-a-missing-event
+  (doseq [type [:chain/step-failed :chain/failed]]
+    (let [failure (anomaly/anomaly :unavailable "Failure event unavailable" {})
+          {:keys [result calls]} (observed {type failure} :failed)]
+      (is (= failure (update result :anomaly/data dissoc :workflow/id)))
+      (is (= 1 (count calls))))))
+
+(deftest ^{:stratum 2} successful-publication-preserves-child-identities
+  (let [{:keys [result calls attempts]} (observed {} :completed)
+        starts (filter #(= :chain/step-started (:event/type %)) attempts)]
+    (is (= :completed (:chain/status result)))
+    (is (= completed-events (mapv :event/type attempts)))
+    (is (= calls (mapv :workflow/id starts)))
+    (is (= 2 (count (set calls))))))
+
+(deftest ^{:stratum 2} legacy-anomalies-and-rejections-stop-the-chain
+  (doseq [failure [{:anomaly/category :anomalies/unavailable}
+                   {:rejected? true :reason :workflow-quiesced}]]
+    (let [{:keys [result calls]} (observed {:chain/started failure} :completed)]
+      (is (anomaly/any-anomaly? result))
+      (is (empty? calls)))))
+
+(deftest ^{:stratum 2} failed-fallback-preserves-the-original-run-publication-error
+  (doseq [type [:chain/started :chain/completed]]
+    (let [original (anomaly/anomaly :unavailable "Lifecycle publication unavailable" {})
+          fallback (anomaly/anomaly :fault "Failure path unavailable" {})
+          expected (if (= type :chain/started) [:chain/started] completed-events)
+          {:keys [result attempts]} (observed {type original :chain/failed fallback} :completed)]
+      (is (= original result))
+      (is (nil? (:chain/failed-step (peek attempts))))
+      (is (= (conj expected :chain/failed) (mapv :event/type attempts))))))
+
+(deftest ^{:stratum 2} failed-step-publications-return-the-preallocated-child-identity
+  (doseq [[type status] [[:chain/step-started :completed]
+                        [:chain/step-completed :completed]
+                        [:chain/step-failed :failed]]
+          failure [(anomaly/anomaly :unavailable "Publication failed" {:original true})
+                   {:anomaly/category :anomalies/unavailable :original true}
+                   {:rejected? true :reason :workflow-quiesced}]]
+    (let [{:keys [result calls attempts]} (observed {type failure} status)
+          event (first (filter #(= type (:event/type %)) attempts))
+          id (:workflow/id event)
+          path (if (contains? result :anomaly/type) [:anomaly/data :workflow/id] [:workflow/id])]
+      (is (uuid? id))
+      (is (= id (get-in result path)))
+      (is (= (if (= type :chain/step-started) [] [id]) calls))
+      (when (anomaly/any-anomaly? failure)
+        (is (= (assoc-in failure path id) result))))))
+
+(deftest ^{:stratum 2} failed-step-fallback-keeps-child-identity-and-original-error
+  (let [original (anomaly/anomaly :unavailable "Step completion unavailable" {})
+        fallback (anomaly/anomaly :fault "Failure path unavailable" {})
+        {:keys [result calls attempts]} (observed {:chain/step-completed original
+                                                  :chain/step-failed fallback
+                                                  :chain/failed fallback} :completed)
+        id (first calls)
+        step-events (filter :step/index attempts)]
+    (is (= (assoc-in original [:anomaly/data :workflow/id] id) result))
+    (is (= [:chain/step-started :chain/step-completed :chain/step-failed] (mapv :event/type step-events)))
+    (is (= [id id id] (mapv :workflow/id step-events)))
+    (is (= 1 (count calls)))))
+
+(deftest ^{:stratum 2} failed-chain-failure-publication-retains-the-failed-child
+  (doseq [failure [(anomaly/anomaly :unavailable "Failure publication unavailable" {})
+                   {:anomaly/category :anomalies/unavailable}]]
+    (let [{:keys [result calls]} (observed {:chain/failed failure} :failed)
+          path (if (contains? result :anomaly/type) [:anomaly/data :workflow/id] [:workflow/id])]
+      (is (= 1 (count calls)))
+      (is (= (assoc-in failure path (first calls)) result)))))
+
+(comment
+  ::fail-closed-chain-publication)

@@ -22,6 +22,7 @@
    Agent: :planner
    Default gates: [:plan-complete]"
   (:require [ai.miniforge.phase.interface :as phase]
+            [ai.miniforge.phase.interface.gate :as phase-gate]
             [ai.miniforge.phase-software-factory.phase-config :as phase-config]
             [ai.miniforge.phase-software-factory.codex-pin :as codex-pin]
             [ai.miniforge.phase-software-factory.gap-wiring :as gap-wiring]
@@ -167,9 +168,15 @@
         metrics (-> (get result :metrics {:tokens (get result :tokens 0)
                                           :duration-ms duration-ms})
                     (assoc :duration-ms duration-ms))
+        ;; The workflow's gate validation projects a denial onto
+        ;; :phase/status. A denied plan fails whatever the planner returned;
+        ;; recomputing the status from the agent result alone let a denied
+        ;; plan leave as :completed and advance.
+        gate-failed? (phase-gate/gate-failed? (:phase ctx))
         ;; already-satisfied is a NEUTRAL success outcome, not a failure.
-        succeeded-or-done? (or success? already-satisfied?)
-        phase-status (cond already-satisfied? :already-satisfied
+        succeeded-or-done? (and (not gate-failed?) (or success? already-satisfied?))
+        phase-status (cond gate-failed?       :failed
+                           already-satisfied? :already-satisfied
                            success?           :completed
                            :else              :failed)
         updated-ctx (-> ctx
@@ -226,8 +233,7 @@
                                                       :tokens toks
                                                       :metrics {:tokens toks}}))))
                    r (validate-dag-readiness invoked)]
-               ;; SPEC §7.4.3 consultation provenance. The planner session does
-               ;; not surface :context-reads yet, so :pin-read? is nil (unknown).
+               ;; SPEC §7.4.3 consultation provenance; :pin-read? comes from the planner's §7.4.2 reads.
                ;; Attached on failures too (:output starts nil on
                ;; response/failure): a failed plan that consulted must not be
                ;; ledgered as one that never did. §7.7.2: the planner result
@@ -236,7 +242,8 @@
                ;; not `r`: validate-dag-readiness rebuilds its failure
                ;; response and would drop the channel keys.
                (codex-pin/attach-consultation
-                 r (codex-pin/consultation-summary codex-outcome nil
+                 r (codex-pin/consultation-summary codex-outcome
+                                                   (:context-reads invoked)
                                                    (:codex-answers invoked)
                                                    (:codex-answer-log invoked))))
      :rules-manifest rules-manifest}))

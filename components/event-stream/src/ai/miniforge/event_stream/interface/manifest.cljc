@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.interface.manifest
   "Public manifest/archive boundary for JVM workflow lifecycle hooks."
   #?(:bb
@@ -25,6 +24,14 @@
      (:require
       [ai.miniforge.event-stream.archive :as archive]
       [ai.miniforge.event-stream.manifest :as manifest])))
+
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} supported?
+  "True where the manifest and archive operations run (the JVM). False
+   under Babashka, the CLI's runtime, where each of them throws: a run
+   there keeps no manifest, as a spec run (`mf run <spec>`) never does."
+  #?(:bb false :clj true))
 
 #?(:bb
    (defn- jvm-only!

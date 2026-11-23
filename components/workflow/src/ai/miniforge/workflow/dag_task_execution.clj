@@ -132,7 +132,7 @@
         sub-opts     (dag-sub-workflow/task-sub-opts context task-def)
         merge-anomaly (:dag/merge-anomaly sub-opts)]
     (if merge-anomaly
-      ;; Multi-parent merge failed before we even entered the sub-workflow.
+      ;; Multi-parent merge failed, or the run stopped, before we entered the sub-workflow.
       ;; Surface the FULL typed anomaly map (not just its message) so
       ;; downstream consumers — workflow-result->dag-result, the dashboard,
       ;; the evidence bundle — can classify the failure by

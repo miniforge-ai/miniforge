@@ -9,7 +9,9 @@
         ai.miniforge/policy-clause {:local/root "../../components/policy-clause"}
         ai.miniforge/decision-envelope {:local/root "../../components/decision-envelope"}
         ai.miniforge/execution-grant {:local/root "../../components/execution-grant"}
+        ai.miniforge/kubernetes-target {:local/root "../../components/kubernetes-target"}
         ai.miniforge/file-durability {:local/root "../../components/file-durability"}
+        ai.miniforge/resource-cleanup {:local/root "../../components/resource-cleanup"}
         ai.miniforge/tenancy {:local/root "../../components/tenancy"}
         ai.miniforge/effect-transaction {:local/root "../../components/effect-transaction"}
         ai.miniforge/config {:local/root "../../components/config"}
@@ -42,6 +44,7 @@
         ai.miniforge/gate {:local/root "../../components/gate"}
         ai.miniforge/evidence-bundle {:local/root "../../components/evidence-bundle"}
         ai.miniforge/dag-executor {:local/root "../../components/dag-executor"}
+        ai.miniforge/subprocess {:local/root "../../components/subprocess"}
         ai.miniforge/policy-pack {:local/root "../../components/policy-pack"}
         ai.miniforge/tool-registry {:local/root "../../components/tool-registry"}
         ai.miniforge/operator {:local/root "../../components/operator"}

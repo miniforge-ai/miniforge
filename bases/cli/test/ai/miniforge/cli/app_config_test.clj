@@ -32,11 +32,12 @@
       (is (= (:display-name profile) (app-config/display-name)))
       (is (= (:description profile) (app-config/description)))
       (is (= (:tui-package profile) (app-config/tui-package))))
-    (testing "derived paths use the configured home dir"
-      (is (.endsWith (app-config/config-path)
-                     (str "/" (:home-dir-name profile) "/config.edn")))
-      (is (.endsWith (app-config/events-dir)
-                     (str "/" (:home-dir-name profile) "/events"))))))
+    (testing "with MINIFORGE_HOME unset, derived paths use the profile's home dir"
+      (with-redefs [profile/getenv (constantly nil)]
+        (is (.endsWith (app-config/config-path)
+                       (str "/" (:home-dir-name profile) "/config.edn")))
+        (is (.endsWith (app-config/events-dir)
+                       (str "/" (:home-dir-name profile) "/events")))))))
 
 (deftest ^{:stratum 0} app-profile-loads-resource-backed-config-test
   (testing "app profile delegates to the resource-backed config loader"

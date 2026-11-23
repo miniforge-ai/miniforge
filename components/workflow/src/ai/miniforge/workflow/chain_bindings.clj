@@ -6,6 +6,15 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn ^{:stratum 0} expression [declaration]
+  (if (map? declaration) (:binding/expression declaration) declaration))
+
+(defn ^{:stratum 0} required? [declaration]
+  (and (map? declaration) (true? (:binding/required? declaration))))
+
+(defn- ^{:stratum 0} detach-expression [value]
+  (if (vector? value) (into [] value) value))
+
 (defn- ^{:stratum 0} chain-input? [binding]
   (and (keyword? binding) (= "chain" (namespace binding))
        (.startsWith (name binding) "input.")))
@@ -22,12 +31,18 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} detach-declaration [declaration]
+  (if (map? declaration)
+    (update (into {} declaration) :binding/expression detach-expression)
+    (detach-expression declaration)))
+
 (defn ^{:stratum 1} resolve-binding [binding previous input]
-  (cond
-    (string? binding) binding
-    (chain-input? binding) (input-value binding input)
-    (vector? binding) (previous-value binding previous)
-    (keyword? binding) (get input binding)))
+  (let [value (expression binding)]
+    (cond
+      (string? value) value
+      (chain-input? value) (input-value value input)
+      (vector? value) (previous-value value previous)
+      (keyword? value) (get input value))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

@@ -19,16 +19,46 @@
   "Event-stream lifecycle and query API."
   (:require
    [ai.miniforge.event-stream.boundary.publication-input :as publication-input]
+   [ai.miniforge.event-stream.boundary.current-stream :as current-stream]
+   [ai.miniforge.event-stream.boundary.legacy-control :as legacy-control]
    [ai.miniforge.event-stream.core :as core]
-   [ai.miniforge.event-stream.envelope-draft :as draft]))
+   [ai.miniforge.event-stream.envelope-draft :as draft]
+   [ai.miniforge.event-stream.persisted-publication :as persisted]
+   [ai.miniforge.event-stream.retention :as retention]
+   [ai.miniforge.event-stream.sink-durability :as durability]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} prepare-current-publication
-  "Validate and redact a sequence-free chain v2, intervention v2, or Spec snapshot
+  "Validate and redact a sequence-free chain v2, intervention v2, Spec snapshot, OPSV or workflow lifecycle
    draft. Returns [scope draft] or an anomaly, not an acknowledgment. Other families
    are unsupported here. Historical replay and legacy publish! remain separate."
   publication-input/prepare)
+
+(def ^{:stratum 0} create-current-event-stream
+  "Own an existing canonical :journal-directory and restore supported typed records.
+   Supports chain v2, intervention v2, Spec snapshots, OPSV and workflow lifecycle drafts. No volatile fallback.
+   Optional :sinks are best-effort listeners after durable commit (default []).
+   Also accepts :logger and :snowflake-generator. Returns a stream or anomaly."
+  current-stream/create)
+
+(def ^{:stratum 0} current-event-stream?
+  "Validate current stream structure, including closed streams; not availability or authority."
+  current-stream/current?)
+
+(def ^{:stratum 0} legacy-event-stream?
+  "Validate legacy stream structure without granting execution authority."
+  current-stream/legacy?)
+
+(def ^{:stratum 0} current-journal-directory
+  "Return a current stream's canonical journal directory, including after close. Not an authority check."
+  current-stream/journal-directory)
+
+(def ^{:stratum 0} close-current-event-stream!
+  "Release a current stream's journal ownership and reject further publication.
+   This does not wait for in-flight listener callbacks; it is not a delivery drain.
+   Returns an anomaly without mutation when given a legacy stream."
+  current-stream/close!)
 
 ;; Event stream lifecycle and queries
 (def ^{:stratum 0} create-event-stream
@@ -37,8 +67,23 @@
    quiesce fence, in-flight counter, optional snowflake generator).
    Optional opts map: :logger, :sinks (vector of sink fns), :config
    (builds sinks from config), :snowflake-generator (BD-2b event-id
-   generator for lexically-sortable ids)."
+   generator for lexically-sortable ids), :retention (bound on the
+   in-memory history, e.g. `bounded-retention`; absent = unbounded)."
   core/create-event-stream)
+
+(def ^{:stratum 0} bounded-retention
+  "Retention policy for a stream that lives for days (the web dashboard):
+   per workflow, every lifecycle event, the newest health event per
+   dependency and the newest 500 others, for the 100 most recently active
+   workflows. Pass as `:retention` to
+   `create-event-stream`; merge over it to change a limit."
+  retention/bounded-policy)
+
+(def ^{:stratum 0} compact-events
+  "`(compact-events events policy)`: the events of `events` (a vector in
+   publish order) that a retention policy such as `bounded-retention`
+   keeps, still in publish order. Pure."
+  retention/compact)
 
 (def ^{:stratum 0} create-envelope
   "Build an event envelope map with an atomically-assigned per-workflow
@@ -57,13 +102,34 @@
   draft/create)
 
 (def ^{:stratum 0} publish!
-  "Publish an event to the stream: fan out to sinks, append to the
+  "Current streams validate/redact drafts, durably commit, then notify listeners.
+   Returns the durable receipt or an anomaly; caller positions are rejected.
+   Legacy streams retain their existing behavior: fan out to sinks, append to the
    in-memory log, fan out to matching subscribers, log. Returns the
    published event map. If the event's workflow has been quiesced
    (BD-2a), short-circuits and returns a {:rejected? true :reason
    :workflow-quiesced :workflow-id ... :event-type ...} map without
    running sinks or subscribers."
   core/publish!)
+
+(def ^{:stratum 0} publish-persisted!
+  "Like publish!, but returns the result only when the event was persisted.
+   A current stream's receipt passes through. On a legacy stream an anomaly or
+   rejection passes through, and the event passes only when the stream has a
+   durable sink (the file sink) and every durable sink wrote it; otherwise an
+   :unavailable anomaly with :publication/reason :no-durable-sink or
+   :sink-write-failed."
+  persisted/publish-persisted!)
+
+(def ^{:stratum 0} durable-sink
+  "Mark a legacy-stream sink as persisting each event it returns from without
+   throwing, so publish-persisted! can count it."
+  durability/durable-sink)
+
+(def ^{:stratum 0} replay!
+  "Deliver a stored event to a legacy stream's log and subscribers
+   without its sinks. See `core/replay!`."
+  core/replay!)
 
 (def ^{:stratum 0} subscribe!
   "Register a callback for events. 3-arg form subscribes to all events;
@@ -78,7 +144,9 @@
 (def ^{:stratum 0} get-events
   "Query the in-memory event log. Returns a vector of event maps.
    Optional opts map filters/pages: :workflow-id, :event-type, :offset,
-   :limit."
+   :limit. Current streams also accept :scope [scope-type UUID], validate
+   options (returning anomalies for invalid options), and filter by authoritative
+   scope: a chain event's workflow reference is not workflow membership."
   core/get-events)
 
 (def ^{:stratum 0} get-latest-status
@@ -87,21 +155,24 @@
   core/get-latest-status)
 
 ;; BD-2a: shutdown ordering primitives.
-(def ^{:stratum 0} quiesce!
+(defn ^{:stratum 0} quiesce!
   "Fence future publishes for a workflow (when :workflow-id is given)
    and wait for in-flight publishes to settle. After return, publish!
    for that workflow returns a rejection map. Without :workflow-id, adds
    no fence and only waits for in-flight publishes. Returns a map:
    {:ok? true :pending-publishers 0} or {:ok? false :reason :timeout
    :pending-publishers N}. Opts: :workflow-id, :timeout-ms (default
-   5000)."
-  core/quiesce!)
+   5000). Current streams return an unsupported anomaly; these legacy barriers
+   do not govern current-profile publication."
+  ([stream] (quiesce! stream {}))
+  ([stream opts] (legacy-control/invoke! core/quiesce! stream opts)))
 
-(def ^{:stratum 0} drain!
+(defn ^{:stratum 0} drain!
   "Wait for every event published before this call to reach all sinks,
    including each sink's optional drain hook. Returns a map: {:ok? true
    :drained-count N}, {:ok? false :reason :timeout :pending-count N}, or
    {:ok? false :reason :sink-error :failed-sinks [...]}. Opts:
    :timeout-ms (default 5000) is the total budget across in-flight
-   settle plus sink drain."
-  core/drain!)
+   settle plus sink drain. Current streams return an unsupported anomaly."
+  ([stream] (drain! stream {}))
+  ([stream opts] (legacy-control/invoke! core/drain! stream opts)))

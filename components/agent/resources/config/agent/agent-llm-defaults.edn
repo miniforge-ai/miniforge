@@ -20,8 +20,7 @@
 ;; :curator is not a role in the create-{role} sense; it is the curator's
 ;; LLM-enrichment call site, whose tuning previously lived inline. It carries
 ;; the same {:temperature :max-tokens} shape as the role entries and reads
-;; its config through the same loader. The meta-evaluator call site has a
-;; different shape (no :temperature) and lives in meta-eval-tuning.edn.
+;; its config through the same loader.
 
 {:planner     {:temperature 0.3 :max-tokens 32000}
  :implementer {:temperature 0.2 :max-tokens 32000}

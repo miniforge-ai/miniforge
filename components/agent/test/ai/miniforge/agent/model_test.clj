@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.agent.model-test
   (:require
    [clojure.test :refer [deftest testing is]]
@@ -24,9 +23,9 @@
    [ai.miniforge.llm.interface :as llm]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Default model policy
 
-(deftest default-model-for-role-test
+;; Default model policy
+(deftest ^{:stratum 0} default-model-for-role-test
   (testing "thinking roles default to GPT thinking model"
     (with-redefs [config/load-merged-config
                   (fn []
@@ -42,10 +41,8 @@
       (is (= "gpt-5.2-codex" (model/default-model-for-role :implementer)))
       (is (= "gpt-5.2-codex" (model/default-model-for-role :reviewer))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Backend resolution
-
-(deftest resolve-llm-client-for-role-test
+(deftest ^{:stratum 0} resolve-llm-client-for-role-test
   (testing "returns same-backend client with model injected"
     (let [client (llm/create-client {:backend :codex})]
       (with-redefs [config/load-merged-config
@@ -55,14 +52,14 @@
         (let [resolved (model/resolve-llm-client-for-role :implementer client)]
           (is (= :codex (llm/client-backend resolved)))))))
 
-  (testing "creates a role-specific client when execution model needs a different backend"
+  (testing "keeps the shared client's backend when the model is another backend's"
     (let [shared-client (llm/create-client {:backend :claude})
           resolved (with-redefs [config/load-merged-config
                                  (fn []
                                    {:agents {:default-models {:thinking "gpt-5.4"
                                                               :execution "gpt-5.2-codex"}}})]
                      (model/resolve-llm-client-for-role :implementer shared-client))]
-      (is (= :codex (llm/client-backend resolved)))))
+      (is (= :claude (llm/client-backend resolved)))))
 
   (testing "returns nil when no shared client is available"
     (let [resolved (with-redefs [config/load-merged-config

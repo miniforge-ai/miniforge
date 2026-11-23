@@ -27,12 +27,31 @@
    code-side FALLBACKS used only when that resource is absent at
    classpath load."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.llm.messages :as msg]
    [ai.miniforge.llm.model-registry :as registry]
    [ai.miniforge.logging.interface :as log]
    [clojure.edn :as edn]
    [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private default-logger
+  "Where select-model reports a fallback when its config carries no
+   :logger; the module-level EDN logger network-monitor also uses."
+  (log/create-logger {:min-level :info :output :edn}))
+
+(def ^{:stratum 0} ^:private automatic-tier-order
+  "Every recommendation tier a task type in the catalog may define, in the
+   order :automatic reads them. A task type defines some of these; the
+   rest are skipped."
+  [:tier-1 :tier-2 :tier-3-local :tier-1-local :tier-2-local
+   :tier-1-free :tier-2-cheap :tier-3-moderate])
+
+(defn ^{:stratum 0} local-model?
+  "True when the catalog marks the model as running locally."
+  [model-key]
+  (boolean (get-in (registry/get-model model-key) [:capabilities :local])))
 
 ;; Constraints and availability
 (def ^{:stratum 0} ^:private default-cost-limit-usd
@@ -183,32 +202,39 @@
           (boolean (when-let [v (get-env-var env-var)]
                      (not (.isBlank ^String v))))))))
 
+(defn ^{:stratum 3} unmet-constraints
+  "The caller's constraints `model-key` fails, as a vector of
+   :require-local, :context-size and :cost-limit; empty when it meets
+   them all. Only constraints the caller set are checked."
+  [model-key {:keys [context-size cost-limit require-local]}]
+  (cond-> []
+    (and require-local (not (local-model? model-key)))
+    (conj :require-local)
+
+    (and context-size (not (meets-context-requirement? model-key context-size)))
+    (conj :context-size)
+
+    (and cost-limit (not (meets-cost-constraint? model-key cost-limit)))
+    (conj :cost-limit)))
+
 ;------------------------------------------------------------------------------ Layer 4
 
 ;; Selection strategies
 (defn ^{:stratum 4} select-by-automatic
-  "Automatic selection based on task type.
-   Picks the best model for the task, considering availability."
+  "Automatic selection based on task type: the first available model, in
+   `automatic-tier-order` over the task type's tiers, that meets the
+   context and cost constraints. With :require-local only models the
+   catalog marks local are considered, whichever tier lists them. nil
+   when no model qualifies; it does not relax a constraint."
   [task-type {:keys [context-size cost-limit require-local]}]
   (let [recommendations (registry/recommend-models-for-task-type task-type)
-        all-tiers (if require-local
-                    ;; For local-only, use tier-3-local or tier-1-local
-                    (concat (:tier-1-local recommendations)
-                            (:tier-2-local recommendations)
-                            (:tier-3-local recommendations))
-                    ;; Otherwise try tier-1, tier-2, then tier-3-local
-                    (concat (:tier-1 recommendations)
-                            (:tier-2 recommendations)
-                            (:tier-3-local recommendations)))]
-
-    ;; Find first available model meeting constraints
-    (or (first (filter (fn [model-key]
-                         (and (model-available? model-key)
-                              (meets-context-requirement? model-key (or context-size 0))
-                              (meets-cost-constraint? model-key (or cost-limit default-cost-limit-usd))))
-                       all-tiers))
-        ;; Fallback to first available if no match
-        (first (filter model-available? all-tiers)))))
+        candidates      (cond->> (distinct (mapcat #(get recommendations %) automatic-tier-order))
+                          require-local (filter local-model?))]
+    (first (filter (fn [model-key]
+                     (and (model-available? model-key)
+                          (meets-context-requirement? model-key (or context-size 0))
+                          (meets-cost-constraint? model-key (or cost-limit default-cost-limit-usd))))
+                   candidates))))
 
 (defn ^{:stratum 4} select-by-cost-optimized
   "Cost-optimized selection - prefer cheapest sufficient model."
@@ -259,8 +285,17 @@
 
    Input:
    - task-classification: Result from task-classifier/classify-task
-   - config: Optional configuration overrides
+   - config: Optional configuration overrides; :logger receives the
+     fallback warning (default: a module-level EDN logger)
    - constraints: Optional constraints {:context-size :cost-limit :require-local}
+
+   When the strategy selects nothing, the result is :sonnet-4.6 with
+   :fallback-used true; otherwise :fallback-used is false. The constraints
+   are hard: when the model it would return fails one the caller set (a
+   cloud model under :require-local, a window under :context-size, a price
+   tier over :cost-limit), the result is a :not-found anomaly naming the
+   unmet constraints instead, so a caller that asked for local inference
+   never gets a cloud model.
 
    Output:
    {:model :sonnet-4.6
@@ -295,21 +330,32 @@
          model (registry/get-model model-key)
          fallback-used (not selected)]
 
-     (when fallback-used
-       (log/warn ::model-selection-fallback
-                 "No model met constraints, using fallback"
-                 {:task-type task-type
-                  :fallback model-key}))
-
-     {:model model-key
-      :model-id (:model-id model)
-      :provider (:provider model)
-      :backend (:backend model)
-      :task-type task-type
-      :confidence confidence
-      :strategy strategy
-      :rationale (build-selection-rationale model-key task-classification strategy constraints)
-      :fallback-used fallback-used})))
+     (if-let [unmet (not-empty (unmet-constraints model-key constraints))]
+       (anomaly/anomaly :not-found
+                        (msg/t :model-selection/constraints-unmet
+                               {:task-type task-type :strategy strategy
+                                :model model-key :unmet unmet})
+                        {:task-type task-type
+                         :strategy strategy
+                         :model model-key
+                         :unmet-constraints unmet})
+       (do
+         (when fallback-used
+           (log/warn (get merged-config :logger default-logger)
+                     :system :llm/model-selection-fallback
+                     {:message (msg/t :model-selection/fallback
+                                      {:task-type task-type :model model-key})
+                      :data {:task-type task-type
+                             :fallback model-key}}))
+         {:model model-key
+          :model-id (:model-id model)
+          :provider (:provider model)
+          :backend (:backend model)
+          :task-type task-type
+          :confidence confidence
+          :strategy strategy
+          :rationale (build-selection-rationale model-key task-classification strategy constraints)
+          :fallback-used fallback-used})))))
 
 ;------------------------------------------------------------------------------ Layer 6
 

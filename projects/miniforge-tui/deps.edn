@@ -15,6 +15,7 @@
         ai.miniforge/decision-envelope {:local/root "../../components/decision-envelope"}
         ai.miniforge/execution-grant {:local/root "../../components/execution-grant"}
         ai.miniforge/file-durability {:local/root "../../components/file-durability"}
+        ai.miniforge/resource-cleanup {:local/root "../../components/resource-cleanup"}
         ai.miniforge/tenancy {:local/root "../../components/tenancy"}
         ai.miniforge/effect-transaction {:local/root "../../components/effect-transaction"}
         ai.miniforge/algorithms {:local/root "../../components/algorithms"}
@@ -40,6 +41,7 @@
         ai.miniforge/workflow-software-factory {:local/root "../../components/workflow-software-factory"}
         ai.miniforge/workflow-financial-etl {:local/root "../../components/workflow-financial-etl"}
         ai.miniforge/phase-opsv {:local/root "../../components/phase-opsv"}
+        ai.miniforge/kubernetes-target {:local/root "../../components/kubernetes-target"}
         ai.miniforge/phase-software-factory {:local/root "../../components/phase-software-factory"}
         ai.miniforge/llm {:local/root "../../components/llm"}
         ai.miniforge/tool {:local/root "../../components/tool"}
@@ -61,6 +63,7 @@
         ai.miniforge/pr-sync {:local/root "../../components/pr-sync"}
         ;; DAG and PR management
         ai.miniforge/dag-executor {:local/root "../../components/dag-executor"}
+        ai.miniforge/subprocess {:local/root "../../components/subprocess"}
         ai.miniforge/pr-lifecycle {:local/root "../../components/pr-lifecycle"}
         ai.miniforge/task-executor {:local/root "../../components/task-executor"}
         ai.miniforge/repo-dag {:local/root "../../components/repo-dag"}

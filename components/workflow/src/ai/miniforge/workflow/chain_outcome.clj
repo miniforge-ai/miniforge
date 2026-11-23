@@ -12,31 +12,48 @@
   (and (map? result)
        (or (contains? result :anomaly/type) (contains? result :anomaly/category))))
 
+(defn ^{:stratum 0} with-child-identity [error id]
+  (let [path (if (contains? error :anomaly/type) [:anomaly/data :workflow/id] [:workflow/id])]
+    (assoc-in error path id)))
+
+(defn ^{:stratum 0} with-run-identity [error record]
+  (let [identity (select-keys record [:chain/run-id :chain/definition-id :chain/definition-version])]
+    (if (contains? error :anomaly/type)
+      (update error :anomaly/data merge identity)
+      (merge error identity))))
+
 (defn- ^{:stratum 0} error-message [result]
   (let [error (or (:execution/error result) (:anomaly/message result) (:message result))]
     (if (string? error) error (messages/t :chain/child-incomplete))))
 
 (defn ^{:stratum 0} step-result [chain-id step index result]
-  {:step/id (:step/id step)
-   :step/workflow-id (:step/workflow-id step)
-   :step/execution-id (:execution/id result)
-   :step/status (:execution/status result)
-   :step/output (:execution/output result)
-   :step/chain-id chain-id
-   :step/chain-index index})
+  (cond-> {:step/id (:step/id step)
+           :step/workflow-id (:step/workflow-id step)
+           :step/execution-id (:execution/id result)
+           :step/status (:execution/status result)
+           :step/output (:execution/output result)
+           :step/chain-id chain-id
+           :step/chain-index index}
+    (contains? result :execution/bindings) (assoc :step/bindings (:execution/bindings result))
+    (contains? result :execution/edges) (assoc :step/edges (:execution/edges result))))
 
 (defn- ^{:stratum 0} result-data [result]
   (if (map? result) result {}))
 
 (defn ^{:stratum 0} chain-result [definition duration results status]
   (let [step-count (count (:chain/steps definition))]
-    {:chain/id (:chain/id definition)
-     :chain/status status
-     :chain/step-results results
-     :chain/step-count step-count
-     :chain/duration-ms duration}))
+    (merge (:chain/run-record definition)
+           {:chain/id (:chain/id definition)
+            :chain/status status
+            :chain/step-results results
+            :chain/edges (into [] (mapcat :step/edges) results)
+            :chain/step-count step-count
+            :chain/duration-ms duration})))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} failed? [result]
+  (or (failure-value? result) (= :failed (:execution/status result))))
 
 (defn ^{:stratum 1} completed? [result]
   (and (= :completed (:execution/status result))

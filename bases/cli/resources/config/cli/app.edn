@@ -4,15 +4,17 @@
   :description "Autonomous software factory — built on MiniForge Core"
   :system-check-title "Miniforge System Check"
   :home-dir-name ".miniforge"
-  :tui-package "miniforge-tui"
+  ;; No packaged TUI: no miniforge-tui formula is published. The TUI runs
+  ;; in a JVM build (`bb install:tui` from a source checkout).
+  :tui-package nil
   :help-examples ["doctor"
                   "run feature.spec.edn"
                   "web                        # Start web dashboard (port 7878)"
                   "web --port 3000 --open     # Custom port, auto-open browser"
-                  "tui                        # Start terminal UI (requires miniforge-tui)"
+                  "tui                        # Start terminal UI (JVM build only)"
                   "workflow list"
-                  "workflow run :simple-v2"
-                  "workflow run :simple-v2 -i input.edn"
+                  "workflow run :quick-fix"
+                  "workflow run :quick-fix -i input.edn"
                   "workflow run :workflow-id --input-json '{\"task\": \"Build feature\"}'"
                   "chain list"
                   "fleet add myorg/myrepo"

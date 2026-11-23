@@ -23,10 +23,19 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [ai.miniforge.dag-executor.interface :as dag]
-            [ai.miniforge.dag-executor.result :as result]
-            [ai.miniforge.workflow.runner-environment :as env]))
+            [ai.miniforge.workflow.runner-environment :as env]
+            [ai.miniforge.workflow.environment-test-fixtures :as fixture]
+            [ai.miniforge.workflow.environment-records :as records]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} persistence-context [worktree]
+  (cond-> {:execution/executor ::stub-executor :execution/environment-id (random-uuid)}
+    worktree (assoc :execution/worktree-path worktree)))
+
+(defn- ^{:stratum 0} persist! [calls & _]
+  (swap! calls inc)
+  (dag/ok {:persisted? false}))
 
 (defn- ^{:stratum 0} sh!
   "Run a shell command and throw ex-info when exit != 0."
@@ -40,7 +49,7 @@
 (deftest ^{:stratum 0} normalized-environment-metadata-is-always-a-map-test
   (testing "valid metadata maps are preserved"
     (is (= {:base-branch "main"}
-           (#'env/normalized-environment-metadata
+           (records/normalized-metadata
             {:metadata {:base-branch "main"}}))))
   (testing "absent and malformed metadata becomes an empty map"
     (doseq [env-value [{}
@@ -49,7 +58,7 @@
                        {:metadata :not-a-map}
                        {:metadata 42}
                        {:metadata []}]]
-      (is (= {} (#'env/normalized-environment-metadata env-value))))))
+      (is (= {} (records/normalized-metadata env-value))))))
 
 (deftest ^{:stratum 0} build-env-record-omits-base-sha-when-no-git-test
   (testing "non-git worktree → :base-sha absent, no crash"
@@ -57,15 +66,7 @@
                            (random-uuid))]
       (.mkdirs (io/file non-git-dir))
       (try
-        (let [fns {:create-registry (constantly {})
-                   :select-exec     (constantly ::stub)
-                   :acquire-env!    (fn [_ _ _]
-                                      (result/ok {:environment-id "e"
-                                                  :workdir non-git-dir
-                                                  :metadata {}}))
-                   :result-ok?      result/ok?
-                   :result-unwrap   :data
-                   :executor-type   (constantly :worktree)}
+        (let [fns (fixture/executor-functions non-git-dir {})
               record (env/build-env-record ::stub (random-uuid) :local {} fns)]
           (is (some? record))
           (is (not (contains? (:environment-metadata record) :base-sha))
@@ -73,31 +74,26 @@
         (finally
           (.delete (io/file non-git-dir)))))))
 
-(deftest ^{:stratum 0} persist-at-phase-boundary-guards-on-worktree-test
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} persist-at-phase-boundary-guards-on-worktree-test
   (testing "an executor + env-id but NO :execution/worktree-path -> the persist
             never runs; it must not fall back to committing the process CWD (the
             leak that let a sandboxless run-pipeline commit into the live repo)"
     (let [calls (atom 0)]
-      (with-redefs [dag/persist-workspace!
-                    (fn [& _] (swap! calls inc) (result/ok {:persisted? false}))]
+      (with-redefs [dag/persist-workspace! (partial persist! calls)]
         (let [outcome (env/persist-workspace-at-phase-boundary!
-                       {:execution/executor ::stub-executor
-                        :execution/environment-id (random-uuid)}
+                       (persistence-context nil)
                        {})]
           (is (nil? outcome) "no worktree -> no persist -> nil")
           (is (zero? @calls) "persist-workspace! is never invoked without a worktree")))))
   (testing "a configured worktree-path DOES run the persist"
     (let [calls (atom 0)]
-      (with-redefs [dag/persist-workspace!
-                    (fn [& _] (swap! calls inc) (result/ok {:persisted? false}))]
+      (with-redefs [dag/persist-workspace! (partial persist! calls)]
         (env/persist-workspace-at-phase-boundary!
-         {:execution/executor ::stub-executor
-          :execution/environment-id (random-uuid)
-          :execution/worktree-path "/tmp/sandbox-worktree"}
+         (persistence-context "/tmp/sandbox-worktree")
          {})
         (is (= 1 @calls) "persist runs when a worktree is configured")))))
-
-;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} with-temp-git-repo
   "Initialise a temp git repo with one commit and pass its path to f.
@@ -120,6 +116,17 @@
         (doseq [^java.io.File fp (reverse (file-seq (io/file dir)))]
           (.delete fp))))))
 
+(defn- ^{:stratum 1} assert-base-sha [dir]
+  (let [expected-sha (str/trim (:out (sh! "git" "-C" dir "rev-parse" "HEAD")))
+        fns (fixture/executor-functions dir {:base-branch "main"})
+        record (env/build-env-record ::stub-executor (random-uuid) :local {} fns)]
+    (is (some? record))
+    (is (= dir (:worktree-path record)))
+    (is (= expected-sha (get-in record [:environment-metadata :base-sha]))
+        "build-env-record sets :base-sha to resolved worktree HEAD SHA")
+    (is (= "main" (get-in record [:environment-metadata :base-branch]))
+        "pre-existing metadata fields must survive the merge")))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} build-env-record-captures-base-sha-test
@@ -128,33 +135,11 @@
   ;; check against a freshly-merged PR's SHA. Pin the capture here so
   ;; a regression that drops the field surfaces at test time.
   (testing "[:environment-metadata :base-sha] is populated from worktree HEAD"
-    (with-temp-git-repo
-      (fn [dir]
-        (let [expected-sha (-> (sh! "git" "-C" dir "rev-parse" "HEAD")
-                               :out
-                               str/trim)
-              fns {:create-registry (constantly {})
-                   :select-exec     (constantly ::stub-executor)
-                   :acquire-env!    (fn [_ task-id _]
-                                      (result/ok {:environment-id (str "env-" task-id)
-                                                  :workdir dir
-                                                  :metadata {:base-branch "main"}}))
-                   :result-ok?      result/ok?
-                   :result-unwrap   :data
-                   :executor-type   (constantly :worktree)}
-              record (env/build-env-record ::stub-executor
-                                            (random-uuid)
-                                            :local
-                                            {}
-                                            fns)]
-          (is (some? record))
-          (is (= dir (:worktree-path record)))
-          (is (= expected-sha (get-in record [:environment-metadata :base-sha]))
-              "build-env-record sets :base-sha to resolved worktree HEAD SHA")
-          (is (= "main" (get-in record [:environment-metadata :base-branch]))
-              "pre-existing metadata fields must survive the merge"))))))
+    (with-temp-git-repo assert-base-sha)))
 
 ;; Every pipeline this namespace runs acquires its worktree from a
 ;; throwaway host repository and checkpoints into a throwaway root — never
 ;; the checkout the test JVM was launched in, never `~/.miniforge`.
 (clojure.test/use-fixtures :once isolation/with-isolated-host)
+
+(comment ::environment-record-regressions)
