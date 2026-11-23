@@ -103,7 +103,7 @@
                    (read-cursor-mcp-config config-file))
         config (assoc-in (or existing {}) ["mcpServers" "artifact"] entry)]
     (when (and (.exists config-file) (nil? existing) (not (.exists backup-file)))
-      (io/copy config-file backup-file))
+      (fs/copy config-file backup-file {:copy-attributes true}))
     (.mkdirs dir)
     (spit config-file (json/generate-string config {:pretty true}))
     (str config-file)))
