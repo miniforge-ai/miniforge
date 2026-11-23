@@ -8,7 +8,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn ^{:stratum 0} dispatch!
-  ([state submit! read! until argv] (read! state until argv))
+  ([state _submit! read! until argv] (read! state until argv))
   ([state submit! _read! until argv payload]
    (if (= "create" (second argv))
      (pods/capture-created! state submit! until argv payload)
