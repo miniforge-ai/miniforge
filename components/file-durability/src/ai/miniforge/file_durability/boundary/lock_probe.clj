@@ -38,7 +38,8 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} check! [directory peer]
-  (fs/with-temp-dir [root {:dir directory :prefix probe-prefix
+  (fs/with-temp-dir [root {:dir directory
+                          :prefix probe-prefix
                           :posix-file-permissions directory-policy/private-permissions}]
     (let [child (volatile! nil)]
       (protocol/allocate! root)

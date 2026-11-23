@@ -56,7 +56,7 @@ ambiguous mount data, no peer proof, and root replacement. Test actual
 JVM/Babashka peers and forced publication on disposable files. Bound native
 storage metadata to a shared process/read deadline and a fixed output limit.
 
-The extended native packet passes 21 tests and 39 assertions in each JVM product,
+The extended native packet passes 23 tests and 47 assertions in each JVM product,
 Babashka source and a fresh package. It covers the opaque-root contract, actual
 native ACL/metadata behavior, real JVM/Babashka mutual locks, and refusal to skip
 a missing peer runtime or classpath. The same packet is wired into the existing
@@ -67,7 +67,7 @@ These are runtime/storage-contract checks, not power-loss certification or proof
 that an unsupported hosted VM qualifies as persistent authority storage.
 Targeted controls that bypass peer proof, root identity revalidation, or mandatory
 peer admission produce one, one and two assertion failures respectively, with no
-runtime errors, in both JVM and native Babashka. Ten exact qualification examples
+runtime errors, in both JVM and native Babashka. Twelve exact qualification examples
 pass in each. The tooling regression pins product-relative and absolute peer
 classpath entries, including a path containing spaces.
 
@@ -83,6 +83,6 @@ PR #2530 consumes this prerequisite. PR #2528 owns the full-stop contract.
 
 ## Checklist
 
-- [ ] Implementation and adversarial standards pass complete.
+- [x] Implementation and adversarial standards pass complete.
 - [x] Serial native qualification and packaged proofs complete.
 - [ ] Current-head CI and full review settled.

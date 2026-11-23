@@ -13,7 +13,8 @@
             [ai.miniforge.file-durability.publication-support :as support]
             [ai.miniforge.file-durability.qualification-fixtures :as fixtures]
             [babashka.fs :as fs]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is]])
+  (:import [java.io File]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -42,7 +43,13 @@
 
 (defn- ^{:stratum 0} verify-peer-paths! [root]
   (doseq [[field unsafe] [[:peer/executable (fs/file "bb")]
-                          [:peer/classpath "."]]]
+                          [:peer/executable "bb"]
+                          [:peer/executable nil]
+                          [:peer/classpath "."]
+                          [:peer/classpath nil]
+                          [:peer/classpath ""]
+                          [:peer/classpath (str root File/pathSeparator ".")]
+                          [:peer/classpath (str root File/pathSeparator)]]]
     (is (= :invalid-input
            (:anomaly/type (durability/qualify-local-root!
                            root fixtures/profile (assoc (fixtures/peer root) field unsafe)))))))

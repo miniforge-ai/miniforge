@@ -42,14 +42,10 @@
   (Files/createFile (marker-path root marker) (make-array FileAttribute 0))
   true)
 
-(defn ^{:stratum 1} await? [root marker]
-  (let [path (marker-path root marker)
-        start (System/nanoTime)]
-    (loop []
-      (cond
-        (fs/regular-file? path {:nofollow-links true}) true
-        (>= (.toMillis TimeUnit/NANOSECONDS (- (System/nanoTime) start)) wait-ms) false
-        :else (do (Thread/sleep poll-ms) (recur))))))
+(defn- ^{:stratum 1} wait-for-next-poll! [start]
+  (when (< (.toMillis TimeUnit/NANOSECONDS (- (System/nanoTime) start)) wait-ms)
+    (Thread/sleep poll-ms)
+    true))
 
 (defn ^{:stratum 1} with-attempt [root f]
   (with-open [channel (FileChannel/open (fs/path root probe-inode) lock-options
@@ -57,5 +53,15 @@
     (if-let [^java.lang.AutoCloseable lock (.tryLock channel)]
       (with-open [_held lock] (f true))
       (f false))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} await? [root marker]
+  (let [path (marker-path root marker)
+        start (System/nanoTime)]
+    (boolean
+     (loop []
+       (or (fs/regular-file? path {:nofollow-links true})
+           (and (wait-for-next-poll! start) (recur)))))))
 
 (comment (runtime-kind))
