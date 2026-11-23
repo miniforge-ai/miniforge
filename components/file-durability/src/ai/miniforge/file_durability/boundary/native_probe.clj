@@ -36,19 +36,22 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} read-output [arguments input]
-  (let [start (System/nanoTime)
+(defn ^{:stratum 2} read-output
+  "Return bounded output only for the caller's exact protocol exit set (default: zero)."
+  ([arguments input] (read-output arguments input #{0}))
+  ([arguments input accepted-exits]
+   (let [start (System/nanoTime)
         child (process/process arguments {:in input
                                          :out :stream
                                          :err :discard})
         captured (future (read-utf8 (:out child)))]
     (try+
       (let [result (deref child (remaining-ms start) nil)]
-        (when (= 0 (:exit result))
+        (when (contains? accepted-exits (:exit result))
           (deref captured (remaining-ms start) nil)))
       (finally
         (future-cancel captured)
-        (stop! child)))))
+        (stop! child))))))
 
 (comment
   (read-utf8 (java.io.ByteArrayInputStream. (byte-array 0))))

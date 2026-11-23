@@ -82,6 +82,11 @@
   (when (fs/exists? (first failed-child))
     (is (nil? (probe/read-output failed-child nil)))))
 
+(deftest ^{:stratum 1 :integration true} test-selected-exit-is-exact-and-does-not-change-the-default
+  (when (fs/exists? (first failed-child))
+    (is (= "" (probe/read-output failed-child nil #{1})))
+    (is (nil? (probe/read-output successful-child nil #{1})))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2 :integration true} test-timed-out-capture-is-cancelled-after-successful-child
