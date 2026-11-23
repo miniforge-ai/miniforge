@@ -25,24 +25,33 @@ consumes these observations immediately; durable run-fence adoption follows it.
 
 ## Changes in detail
 
-Observe only unambiguous writable ext4/XFS mounts on non-virtual Linux block
-devices, or writable APFS with volume ownership and internal Apple Fabric backing.
+Observe only unambiguous writable ext4/XFS mounts on recognized local AHCI or
+PCIe-NVMe stacks, or writable APFS with volume ownership and internal Apple Fabric backing.
 Unknown, network, volatile, ambiguous or known unsafe stores refuse.
 Keep root device/inode identity separate from backend-specific observations.
 There are no writes, grants, deployments or live infrastructure changes.
+Linux requires exact no-virtualization evidence from the installed native
+`systemd-detect-virt`, plus allowlisted driver ancestry and local NVMe transport
+where applicable. Missing helpers, VM/container reports, unknown drivers and
+non-local transports refuse. These remain trusted host/runtime observations,
+not hardware attestation or a power-loss guarantee.
 
 ## Testing plan
 
 Use producer-shaped mount and disk-metadata fixtures. Pin rejection of unsupported
 mounts, ambiguous tables, virtual or unmapped devices, mismatched root devices,
 disabled APFS ownership and invalid UUID types. Mock only native I/O boundaries.
-The packet passes 8 tests and 46 assertions in each JVM product, Babashka source,
+The packet passes 17 tests and 106 assertions in each JVM product, Babashka source,
 and a fresh package. Disabling the filesystem allowlist, device checks or ownership
 check fails five, two and two assertions respectively on JVM and Babashka, with no
-runtime errors. Read-only local metadata checks confirm the native fixture shape;
+runtime errors. Ignoring the selected native exit protocol fails two further assertions.
+The realistic PCI/virtio regression mirrors [Oracle's sysfs example](https://docs.oracle.com/en/operating-systems/oracle-linux/8/udev/udev-QueryingUdevandSysfs_view_attributes_for_a_device_and_its_parent_devices.html).
+Controller transport follows the [kernel NVMe ABI](https://www.kernel.org/doc/html/latest/admin-guide/abi-stable.html).
+Host detection follows the [native tool contract](https://www.freedesktop.org/software/systemd/man/latest/systemd-detect-virt.html).
+Read-only local metadata checks confirm the macOS fixture shape;
 the optional physical-classification field is absent even on this host's backing
 partition. Strict lint and actual dependency-layer checks pass.
-The six exact namespace REPL examples also pass on JVM and native Babashka.
+All nine exact namespace REPL examples pass on JVM and native Babashka.
 
 ## Deployment plan
 
