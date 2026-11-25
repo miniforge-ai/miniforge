@@ -28,7 +28,8 @@
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.java.shell :as shell]
-            [clojure.string :as str]))
+            [clojure.string :as str])
+  (:import (java.nio.file CopyOption Files StandardCopyOption)))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -110,6 +111,21 @@
       (when (or (= target-c root-c)
                 (str/starts-with? target-c (str root-c java.io.File/separator)))
         (.getPath resolved)))))
+
+(defn- ^{:stratum 0} write-edn-atomically!
+  "Write `data` as EDN to `path` via a sibling temp file and an atomic rename,
+   so a crash or concurrent phase server never leaves a truncated cache file.
+   The temp file is removed if the write or rename fails."
+  [path data]
+  (let [target (io/file path)
+        tmp    (io/file (.getParentFile target) (str (.getName target) "." (random-uuid) ".tmp"))]
+    (io/make-parents target)
+    (try
+      (spit tmp (pr-str data))
+      (Files/move (.toPath tmp) (.toPath target)
+                  (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE
+                                          StandardCopyOption/REPLACE_EXISTING]))
+      (finally (io/delete-file tmp true)))))
 
 (defn- ^{:stratum 0} read-cache-edn
   "Read {:files .. :mtimes ..} from an EDN cache file, or nil on missing/bad."
@@ -339,8 +355,7 @@
   (let [{:keys [source-root files mtimes]} @cache-state]
     (when-let [path (and (seq files) (persistent-cache-path source-root))]
       (try
-        (io/make-parents path)
-        (spit path (pr-str {:files files :mtimes mtimes}))
+        (write-edn-atomically! path {:files files :mtimes mtimes})
         (binding [*out* *err*]
           (println (msg/t :cache/saved {:count (count files) :path path})))
         (catch Exception e
