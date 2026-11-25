@@ -365,6 +365,22 @@
           (is (contains? (:mtimes @cache/cache-state) "src/b.clj")
               "its mtime is restored so staleness is still detectable"))))))
 
+(deftest ^{:stratum 1} save-cache-leaves-no-temp-file-test
+  (testing "save-cache! renames into place; the .miniforge dir holds only the cache file"
+    (with-temp-dir
+      (fn [dir]
+        (let [f (io/file dir "src/c.clj")]
+          (io/make-parents f)
+          (spit f "CCC")
+          (cache/load-cache! dir dir)
+          (cache/handle-context-read {"path" "src/c.clj"})
+          (cache/save-cache!)
+          (cache/save-cache!)
+          (is (= ["context-cache.edn"]
+                 (mapv #(.getName ^java.io.File %)
+                       (.listFiles (io/file dir ".miniforge"))))
+              "no leftover temp file after repeated saves"))))))
+
 ;; context_write handler
 (deftest ^{:stratum 1} handle-context-write-writes-to-workdir-and-caches-test
   (with-temp-dir
