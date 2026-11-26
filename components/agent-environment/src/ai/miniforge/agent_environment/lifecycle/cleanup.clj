@@ -45,15 +45,17 @@
    :cleanup/verified? false})
 
 (defn- ^{:stratum 0} requested-under-lease
-  "`entry` releasing under `cleanup`, unless it no longer admits a release under `lease`."
+  "`entry` releasing under `cleanup`, unless it no longer admits a release
+   under `lease`. A lease holder's release carries no claim, so no acquire
+   reconciles it while the holder retries."
   [lease now cleanup entry]
   (if (lease/lease-refusal entry :environment/release lease now)
     entry
-    (assoc entry :entry/state :state/releasing :entry/cleanup cleanup)))
+    (assoc entry :entry/state :state/releasing :entry/cleanup cleanup :entry/claim nil)))
 
 (defn- ^{:stratum 0} releasing
-  [entry environment cleanup]
-  (assoc entry :entry/state :state/releasing :entry/environment environment :entry/cleanup cleanup))
+  [entry environment cleanup claim]
+  (assoc entry :entry/state :state/releasing :entry/environment environment :entry/cleanup cleanup :entry/claim claim))
 
 (defn- ^{:stratum 0} abandoned?
   "True for a reservation a reconcile released with no environment."
@@ -100,16 +102,16 @@
    reservation at `generation` while still provisioning, or after a
    reconcile released it with no environment. Never an adopted environment
    or a newer generation."
-  [generation environment cleanup entry]
+  [generation environment cleanup claim entry]
   (if (and (= generation (:entry/generation entry))
            (or (= :state/provisioning (:entry/state entry)) (abandoned? entry)))
-    (releasing entry environment cleanup)
+    (releasing entry environment cleanup claim)
     entry))
 
 (defn ^{:stratum 1} for-stale
   "Ownership for a reconcile's cleanup: `stale`, while still the key's exact entry."
-  [stale environment cleanup entry]
-  (if (= stale entry) (releasing entry environment cleanup) entry))
+  [stale environment cleanup claim entry]
+  (if (= stale entry) (releasing entry environment cleanup claim) entry))
 
 (defn- ^{:stratum 1} unowned
   "Nil when the change recorded `cleanup`, else why it did not."
@@ -151,14 +153,19 @@
 
 (defn ^{:stratum 2} cleaned-under!
   "Delete `environment` under a cleanup intent `requested` records on its
-   key: `(requested environment cleanup entry)` returns the entry releasing
-   it when the caller owns the cleanup, else the entry unchanged. Returns
+   key: `(requested environment cleanup claim entry)` returns the entry
+   releasing it when the caller owns the cleanup, else the entry unchanged.
+   The entry carries this controller's claim while the cleanup is pending;
+   past it, an acquire reconciles the entry, so an interrupted cleanup no
+   lease holder can retry does not hold the key. Returns
    `{:cleanup/receipt r :cleanup/recorded change}`; when the intent was not
    taken, nothing is deleted and the receipt is nil."
   [c subject request target environment requested reason]
   (let [k (lease/request-key request)
-        cleanup (intent (random-uuid) (:environment/uid environment) (:target/generation target) (support/now c))
-        changed (controller/change-entry! c k (partial requested environment cleanup))]
+        now (support/now c)
+        cleanup (intent (random-uuid) (:environment/uid environment) (:target/generation target) now)
+        claim (controller/claim-for c now)
+        changed (controller/change-entry! c k (partial requested environment cleanup claim))]
     (if (or (anomaly/anomaly? changed) (not (owns? cleanup changed)))
       {:cleanup/receipt nil :cleanup/recorded changed}
       (let [{:keys [steps applied? verified?]} (deleted c target cleanup)

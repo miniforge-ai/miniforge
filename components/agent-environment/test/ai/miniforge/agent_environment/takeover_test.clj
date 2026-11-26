@@ -148,6 +148,22 @@
       (is (empty? (fake/live-namespaces (:fake w))))
       (is (= :state/released (:entry/state (stored w req)))))))
 
+(deftest ^{:stratum 1} test-an-interrupted-reconcile-is-resumed-once-its-claim-expires
+  (let [w (outage-world)
+        req (fx/request w (:a w))]
+    (controller/claim! (:c w) req)
+    (protocol/provision! (:fake w) (target-of req first-generation) req)
+    (controller/settle-provision! (:c w) req first-generation :state/cleanup-uncertain nil)
+    (swap! (:faults w) assoc :writes 1)
+    (is (= :anomalies.agent-environment/ledger-unavailable (reason (faults/reacquire w (faults/late-controller w) req))))
+    (swap! (:faults w) assoc :writes nil)
+    (testing "given the reconcile's cleanup left pending → fenced while its claim lasts"
+      (is (= :state/releasing (:entry/state (stored w req))))
+      (is (= :anomalies.agent-environment/environment-releasing (reason (faults/reacquire w (faults/late-controller w) req)))))
+    (testing "given its claim expired → the next acquire finishes the cleanup and provisions"
+      (is (= 2 (get-in (faults/reacquire w (faults/restarted w faults/much-later) req) [:environment/lease :lease/generation])))
+      (is (= 1 (count (fake/live-namespaces (:fake w))))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} test-a-late-owner-gets-the-adopted-environments-refusal

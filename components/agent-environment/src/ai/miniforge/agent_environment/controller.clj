@@ -106,7 +106,7 @@
   [result]
   (or (anomaly/subtype result) (:anomaly/type result)))
 
-(defn- ^{:stratum 0} claim-for
+(defn ^{:stratum 0} claim-for
   [controller now]
   (lease/claim (:controller/id controller)
                (.plusMillis (lease/->instant now) (:controller/claim-ttl-ms controller))))
