@@ -8,8 +8,11 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defprotocol ^{:stratum 0} DirectoryLease
-  (release! [pin] "Invalidate the pin and close its native stream, idempotently.")
-  (live? [pin] "True until the owning host releases this pin."))
+  (release! [pin] "Invalidate the pin and release its native resource, idempotently.")
+  (live? [pin] "True only while the native pin remains retained and live."))
+
+(defprotocol ^{:stratum 0} DescriptorIdentity
+  (identity-of [pin] "Device/inode from the held descriptor, or nil after loss/release."))
 
 ;------------------------------------------------------------------------------ Layer 1
 
