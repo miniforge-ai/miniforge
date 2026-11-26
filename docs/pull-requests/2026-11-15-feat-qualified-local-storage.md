@@ -88,6 +88,7 @@ checked both during qualification and throughout handle ownership.
 The interface-admission regression catches misplaced validation with 13 failures
 and zero errors before the fix. Bypassing the corrected admission produces the
 same 13 expected failures and zero errors on Java 21 and Babashka.
+Seven exact qualification namespace examples pass in both runtimes.
 
 Merged PR #2563 supplies the shared resource-transfer failure-priority fix;
 the composed packet retains its fatal/interruption and cleanup-provenance
@@ -99,11 +100,10 @@ review or merge gate is waived by these local results.
 Host-only opt-in with trusted, installed launchers and a persistent root.
 Requalify after a controller restart. No cluster access, runtime shutdown,
 experiments or credential actions.
-The documented dependency chain is #2560 → #2559 → this PR, with merged
-foundations #2562 and #2563. The local checkout is composed with pending
-peer PR #2559 at 6190e3a49 while its CI/review cycle runs;
-it will not be published until that prerequisite merges to main and the
-main-based composed diff is within budget and passes every gate. Its explicit
+The dependency chain #2560 → #2559 → this PR is merged through the peer proof,
+with merged foundations #2562 and #2563. This branch is composed with main;
+the peer squash has the exact same tree as its locally validated input.
+Every current-head CI and review gate still applies to this PR. Its explicit
 lock-limit contract replaces the old timing constants; no compatibility arity
 or implicit bounds remain. New shared numeric schemas keep count bounds
 distinct from time units without duplicating their native integer constraint.
@@ -114,6 +114,6 @@ PR #2530 consumes this prerequisite. PR #2528 owns the full-stop contract.
 
 ## Checklist
 
-- [ ] Final composed implementation and adversarial standards pass complete.
-- [ ] Final serial native qualification and packaged proofs complete.
+- [x] Final composed implementation and adversarial standards pass complete.
+- [x] Final serial native qualification and packaged proofs complete.
 - [ ] Current-head CI and full review settled.
