@@ -2,12 +2,18 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.file-durability.spec
-  (:require [ai.miniforge.file-durability.lock-spec :as lock]
-            [ai.miniforge.file-durability.peer-spec :as peer]))
+  (:require [ai.miniforge.file-durability.boundary.qualified-root :as qualified-root]
+            [ai.miniforge.file-durability.lock-spec :as lock]
+            [ai.miniforge.file-durability.peer-spec :as peer]
+            [ai.miniforge.file-durability.qualification-spec :as qualification]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} File [:fn #(instance? java.io.File %)])
+
+(def ^{:stratum 0} QualifiedRoot
+  "Issued handle type; liveness is checked at use, not at input validation."
+  [:fn qualified-root/qualified?])
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -21,6 +27,8 @@
 (def ^{:stratum 1} PublicationWrite [:tuple File bytes? fn?])
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(def ^{:stratum 2} QualificationArguments [:tuple DirectoryFile :keyword peer/Peer qualification/Limits])
 
 (def ^{:stratum 2} RuntimeLockArguments [:tuple DirectoryFile peer/Peer lock/Limits])
 

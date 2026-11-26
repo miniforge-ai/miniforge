@@ -21,6 +21,9 @@
         (ai.miniforge.file-durability.runtime-peer-fixtures/require-peer!)
         (let [suites '[ai.miniforge.file-durability.macos-acl-integration-test
                        ai.miniforge.file-durability.native-probe-integration-test
+                       ai.miniforge.file-durability.qualification-test
+                       ai.miniforge.file-durability.qualified-root-lifetime-integration-test
+                       ai.miniforge.file-durability.qualified-root-boundary-test
                        ai.miniforge.file-durability.runtime-lock-boundary-test
                        ai.miniforge.file-durability.runtime-lock-refusal-integration-test
                        ai.miniforge.file-durability.runtime-peer-fixtures-test

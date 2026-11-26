@@ -3,11 +3,12 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.file-durability.lock-spec
   "Trusted deployment bounds for the isolated cross-runtime handshake."
-  (:require [malli.core :as m]))
+  (:require [ai.miniforge.file-durability.limits-spec :as bounds]
+            [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} Milliseconds [:int {:min 1 :max Integer/MAX_VALUE}])
+(def ^{:stratum 0} Milliseconds bounds/PositiveInteger)
 
 ;------------------------------------------------------------------------------ Layer 1
 

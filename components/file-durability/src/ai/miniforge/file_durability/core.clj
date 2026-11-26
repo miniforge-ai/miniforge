@@ -4,11 +4,14 @@
 (ns ai.miniforge.file-durability.core
   (:require [ai.miniforge.file-durability.boundary :as boundary]
             [ai.miniforge.file-durability.boundary.attached-directory :as attached]
+            [ai.miniforge.file-durability.boundary.directory-lease :as lease]
             [ai.miniforge.file-durability.io :as file-io]
             [ai.miniforge.file-durability.boundary.directory-policy :as directory-policy]
             [ai.miniforge.file-durability.boundary.protected-directory :as directory]
             [ai.miniforge.file-durability.boundary.runtime-locks :as locks]
-            [ai.miniforge.file-durability.boundary.publication-probe :as publication-probe]))
+            [ai.miniforge.file-durability.boundary.publication-probe :as publication-probe]
+            [ai.miniforge.file-durability.boundary.qualified-root :as qualified-root]
+            [ai.miniforge.file-durability.boundary.root-qualification :as qualification]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -24,6 +27,18 @@
 (defn ^{:stratum 0} verify-publication! [root]
   (boundary/call-with-exception-handling :verify-publication root
                                         #(publication-probe/check! (directory/existing! root)) identity))
+
+(defn ^{:stratum 0} qualify-local-root! [root profile peer limits]
+  (boundary/call-with-exception-handling :qualify-local-root root
+                                        (partial qualification/qualify! root profile peer limits) identity))
+
+(defn ^{:stratum 0} release-qualified-root! [root]
+  (boundary/call-with-exception-handling :release-qualified-root nil
+                                        (partial lease/release! root) (constantly :qualified-root-released)))
+
+(defn ^{:stratum 0} resolve-qualified-root [root]
+  (boundary/call-with-exception-handling :resolve-qualified-root nil
+                                        (partial qualified-root/resolve-root root) identity))
 
 (defn ^{:stratum 0} verify-runtime-locks! [root peer limits]
   (boundary/call-with-exception-handling :verify-runtime-locks root

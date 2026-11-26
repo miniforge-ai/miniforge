@@ -46,6 +46,11 @@
                        {:durability/path (str path)
                         :storage/profile profile}))
 
+(defn ^{:stratum 1} released-root [path]
+  (anomaly/sub-anomaly :unavailable :anomalies.file-durability/released-root
+                       (t :file/released-root)
+                       {:durability/path (str path)}))
+
 (defn ^{:stratum 1} unreaped-peer [path]
   (anomaly/sub-anomaly :unavailable :anomalies.file-durability/unreaped-peer
                        (t :file/unreaped-peer)

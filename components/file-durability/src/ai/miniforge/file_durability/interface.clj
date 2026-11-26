@@ -3,7 +3,7 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.file-durability.interface
   "API surface class 1: trusted-process filesystem primitives using caller-owned Files.
-   Writes return the input File; resolution returns Paths and probes return acknowledgements or profiles.
+   Writes return Files, resolution returns Paths, qualification returns owned handles.
    Failures return anomalies and must propagate; native defaults are not protection proof.
    Stores own path authorization, publication atomicity, and record identity.
    Complete writes force file contents; publication needs a subsequent confirm!."
@@ -46,6 +46,31 @@
   (if (m/validate spec/DirectoryFile root)
     (core/verify-publication! root)
     (boundary/invalid-input :verify-publication)))
+
+(defn ^{:stratum 0} qualify-local-root!
+  "Return an opaque, process-local root or an anomaly. Call from trusted host
+   configuration with the other installed runtime and its absolute classpath.
+   Caller supplies finite pin and lock limits and must release the handle after use.
+   The host must separately establish persistence of the configured store."
+  [root profile peer limits]
+  (if (m/validate spec/QualificationArguments [root profile peer limits])
+    (core/qualify-local-root! root profile peer limits)
+    (boundary/invalid-input :qualify-local-root)))
+
+(defn ^{:stratum 0} release-qualified-root!
+  "Close the native inode pin idempotently; return :qualified-root-released or anomaly.
+   Released handles cannot resolve. The host must not release a handle still in use."
+  [root]
+  (if (m/validate spec/QualifiedRoot root)
+    (core/release-qualified-root! root)
+    (boundary/invalid-input :release-qualified-root)))
+
+(defn ^{:stratum 0} resolve-qualified-root
+  "Return the unchanged protected root as a Path, or an anomaly."
+  [root]
+  (if (m/validate spec/QualifiedRoot root)
+    (core/resolve-qualified-root root)
+    (boundary/invalid-input :resolve-qualified-root)))
 
 (defn ^{:stratum 0} write-new-text!
   "Create and force a new UTF-8 file without replacing existing files or links."

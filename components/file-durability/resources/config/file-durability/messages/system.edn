@@ -6,4 +6,5 @@
   :file/unsafe-acl "Storage protection at {path} requires readable access controls that do not grant additional permissions."
   :file/unverified-locks "Storage could not verify mutual lock exclusion with the configured independent runtime."
   :file/unqualified-store "Storage does not match an explicitly selected supported local profile."
+  :file/released-root "Qualified storage root has been released; qualify it again before use."
   :file/unreaped-peer "Native probe termination is unconfirmed; its private scratch directory was retained."}}
