@@ -28,6 +28,8 @@
                        ai.miniforge.file-durability.lock-denial-integration-test
                        ai.miniforge.file-durability.lock-qualification-integration-test
                        ai.miniforge.file-durability.directory-pin-scan-test
+                       ai.miniforge.file-durability.descriptor-receipt-test
+                       ai.miniforge.file-durability.descriptor-pin-integration-test
                        ai.miniforge.file-durability.owned-resource-integration-test
                        ai.miniforge.file-durability.owned-resource-failure-test
                        ai.miniforge.file-durability.directory-pin-integration-test

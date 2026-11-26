@@ -51,7 +51,7 @@ source Babashka and a freshly packaged CLI. New coverage is 7 tests / 32
 assertions: strict receipt parsing, original identity across path replacement,
 release, host EOF, helper death, malformed/silent helpers and file/symlink
 refusal. A deliberate wrong-identity control produces 15 failures / zero
-errors on both Java and Babashka. Seven exact namespace examples pass on both.
+errors on both Java and Babashka. Eight exact namespace examples pass on both.
 
 ## Deployment plan
 
@@ -68,5 +68,5 @@ native process-death confirmation. No dependency on an unmerged PR.
 
 - [x] Native JVM/Babashka descriptor identity, replacement, death and release.
 - [x] Bounded malformed/absent receipt and cleanup tests.
-- [ ] Owner post-hook standards and adversarial pass; normal signed commits.
+- [x] Owner post-hook standards and adversarial pass; normal signed commits.
 - [ ] Current-head CI, automatic review and one settled full review.
