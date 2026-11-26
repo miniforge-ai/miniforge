@@ -473,7 +473,6 @@
             ;; From the run as recorded: a rewind drops the snapshot, which
             ;; names the workflow when no spec was recorded.
             identity (resolve-resume-workflow recorded)
-            _ (resume-anomaly/throw-resume-anomaly! identity)
             {:keys [workflow-type workflow-version]} identity
             {:keys [workflow]} (load-workflow workflow-type workflow-version {})
 
@@ -517,16 +516,14 @@
                     (messages/t :resume/resuming-from-phase
                                 {:phase (or (resume-print-phase machine-snapshot
                                                                 remaining-pipeline)
-                                            "?")
+                                            (messages/t :cp/unknown-fallback))
                                  :count (count remaining-pipeline)}))
                   (display/print-info (messages/t :resume/all-phases-completed))))
 
             ;; Runtime wiring (CLI concern — stays here)
             event-stream (es/create-event-stream)
             _supervisor (supervisory/attach! event-stream)
-            ;; N15-6: route routing-causality through the witness surface.
-            ;; Mirrors the meta-loop and workflow-runner attach sites; the
-            ;; correlator emits `:supervisory/automation-edge-upserted`
+            ;; The correlator emits `:supervisory/automation-edge-upserted`
             ;; alongside the supervisory snapshots.
             _correlator (correlator/attach! event-stream)
             control-state (es/create-control-state)
@@ -538,7 +535,18 @@
                                     (wr/extract-workspace-checkpoints (read-event-file workflow-id))
                                     from-phase
                                     (:completed-phases reconstructed))]
-                  (es/publish! event-stream (es/workspace-persisted event-stream resume-run-id checkpoint))))]
+                  (es/publish! event-stream (es/workspace-persisted event-stream resume-run-id checkpoint))))
+            ;; `skipping` uses the full (pre-trim) workflow pipeline so the
+            ;; event records every phase bypassed, including those stripped
+            ;; by trim-pipeline that do not appear in remaining-pipeline.
+            _ (let [from-phase-kw (some-> (resume-print-phase machine-snapshot remaining-pipeline) keyword)
+                    from-state    (or (:execution/fsm-state machine-snapshot) :checkpointed)
+                    skipping      (into []
+                                        (comp (map :phase)
+                                              (take-while #(not= % from-phase-kw)))
+                                        (:workflow/pipeline workflow))]
+                (es/publish! event-stream
+                             (es/workflow-resumed event-stream resume-run-id from-state from-phase-kw skipping)))]
 
         (try
           ;; Governed control path: the resumed run gets the same
@@ -554,9 +562,8 @@
                                       ;; `--pin` also pins the checkpoints this
                                       ;; attempt writes, under a new run id too.
                                       :checkpoint/pin? (boolean (:pin opts))
-                                      ;; The id announced and registered
-                                      ;; above; without it a snapshot-less
-                                      ;; resume minted a second id.
+                                      ;; The id registered above: ensures events land under
+                                      ;; the same id the control plane tracks this run as.
                                       :workflow-id resume-run-id
                                       :origin-id origin-id
                                       :workflow-run/correlation-id correlation-id
@@ -588,10 +595,8 @@
                             {:status final-status})))
             (when-not (terminal-status? final-status)
               ;; Non-terminal status means run-pipeline returned without
-              ;; advancing the FSM to a terminal state. The CLI used to
-              ;; print this and exit 0 — silently losing the prior
-              ;; session's plan/explore/verify token spend. Throw so
-              ;; main exits non-zero and dogfood drivers see the failure.
+              ;; advancing the FSM to a terminal state; throw so callers
+              ;; get a non-zero exit and can detect the resume failure.
               (response/throw-anomaly!
                 :anomalies.workflow/resume-non-terminal
                 (messages/t :resume/non-terminal-status
