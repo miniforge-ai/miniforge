@@ -31,6 +31,11 @@
 
 (def ^{:stratum 0} unavailable :anomalies.agent-environment/ledger-unavailable)
 
+(def ^{:stratum 0} mutating-calls
+  "Provider calls that change what the provider holds. `probe` and
+   `observe` only read, so a refused request may still make them."
+  [:provision! :deprovision! :cancel! :exec! :write-file!])
+
 (defn- ^{:stratum 0} reason [result] (anomaly/subtype result))
 
 (defn- ^{:stratum 0} second-controller
@@ -50,6 +55,8 @@
     (store/write-entry! inner k revision (assoc entry :entry/state :state/cleanup-uncertain))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} mutations [w] (select-keys @(:calls w) mutating-calls))
 
 (deftest ^{:stratum 1} test-an-unrecorded-claim-never-reaches-the-provider
   (let [w (outage-world)]
@@ -149,3 +156,18 @@
     (is (= 1 (:provision! @(:calls w))))
     (is (= 1 (count (distinct environments))))
     (is (every? #{:anomalies.agent-environment/acquire-in-flight} (map reason (filter anomaly/anomaly? results))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} test-a-refused-request-never-mutates-the-provider
+  (let [w (outage-world)
+        req (fx/request w (:a w))]
+    (fx/acquire w (:a w) req)
+    (let [before (mutations w)
+          changed (assoc req :environment/template-hash (second fx/template-hashes))]
+      (testing "given a changed request for the same key → refused, no provider mutation"
+        (is (= :anomalies.agent-environment/conflicting-request (reason (fx/acquire w (:a w) changed))))
+        (is (= before (mutations w))))
+      (testing "given a request naming another tenant → refused, no provider mutation"
+        (is (= :anomalies.agent-environment/forged-tenant (reason (fx/acquire w (:a w) (fx/request w (:b w))))))
+        (is (= before (mutations w)))))))
