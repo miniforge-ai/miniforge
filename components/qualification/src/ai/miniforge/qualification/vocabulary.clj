@@ -60,6 +60,13 @@
        (some? fixture-hash)
        (some? config-hash)))
 
+(defn ^{:stratum 0} java-collection?
+  "True for a `java.util` map or collection that is not a Clojure one: its
+   order is its own and the checks here, which walk Clojure collections,
+   never see its contents."
+  [x]
+  (and (or (instance? java.util.Map x) (instance? java.util.Collection x)) (not (coll? x))))
+
 (def ^{:stratum 0} NonBlank
   [:and :string [:fn (complement str/blank?)]])
 

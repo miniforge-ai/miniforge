@@ -20,8 +20,14 @@
    verdict. A declared criterion with no result is unrun; only a run where
    every criterion passed is a pass."
   (:require
+   [ai.miniforge.content-hash.interface :as content-hash]
    [ai.miniforge.qualification.messages :as msg]
-   [ai.miniforge.qualification.vocabulary :as vocab]))
+   [ai.miniforge.qualification.schema :as schema]
+   [ai.miniforge.qualification.vocabulary :as vocab]
+   [clojure.edn :as edn]
+   [malli.core :as m]
+   [malli.error :as me]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -48,7 +54,44 @@
           (for [[id n] counts :when (> n 1)]
             (msg/t :result/duplicate {:id id})))))
 
+(defn- ^{:stratum 0} plain-data?
+  "True when `x`'s canonical EDN, the text its content hash digests,
+   survives UTF-8 and reads back equal, so the hash repeats and names only
+   `x`, and its plain EDN, the text the report holds, reads back too. A fn
+   or other object fails, and so do two keys the canonical order merges
+   (`1` and `1.0`), a lone surrogate, which UTF-8 makes `?`, a map keyed by
+   collections, whose order the hash does not normalize, any Java
+   collection, whose contents no check here walks, and a queue, which
+   prints unreadably. The hash pins numbers as printed, so `1` and `1N`
+   are different evidence."
+  [x]
+  (try+
+   (let [text (content-hash/canonical-edn x)]
+     (and (not-any? #(or (and (map? %) (some coll? (keys %)))
+                         (vocab/java-collection? %))
+                    (tree-seq coll? seq x))
+          (= text (String. (.getBytes ^String text "UTF-8") "UTF-8"))
+          (= x (edn/read-string text) (edn/read-string (pr-str x)))))
+   (catch Exception _
+     false)))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} output-problems
+  "Why a scenario's output cannot be reported, or nil when it can: it is
+   not a ScenarioOutput, its fixtures, config or results are not plain data
+   (the hashes would not repeat or would merge two keys, and the report
+   could not be written as EDN), or its results do not match the gate."
+  [gate output]
+  (cond
+    (not (m/validate schema/ScenarioOutput output))
+    [(pr-str (me/humanize (m/explain schema/ScenarioOutput output)))]
+
+    (not (plain-data? (select-keys output [:scenario/fixtures :scenario/config :scenario/results])))
+    [(msg/t :scenario/not-plain-data)]
+
+    :else
+    (not-empty (result-problems gate (:scenario/results output)))))
 
 (defn ^{:stratum 1} unrun-rows
   "Every declared criterion as unrun, for `reason`."
