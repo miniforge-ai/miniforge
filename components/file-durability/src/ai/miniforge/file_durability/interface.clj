@@ -61,12 +61,16 @@
   "Close the native inode pin idempotently; return :qualified-root-released or anomaly.
    Released handles cannot resolve. The host must not release a handle still in use."
   [root]
-  (core/release-qualified-root! root))
+  (if (m/validate spec/QualifiedRoot root)
+    (core/release-qualified-root! root)
+    (boundary/invalid-input :release-qualified-root)))
 
 (defn ^{:stratum 0} resolve-qualified-root
   "Return the unchanged protected root as a Path, or an anomaly."
   [root]
-  (core/resolve-qualified-root root))
+  (if (m/validate spec/QualifiedRoot root)
+    (core/resolve-qualified-root root)
+    (boundary/invalid-input :resolve-qualified-root)))
 
 (defn ^{:stratum 0} write-new-text!
   "Create and force a new UTF-8 file without replacing existing files or links."

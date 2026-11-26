@@ -42,6 +42,8 @@ The host must explicitly release it after all consumers finish; release is
 idempotent, returns a specific acknowledgement, and permanently refuses further
 resolution before filesystem observation. A closed handle cannot revive when
 device/inode numbers are later reused.
+Handle-type validation belongs to the public interface and a named schema;
+the implementation trusts those inputs while checking current native liveness.
 
 The initial Linux profile accepts an unambiguous writable single-device XFS mount,
 recognized AHCI or PCIe-NVMe driver ancestry, exact no-virtualization evidence from
@@ -67,9 +69,9 @@ ambiguous mount data, no peer proof, and root replacement. Test actual
 JVM/Babashka peers and forced publication on disposable files. Bound native
 storage metadata to a shared process/read deadline and a fixed output limit.
 
-The prepared composition with the peer's I/O-cleanup fix passes 66 tests /
-304 assertions in each Java 21 product, source Babashka and a fresh package.
-The exact project integration alias passes 20 tests / 62 assertions. The same
+The prepared composition with the peer's I/O-cleanup fix passes 67 tests /
+317 assertions in each Java 21 product, source Babashka and a fresh package.
+The exact project integration alias passes 21 tests / 75 assertions. The same
 native packet is wired into the hosted Darwin gate. Local positive checks
 qualify and resolve a disposable APFS root, attach a protected child and release
 the owned handle, with four successful assertions in each runtime mode.
@@ -79,11 +81,13 @@ proof that an unsupported hosted VM qualifies as persistent authority storage.
 Six lifetime fault controls produce 2 / 2 / 1 / 1 / 1 / 2 expected failures and
 zero errors on Java 21 and Babashka. They cover before-pin identity binding,
 failed-proof resource transfer, late pin closure, closed-before-I/O refusal,
-current identity revalidation and native release. Six exact qualification
-namespace examples pass in both runtimes. Qualification tests use real native
+current identity revalidation and native release. Qualification tests use real native
 directory descriptors; their fixture independently releases every acquired pin,
 including unexpected successes under fault injection. Root replacement is
 checked both during qualification and throughout handle ownership.
+The interface-admission regression catches misplaced validation with 13 failures
+and zero errors before the fix. Bypassing the corrected admission produces the
+same 13 expected failures and zero errors on Java 21 and Babashka.
 
 Merged PR #2563 supplies the shared resource-transfer failure-priority fix;
 the composed packet retains its fatal/interruption and cleanup-provenance

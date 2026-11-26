@@ -33,16 +33,12 @@
                                         (partial qualification/qualify! root profile peer limits) identity))
 
 (defn ^{:stratum 0} release-qualified-root! [root]
-  (if (qualified-root/qualified? root)
-    (boundary/call-with-exception-handling :release-qualified-root nil
-                                          (partial lease/release! root) (constantly :qualified-root-released))
-    (boundary/invalid-input :release-qualified-root)))
+  (boundary/call-with-exception-handling :release-qualified-root nil
+                                        (partial lease/release! root) (constantly :qualified-root-released)))
 
 (defn ^{:stratum 0} resolve-qualified-root [root]
-  (if (qualified-root/qualified? root)
-    (boundary/call-with-exception-handling :resolve-qualified-root nil
-                                          (partial qualified-root/resolve-root root) identity)
-    (boundary/invalid-input :resolve-qualified-root)))
+  (boundary/call-with-exception-handling :resolve-qualified-root nil
+                                        (partial qualified-root/resolve-root root) identity))
 
 (defn ^{:stratum 0} verify-runtime-locks! [root peer limits]
   (boundary/call-with-exception-handling :verify-runtime-locks root
