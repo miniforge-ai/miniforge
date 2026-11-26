@@ -19,6 +19,9 @@
 
 (defn- ^{:stratum 0} fatal [& _] (throw (AssertionError.)))
 
+(defn- ^{:stratum 0} future-failure [operation & _]
+  @(future (operation)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} invalid-input-never-reaches-filesystem-operations
@@ -71,15 +74,17 @@
 
 (deftest ^{:stratum 1} interruption-is-preserved-and-fatal-errors-propagate
   (let [file (File. "unused")]
-    (try
-      (with-redefs [file-io/confirm! interrupted]
-        (let [result (durability/confirm! file)
-              interrupted? (Thread/interrupted)]
-          (is (anomaly/anomaly? result))
-          (is interrupted?)))
-      (finally (Thread/interrupted)))
-    (with-redefs [file-io/confirm! fatal]
-      (is (thrown? AssertionError (durability/confirm! file))))))
+    (doseq [operation [interrupted (partial future-failure interrupted)]]
+      (try
+        (with-redefs [file-io/confirm! operation]
+          (let [result (durability/confirm! file)
+                interrupted? (Thread/interrupted)]
+            (is (anomaly/anomaly? result))
+            (is interrupted?)))
+        (finally (Thread/interrupted))))
+    (doseq [operation [fatal (partial future-failure fatal)]]
+      (with-redefs [file-io/confirm! operation]
+        (is (thrown? AssertionError (durability/confirm! file)))))))
 
 (comment
   (clojure.test/run-tests 'ai.miniforge.file-durability.interface-test))

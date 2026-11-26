@@ -5,6 +5,7 @@
   "Convert filesystem failures to data without claiming successful durability."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.messages.interface :as messages]
+            [ai.miniforge.resource-cleanup.interface :as cleanup]
             [slingshot.slingshot :refer [try+ throw+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -65,12 +66,13 @@
   ([operation file action completed-value]
    (try+
      (completed-value (action))
-     (catch InterruptedException _
-       (let [result (io-failure operation file)]
-         (.interrupt (Thread/currentThread))
-         result))
      (catch anomaly/anomaly? result result)
-     (catch Exception _ (io-failure operation file)))))
+     (catch Exception failure
+       (let [critical (cleanup/fatal-cause failure)]
+         (when (instance? Error critical) (throw critical))
+         (when (instance? InterruptedException critical)
+           (.interrupt (Thread/currentThread)))
+         (io-failure operation file))))))
 
 (comment
   (io-failure :confirm nil))
