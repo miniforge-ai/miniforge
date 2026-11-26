@@ -4,6 +4,7 @@
 (ns ai.miniforge.file-durability.boundary.descriptor-receipt
   "Decode only the bounded native descriptor protocol, never pathname attributes."
   (:require [ai.miniforge.file-durability.boundary.probe-deadline :as deadline]
+            [ai.miniforge.file-durability.boundary.root-identity :as identity]
             [slingshot.slingshot :refer [try+]])
   (:import [java.io InputStream]
            [java.nio.charset StandardCharsets]))
@@ -20,8 +21,9 @@
 
 (defn- ^{:stratum 0} identity-value [device inode]
   (try+
-    {:storage/device-number (Long/parseLong device)
-     :storage/inode (Long/parseLong inode)}
+    (let [device-number (Long/parseLong device)
+          inode-number (Long/parseLong inode)]
+      (identity/value device-number inode-number))
     (catch NumberFormatException _ nil)))
 
 ;------------------------------------------------------------------------------ Layer 1

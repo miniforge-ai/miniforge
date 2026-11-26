@@ -43,6 +43,9 @@ operation. The system-Perl bridge avoids a custom native executable/toolchain.
 
 Protocol decoding is pure; process ownership and cleanup stay at the native
 boundary. No pathname re-stat is accepted as descriptor evidence.
+Path and descriptor observations share one producer-owned device/inode value
+constructor. This extraction preserves the representation; the existing parser
+assertions retain an explicit field-name oracle and native tests compare values.
 
 ## Testing plan
 
@@ -51,7 +54,7 @@ source Babashka and a freshly packaged CLI. New coverage is 7 tests / 32
 assertions: strict receipt parsing, original identity across path replacement,
 release, host EOF, helper death, malformed/silent helpers and file/symlink
 refusal. A deliberate wrong-identity control produces 15 failures / zero
-errors on both Java and Babashka. Eight exact namespace examples pass on both.
+errors on both Java and Babashka. Nine exact namespace examples pass on both.
 
 ## Deployment plan
 

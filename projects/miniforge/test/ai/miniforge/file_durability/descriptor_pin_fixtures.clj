@@ -7,6 +7,7 @@
             [ai.miniforge.file-durability.boundary.native-directory-pin :as pin]
             [ai.miniforge.file-durability.boundary.native-process-exit :as exit]
             [ai.miniforge.file-durability.boundary.probe-deadline :as deadline]
+            [ai.miniforge.file-durability.boundary.root-identity :as identity]
             [ai.miniforge.resource-cleanup.interface :as cleanup]
             [babashka.fs :as fs]
             [slingshot.slingshot :refer [try+]])
@@ -37,7 +38,7 @@
     child))
 
 (defn ^{:stratum 0} launch-program! [program _path]
-  (let [builder (ProcessBuilder. ^java.util.List ["/usr/bin/perl" "-f" "-e" program])]
+  (let [builder (ProcessBuilder. ^java.util.List [process/executable "-f" "-e" program])]
     (.clear (.environment builder))
     (.start builder)))
 
@@ -45,8 +46,7 @@
   (let [attributes (Files/readAttributes (fs/path path) "unix:dev,ino" (make-array LinkOption 0))
         device (get attributes "dev")
         inode (get attributes "ino")]
-    {:storage/device-number device
-     :storage/inode inode}))
+    (identity/value device inode)))
 
 (defn- ^{:stratum 0} release-result! [result]
   (when (satisfies? lease/DirectoryLease result) (lease/release! result)))

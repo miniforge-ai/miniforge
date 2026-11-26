@@ -12,7 +12,7 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0 :private true} executable
+(def ^{:stratum 0} executable
   "This support boundary uses the system interpreter, never PATH or caller argv."
   "/usr/bin/perl")
 
