@@ -143,6 +143,13 @@
                       {:dir (str dir) :args (vec args) :exit exit :err err})))
     result))
 
+(defn- ^{:stratum 0} record-process! [started result opts & args]
+  (let [env (:env opts)
+        arguments (vec args)]
+    (swap! started conj {:env env
+                         :args arguments}))
+  result)
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} discovers-every-miniforge-project-test-test
@@ -197,16 +204,14 @@
             "GIT_CONFIG"     (config-file repo)})))
 
 (defn- ^{:stratum 1} started-processes
-  "Each process `launcher` starts, in order, as `{:env .. :args ..}`. The
-   sanitizer returns `sanitized-env` and both process entry points only
-   record, so nothing runs and a zero exit keeps the launcher off
-   `System/exit`."
+  "Capture launcher ports with a completed native BB process; no test runner starts."
   [launcher]
   (let [started (atom [])
-        record  (fn [opts args] (swap! started conj {:env (get opts :env) :args (vec args)}))]
+        result (p/sh "bb" "-e" "nil")
+        record (partial record-process! started result)]
     (with-redefs [bb-test-runner/sanitize-git-worktree-env (constantly sanitized-env)
-                  p/process (fn [opts & args] (record opts args) (delay {:exit 0}))
-                  p/sh      (fn [opts & args] (record opts args) {:exit 0 :out ""})]
+                  p/process record
+                  p/sh record]
       (with-out-str (launcher)))
     @started))
 
