@@ -106,6 +106,12 @@
         #"[a-zA-Z][a-zA-Z0-9_-]*[?!]?(\.[a-zA-Z][a-zA-Z0-9_-]*[?!]?)*"
         s)))
 
+(defn- ^{:stratum 0} resolved-classpath! [command env]
+  (-> (p/sh {:out :string :env env} command "-A:dev" "-Spath")
+      p/check
+      :out
+      str/trim))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} discovered-project-tests
@@ -194,12 +200,8 @@
 (defn ^{:stratum 1} graalvm []
   (println "🧪 Testing GraalVM/Babashka compatibility...")
   (let [clojure-cmd (proc/clojure-command)
-        ;; Use :dev alias to get full component classpath
         env (bb-test-runner/sanitize-git-worktree-env (into {} (System/getenv)))
-        cp (-> (p/sh {:out :string :env env} clojure-cmd "-A:dev" "-Spath")
-               :out
-               str/trim)
-        ;; Add tests directory to classpath
+        cp (resolved-classpath! clojure-cmd env)
         full-cp (str cp java.io.File/pathSeparator "tests")
         expr "(require 'graalvm-compatibility-test) (graalvm-compatibility-test/-main)"
         exit (run-stream! "bb" "-cp" full-cp "-e" expr)]
@@ -277,3 +279,5 @@
       (println "❌ Pre-commit smoke tests failed with exit code:" exit)
       (System/exit exit))
     (println (format "✓ Pre-commit smoke (%d namespaces) passed" (count nses)))))
+
+(comment (project-test-alias-flag {:aliases {:test {}}}))
