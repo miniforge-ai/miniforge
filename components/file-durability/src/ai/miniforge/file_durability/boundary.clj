@@ -35,6 +35,11 @@
     (anomaly/anomaly :fault (t :file/unverified-publication {:path location})
                      {:durability/path location})))
 
+(defn ^{:stratum 1} unverified-locks [path]
+  (anomaly/sub-anomaly :unavailable :anomalies.file-durability/unverified-locks
+                       (t :file/unverified-locks)
+                       {:durability/path (str path)}))
+
 (defn ^{:stratum 1} unqualified-store [path profile]
   (anomaly/sub-anomaly :unavailable :anomalies.file-durability/unqualified-store
                        (t :file/unqualified-store)
