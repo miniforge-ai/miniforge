@@ -101,9 +101,11 @@
     [path {:tracked tracked' :events (compact-into policy (if rebuild? [] events) files)}]))
 
 (defn ^{:stratum 1} workflow-event-file
-  "Resolve the event file for a specific workflow-id."
+  "Resolve the event file for a specific workflow-id. The id reaches here
+   from a request parameter, so it is reduced to one safe path segment:
+   `../x` must not climb out of the events directory."
   [workflow-id]
-  (io/file events-dir-path (str workflow-id ".edn")))
+  (io/file events-dir-path (str (es/workflow-id-segment workflow-id) ".edn")))
 
 ;------------------------------------------------------------------------------ Layer 2
 
