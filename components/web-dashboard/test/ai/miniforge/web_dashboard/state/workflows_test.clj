@@ -93,7 +93,7 @@
           outside    (io/file root "secret.edn")
           stream     (es/create-event-stream {:sinks []})
           state      (core/create-state {:event-stream stream})]
-      (spit outside (str (pr-str (wf-event :workflow/started (random-uuid)
+      (spit outside (str (pr-str (wf-event :workflow/started "../secret"
                                            "2026-03-28T10:00:00Z")) "\n"))
       (with-redefs [sources/events-dir-path (.getPath events-dir)]
         (is (= [] (vec (sut/get-events state {:workflow-id "../secret" :limit 10}))))
