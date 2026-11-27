@@ -1132,6 +1132,11 @@
    archived → live → legacy directories of a workflow, or nil."
   reader/workflow-events-dir)
 
+(def ^{:stratum 0} workflow-id-segment
+  "`(workflow-id-segment workflow-id)`: the id as one filesystem-safe path
+   segment; ids with separators or `..` map to a stable hashed name."
+  naming/workflow-id-segment)
+
 (def ^{:stratum 0} event-order-key
   "`(event-order-key event)`: [timestamp-ms sequence-number], the order to
    sort read events by before taking the newest; file names order them

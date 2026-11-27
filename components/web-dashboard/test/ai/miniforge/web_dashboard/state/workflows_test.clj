@@ -86,6 +86,20 @@
           (is (= 1 (count phase-events)))
           (is (= [chunk] since-events)))))))
 
+(deftest ^{:stratum 2} get-events-rejects-path-traversal-workflow-id-test
+  (testing "a workflow-id with .. segments never reads a file outside the events dir"
+    (let [root       (temp-events-dir)
+          events-dir (doto (io/file root "events") .mkdirs)
+          outside    (io/file root "secret.edn")
+          stream     (es/create-event-stream {:sinks []})
+          state      (core/create-state {:event-stream stream})]
+      (spit outside (str (pr-str (wf-event :workflow/started "../secret"
+                                           "2026-03-28T10:00:00Z")) "\n"))
+      (with-redefs [sources/events-dir-path (.getPath events-dir)]
+        (is (= [] (vec (sut/get-events state {:workflow-id "../secret" :limit 10}))))
+        (is (not= (.getCanonicalPath outside)
+                  (.getCanonicalPath (sources/workflow-event-file "../secret"))))))))
+
 (deftest ^{:stratum 2} get-workflows-exposes-stream-preview-and-metrics-test
   (testing "live workflow summaries include recent streaming output and aggregated metrics"
     (let [stream     (es/create-event-stream {:sinks []})
